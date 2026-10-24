@@ -246,12 +246,13 @@ class EvalOrchestrator:
             out = [r for r in out if r.get("kind") == "baseline"]
         return out
 
-    def robot_problem(self, robot: dict | None) -> str | None:
-        """Why this robot can't run (or keep running) an eval right now, else None."""
+    def robot_problem(self, robot: dict | None, *, running: bool = False) -> str | None:
+        """Why this robot can't run (or keep running) an eval right now, else None. ``running``: a
+        live eval may sit in ``paused`` (waiting_reset between trials, or a TDM-69 takeover pause)."""
         if robot is None:
             return "robot not found"
         st = robot.get("status")
-        if st not in USABLE_ROBOT:
+        if st not in USABLE_ROBOT and not (running and st == "paused"):
             return f"robot {robot.get('id')} is {st}"
         hb = _i(robot.get("last_heartbeat"))
         age = (self._now_us() - hb) / 1e6 if hb else None
@@ -380,9 +381,12 @@ class EvalOrchestrator:
                    "timeout_s": self.cfg.trial_timeout_s, "kind": run.get("kind"),
                    "reset_between_trials": "wait for resume_policy (TDM-26 reset task)",
                    "solo_mode": self.cfg.solo_mode}
+        from .interventions import eval_payload  # TDM-69: only when run_settings explicitly enables it
+
+        payload.update(eval_payload(self.m, ticket_id, run.get("kind") or ""))
         base = {"ticket_id": ticket_id, "robot_id": robot_id, "eval_run_id": run_id, "kind": run.get("kind"),
                 "checkpoint_uri": run.get("checkpoint_uri"), "trials": trials, "solo_mode": self.cfg.solo_mode,
-                "why": why}
+                "why": why, "interventions": bool(payload.get("interventions"))}
         try:
             self.w.call_reducer("issue_robot_command", robot_id, "run_eval", json.dumps(payload), ticket_id)
         except Exception as e:  # noqa: BLE001 - lost the job lock (or estop): don't leave the run dangling
@@ -495,7 +499,7 @@ class EvalOrchestrator:
         robot = self.m.get("robot", _i(run.get("robot_id")))
         if robot is not None and robot.get("status") == "estop":
             return "cancelled", f"estop: robot {robot['id']} entered estop mid-eval ({done_rows}/{planned} trials)"
-        problem = self.robot_problem(robot)
+        problem = self.robot_problem(robot, running=True)
         if problem:
             return "cancelled", f"robot lost mid-eval: {problem} ({done_rows}/{planned} trials)"
         if cmd is None:

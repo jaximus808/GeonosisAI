@@ -102,6 +102,11 @@ const TDM9_HYPERPARAM_CHECKS: Record<string, (v: unknown) => unknown> = {
     if (typeof v !== 'string') throw new SenderError('hyperparams.prompt must be a string');
     return v;
   },
+  // TDM-69: DAgger interventions. Unset = default (on while collecting a recovery plan, off for evals).
+  interventions_enabled: (v) => {
+    if (typeof v !== 'boolean') throw new SenderError('hyperparams.interventions_enabled must be true or false');
+    return v;
+  },
 };
 
 /**

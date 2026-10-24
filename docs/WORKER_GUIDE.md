@@ -200,3 +200,10 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - Control is accepted only while the token's task is still claimed (re-check the lease every ≤5 s). If the feed goes stale, the browser must release the clutch.
 - **Exclusive control:** the TDM-10 `claim_task` lease, kept alive with `useTdm61ClaimHeartbeat(task)` from `apps/web/src/lib/marketplace/tdm61.ts`.
 - **Recording:** the TDM-48 `recorder_for(ctx)` provides `start` / `mark_takeover` / `mark_handback` / `stop(success)`.
+
+## DAgger interventions (TDM-69): `rdf_orchestrator/interventions.py`, robot side `rdf_robot_client/interventions.py`
+- **When:** on for collection rollouts (ticket `dispatch` + recovery_takeover plan + robot with `camera_config_json.capabilities: ["interventions"]`), off for evals. Override: `run_settings.hyperparams_json.interventions_enabled` true/false.
+- **Robot (TDM-51 runner):** if the rollout payload has `interventions.enabled`, run `FailureDetector` per trial; on a failure append `intervention.failure_detected` {robot_id, ticket_id, command_id, trial_index, eval_run_id, detector, reason}, hold, wait `verdict_wait_s` for `pause_for_takeover` {ref, task_id} / `resume_policy` {end_trial:true, ref}. Takeover window: `mark_takeover()` / `mark_handback()`; write the trial as kind `recovery_takeover` with task_id + the task's assignee. An intervened eval trial is a failure.
+- **Teleop (TDM-52/56/57):** a recovery_takeover task named in an `intervention.started` event (or with `[ref iv:...]` in its instructions) is a takeover of a *paused rollout*: don't send `start_teleop` (the rollout holds the job lock); drive over the control socket, then `handback` (robot_command, or socket `{t:"handback"}` + the robot appends `intervention.handed_back`), then `complete_task`.
+- **Read it:** `GET /tickets/{id}/interventions` (every intervention, claim wait, takeover length, episode, review, timeouts). Trail: `intervention.*` events, actor `orchestrator:interventions`.
+- **Proof (local only, [FAKE]):** `cd services/orchestrator && uv run python ../../spikes/tdm-69-interventions/prove_interventions.py`.

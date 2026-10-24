@@ -74,6 +74,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(offers_router)
     from .agents_api import agents_router  # TDM-35: GET /agents (AgentFeed v1, ?replay=1)
     app.include_router(agents_router)
+    from .interventions_api import interventions_router  # TDM-69: GET /tickets/{id}/interventions, POST /robots/{id}/interventions/flag
+    app.include_router(interventions_router)
     from .paging_api import paging_router  # TDM-65: /push/config, /push/subscribe, /push/test (web push)
     app.include_router(paging_router)
     from .robot_commands_api import robot_commands_router  # TDM-78: POST /robots/{id}/commands (operator key; soft_estop open)

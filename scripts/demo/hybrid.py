@@ -321,7 +321,7 @@ def up_hybrid(a: argparse.Namespace) -> int:
         if P._get(f"{api_url}/healthz", 8)[0] != 401:
             raise RuntimeError("the edge served the orchestrator WITHOUT the edge secret; refusing to publish")
         payload = {"url": api_url, "robot_url": robot_url, "tunnel": tunnel_kind, "started_at": int(time.time()),
-                   "proof": "rdf-edge-proof-v1", "host": os.uname().nodename}
+                   "proof": "rdf-edge-proof-v1"}
         bus.publish_endpoint(payload)
         _log(f"published {ENDPOINT_EVENT} -> {api_url} (Vercel picks it up within ~10 s, no redeploy)")
 

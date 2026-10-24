@@ -2,12 +2,13 @@
 // /join's AccessCodeForm and the dashboard's JoinQr work unchanged. Same answers as the make demo-public edge:
 //   GET  -> {required, ok, public_url, code?}   code only for a logged-in operator (shown under the QR)
 //   POST {code} -> sets the HttpOnly rdf_access cookie (7 days); 401 on a wrong code; 429 when throttled
-// The code is RDF_WEB_ACCESS_CODE (server env). Unset = no gate (required: false).
+// The code is RDF_PUBLIC_ACCESS_CODE (server env; tdm110GateCode). Unset = no gate (required: false).
 
 import {
   TDM110_ACCESS_COOKIE,
   TDM110_ACCESS_TTL_S,
   tdm110CodeMatches,
+  tdm110GateCode,
   tdm110MintAccess,
   tdm110VerifyAccess,
 } from '@/lib/tdm110/access';
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic';
 const NO_STORE = { 'cache-control': 'no-store' };
 
 function accessCode(): string {
-  return (process.env.RDF_WEB_ACCESS_CODE || '').trim();
+  return tdm110GateCode(process.env);
 }
 
 function publicUrl(): string | null {

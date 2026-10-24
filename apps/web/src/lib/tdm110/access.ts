@@ -1,15 +1,21 @@
 // TDM-110: the make demo-public access code, enforced by the web app itself (Vercel has no local edge).
 // Same cookie as scripts/demo/public_guard.py (`rdf_access` = "v1.<exp>.<sig>", sig = base64url HMAC-SHA256
 // over "v1.<exp>" with key HMAC-SHA256(normalized code, "rdf-public-access-v1"), 7 days), so either side can
-// verify the other's cookie. The code comes from RDF_WEB_ACCESS_CODE (server env, never NEXT_PUBLIC_):
-// a distinct name from the edge's RDF_PUBLIC_ACCESS_CODE, so make demo-public's own web server never gates
-// twice. Unset = no gate. Pure apart from node:crypto (test/tdm110-hybrid.test.ts).
+// verify the other's cookie. The code is RDF_PUBLIC_ACCESS_CODE (server env, never NEXT_PUBLIC_), the one
+// variable the edge, the job drops and Vercel share; the web app gates only on Vercel or with RDF_WEB_GATE=1
+// (behind make demo-public's edge the edge already gated). Pure apart from node:crypto (test/tdm110-hybrid.test.ts).
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const TDM110_ACCESS_COOKIE = 'rdf_access';
 export const TDM110_ACCESS_TTL_S = 7 * 24 * 3600;
 const LABEL = 'rdf-public-access-v1';
+
+/** The code this web server enforces itself ('' = no gate). */
+export function tdm110GateCode(env: Record<string, string | undefined>): string {
+  const on = Boolean(env.VERCEL) || env.RDF_WEB_GATE === '1';
+  return on ? (env.RDF_PUBLIC_ACCESS_CODE || '').trim() : '';
+}
 
 export function tdm110NormalizeCode(code: string): string {
   return (code || '').replace(/[\s\-_.]/g, '').toUpperCase();

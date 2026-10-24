@@ -1,15 +1,16 @@
-// TDM-110: access-code gate for the web app when nothing sits in front of it (the Vercel deploy). Off unless
-// RDF_WEB_ACCESS_CODE is set (server env), so `next dev`, make demo and make demo-public (whose edge gates
-// with RDF_PUBLIC_ACCESS_CODE before Next ever sees the request) behave exactly as before.
+// TDM-110: access-code gate for the web app when nothing sits in front of it (the Vercel deploy). The code is
+// RDF_PUBLIC_ACCESS_CODE, the same variable make demo-public's edge and the job drops (Discord posts) use, so
+// one code works everywhere. It gates only on Vercel (VERCEL is set) or with RDF_WEB_GATE=1, so `next dev`,
+// make demo and make demo-public (whose edge gates before Next ever sees the request) behave as before.
 // Same contract as scripts/demo/public_guard.py: pages redirect to /join?next=..., API calls get 401, and
 // /join learns whether to show the code form from `x-rdf-access` (any client-sent value is dropped).
 // The code form posts to /_rdf/access, rewritten to /api/tdm110/access (next.config.ts).
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { TDM110_ACCESS_COOKIE, tdm110AccessDecision } from '@/lib/tdm110/access';
+import { TDM110_ACCESS_COOKIE, tdm110AccessDecision, tdm110GateCode } from '@/lib/tdm110/access';
 
 export function proxy(req: NextRequest) {
-  const code = (process.env.RDF_WEB_ACCESS_CODE || '').trim();
+  const code = tdm110GateCode(process.env);
   if (!code) return NextResponse.next();
   const d = tdm110AccessDecision(code, {
     path: req.nextUrl.pathname,

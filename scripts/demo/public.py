@@ -361,7 +361,7 @@ def up(a: argparse.Namespace) -> int:
         _log(f"ports in use: {busy}. Pick free ones (see --help) or stop what holds them.")
         return 2
 
-    code = "" if a.no_access_code else normalize(os.environ.get("RDF_PUBLIC_ACCESS_CODE") or
+    code = "" if a.no_access_code else normalize(os.environ.get("RDF_PUBLIC_ACCESS_CODE") or _dotenv("RDF_PUBLIC_ACCESS_CODE") or
                                                  "".join(secrets.choice(CODE_ALPHABET) for _ in range(6)))
     if code:
         _write_secret(ROOT / "access_code", code)
@@ -494,6 +494,16 @@ def _demo_passcode(demo_args: str | None) -> str | None:
         if p.startswith("--passcode="):
             return p.split("=", 1)[1]
     return None
+
+
+def _dotenv(name: str) -> str:
+    """One value from the repo-root .env (never printed), so the code matches Vercel and the job drops."""
+    f = REPO / ".env"
+    for line in (f.read_text().splitlines() if f.exists() else []):
+        line = line.strip()
+        if line.startswith(f"{name}=") or line.startswith(f"export {name}="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
 
 
 def normalize(code: str) -> str:

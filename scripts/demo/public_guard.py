@@ -297,6 +297,8 @@ class Guard:
         if path.startswith("/v1/"):
             if not self.cfg.stdb:
                 return self.jerr(404, "no_spacetimedb", "No SpacetimeDB is served here.")
+            if method == "OPTIONS" and not ws:  # CORS preflight from a cross-origin web app (Vercel): no cookie, no effect
+                return await self.proxy(req, self.cfg.stdb, path, tunneled, access="n/a")
             edge = self.edge_ok(req)
             if not (stdb_allowed(method, path, ws, self.cfg.db) or (edge and stdb_server_allowed(method, path, self.cfg.db))):
                 self.stats["blocked"] += 1

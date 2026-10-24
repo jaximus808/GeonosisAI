@@ -91,6 +91,14 @@ def test_stdb_server_routes_only_with_the_secret(tdm110_run):
     tdm110_run(t)
 
 
+def test_cors_preflight_reaches_spacetimedb(tdm110_run):
+    async def t(c: TestClient):
+        r = await c.options("/v1/identity", headers={**CF, "origin": "https://geonosis.jaxonp.com",
+                                                     "access-control-request-method": "POST"})
+        assert r.status == 200 and (await r.json())["tag"] == "stdb", "a cross-origin browser (Vercel) needs the preflight"
+    tdm110_run(t)
+
+
 def test_no_stdb_without_expose(tdm110_run):
     async def t(c: TestClient):
         assert (await c.get("/v1/ping", headers=CF)).status == 404

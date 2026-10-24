@@ -117,6 +117,11 @@ describe('tdm110 access code', () => {
     assert.ok(!A.tdm110VerifyAccess('K7QM2X', py, 605800), 'expired');
     assert.ok(!A.tdm110VerifyAccess('K7QM2X', py.replace('605800', '605801'), 1001), 'tampered');
   });
+  it('one variable: RDF_PUBLIC_ACCESS_CODE, enforced by the web only on Vercel (or RDF_WEB_GATE=1)', () => {
+    assert.equal(A.tdm110GateCode({ RDF_PUBLIC_ACCESS_CODE: ' K7QM2X ', VERCEL: '1' }), 'K7QM2X');
+    assert.equal(A.tdm110GateCode({ RDF_PUBLIC_ACCESS_CODE: 'K7QM2X' }), '', 'behind make demo-public the edge gates');
+    assert.equal(A.tdm110GateCode({ RDF_PUBLIC_ACCESS_CODE: 'K7QM2X', RDF_WEB_GATE: '1' }), 'K7QM2X');
+  });
   it('gates like the edge: pages redirect, API 401, /join open', () => {
     const req = (path: string, extra: Partial<{ method: string; accept: string; cookie: string }> = {}) => ({
       path, search: '', method: 'GET', accept: 'text/html', cookie: undefined, ...extra,

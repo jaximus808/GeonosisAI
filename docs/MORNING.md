@@ -92,18 +92,18 @@ The public site is the Vercel project **`geonosisai`** (scope `jaximus808s-proje
 - **One-time setup** (in order):
   1. `npx vercel@65.2.0 login` (done: `jaximus808`).
   2. Add the shared secret to `.env` (it is never printed): `echo "RDF_EDGE_SECRET=$(openssl rand -base64 33 | tr '+/' '-_')" >> .env`
-  3. Give the web a `web` identity on maincloud (needed for Approve plan and the direct e-stop): `cd services/orchestrator && uv run python ../../spikes/tdm-78-robot-page/setup_web_auth.py mint-web-identity --yes`. This writes `RDF_WEB_SPACETIME_TOKEN` and one `service_identity` row on maincloud.
-  4. Optional: set `RDF_WEB_ACCESS_CODE=<code>` in `.env`. Phones then enter it once at `/join`, the same way as `make demo-public`. A logged-in operator sees the code under the dashboard QR.
+  3. `RDF_WEB_SPACETIME_TOKEN`: the `web` identity on maincloud, used for Approve plan and the direct e-stop. Done: `make demo-maincloud` minted it and added it to the allow-list. Don't mint it again.
+  4. Access code: `RDF_PUBLIC_ACCESS_CODE` in `.env` (6 characters, already set). It is **one** code for Vercel's `/join`, `make demo-public`'s edge and the job drops' Discord posts (`RDF_DROP_SHOW_ACCESS_CODE=1`). Read it with `grep RDF_PUBLIC_ACCESS_CODE .env`. On the site, a logged-in operator sees it under the dashboard QR. To change it, edit `.env`, rerun `scripts/vercel/env-push.sh production`, then redeploy (step 7).
   5. Push the env: `VERCEL_CWD=<linked checkout> scripts/vercel/env-push.sh production`. It prints names only.
-  6. Domain: in Vercel, open Project `geonosisai` → Settings → Domains → **Add** `geonosis.jaxonp.com` (or run `npx vercel@65.2.0 domains add geonosis.jaxonp.com geonosisai --scope jaximus808s-projects`). Then add **one** record in Squarespace DNS (Domains → jaxonp.com → DNS → Custom records): **Type `CNAME`, Host `geonosis`, Data `cname.vercel-dns.com`** (or the exact target Vercel shows next to the domain), TTL default. Leave the apex and other records alone.
+  6. Domain: in Vercel, open Project `geonosisai` → Settings → Domains → **Add** `geonosis.jaxonp.com` (or run `npx vercel@65.2.0 domains add geonosis.jaxonp.com geonosisai --scope jaximus808s-projects`). Then add **one** record in Squarespace DNS (Domains → jaxonp.com → DNS → Custom records): **Type `CNAME`, Host `geonosis`, Data `ade5883db4d8e86e.vercel-dns-017.com`**, TTL default (done; the domain is attached and verified). Leave the apex and other records alone.
   7. Production deploy, from a clean worktree of HEAD (the shared checkout carries other tickets' half-done files): `git worktree add --detach $TMPDIR/geonosis-prod HEAD && cd $TMPDIR/geonosis-prod && npx vercel@65.2.0 link --yes --project geonosisai --scope jaximus808s-projects && npx vercel@65.2.0 deploy --prod`
 - **Each demo:**
-  1. Start the real orchestrator and robot against maincloud (the planner's real-run stack).
-  2. Run `make demo-hybrid ARGS="--stack attach --orch-url http://127.0.0.1:<orch port> --stream-port <robot stream port> --robot-name <robot> --stdb-url https://maincloud.spacetimedb.com --db robo-factory-a706j"`. Publishing uses `RDF_HYBRID_SPACETIME_TOKEN` (an orchestrator identity), else `SPACETIME_TOKEN`.
+  1. Start the real stack on maincloud: `make demo-maincloud ARGS="--orch-port 8028 --web-port 3737"`.
+  2. In a second terminal, run `make demo-hybrid ARGS="--stack attach --orch-url http://127.0.0.1:8028 --stream-port 8791 --robot-name sim-yam-mujoco --stdb-url https://maincloud.spacetimedb.com --db robo-factory-a706j"`. It writes one event_log row per start and stop, and one `register_robot` (robot.updated) per stream re-announce. Publishing uses `RDF_HYBRID_SPACETIME_TOKEN` (an orchestrator identity), else the owner `SPACETIME_TOKEN`.
   3. To check: `https://geonosis.jaxonp.com/api/tdm110/backend` returns `{"ok": true}`. Logged-in operators also see the URL. Stop with Ctrl-C or `make demo-hybrid-down`; it publishes `state: down`, and the site then says "backend offline".
   - `make demo-hybrid` with no ARGS boots `make demo`'s throwaway local stack instead. That's for tests only: the browser can reach its DB only through `--expose-stdb`.
 - **Env split** (`scripts/vercel/env-push.sh` pushes the Vercel side):
-  - **Vercel, secret:** `RDF_EDGE_SECRET`, `RDF_OPERATOR_KEY` (same value as the orchestrator's), `RDF_OPERATOR_PASSCODE`, `RDF_WEB_SPACETIME_TOKEN`, optionally `RDF_WEB_ACCESS_CODE`.
+  - **Vercel, secret:** `RDF_EDGE_SECRET`, `RDF_OPERATOR_KEY` (same value as the orchestrator's), `RDF_OPERATOR_PASSCODE`, `RDF_WEB_SPACETIME_TOKEN`, `RDF_PUBLIC_ACCESS_CODE`.
   - **Vercel, plain:**
     - `NEXT_PUBLIC_SPACETIME_HOST=https://maincloud.spacetimedb.com`
     - `NEXT_PUBLIC_SPACETIME_DB_NAME=robo-factory-a706j`

@@ -30,7 +30,7 @@ SECRETS=(
   RDF_OPERATOR_KEY         # X-RDF-Operator-Key the web server adds to operator calls (same as the orchestrator's)
   RDF_OPERATOR_PASSCODE    # /ops/login
   RDF_WEB_SPACETIME_TOKEN  # `web` service identity on the web's SpacetimeDB (approve plan, direct e-stop)
-  RDF_WEB_ACCESS_CODE      # optional: phones enter it once at /join (unset = open site)
+  RDF_PUBLIC_ACCESS_CODE   # phones enter it once at /join; the same code make demo-public and the job drops use
 )
 # Plain config (not secret).
 PLAIN=(

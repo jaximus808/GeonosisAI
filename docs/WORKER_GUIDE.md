@@ -138,3 +138,21 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **New reducers must log through `logEvent(ctx, actor, type, payload)` from `../event_log`.** Never call `ctx.db.eventLog.insert` directly. `python scripts/verify_event_log.py static` audits this.
 - `append_event` needs a service identity now. Actors are lowercase `kind[:id]` and types are `area.event`, with no spaces. Payloads must be valid JSON under 64 KB.
 - `python scripts/verify_event_log.py` prints the count, range, gaps and the `rdf-evlog-chain-v1` hash, which matches the /events seal. `--expect N:HASH` proves the first N rows are unchanged.
+
+## Episode format (TDM-25, the one definition): `services/common/src/rdf_common/episode_format.py`
+- **Media:** one `<camera>.mp4` per camera, listed in `episode.cameras_json` as `{"exo": uri, "wrist": uri}`.
+- **`actions.parquet`:** one row per control tick, written and read with `write_actions` / `read_actions`.
+  - Required columns: `frame_index`, `timestamp_us` (same clock as `takeover_ts`), `joint_pos`, `gripper_pos`, `ik_target_pos`, `ik_target_quat`, `gripper_cmd`, `control_source` (policy|human|idle).
+  - Optional column: `joint_cmd`.
+- **Parquet metadata `rdf.episode`:** fps, joint names, per-camera frame counts and a `fixture` flag.
+- **Shared checks:** `rdf_common.review_checks` (`ReviewThresholds.from_yaml`, `run_checks`) holds the deterministic checks. The reviewer and dataset QA (TDM-92) both use it. Thresholds are in `services/orchestrator/config/review.yaml`, and the jerk threshold needs re-tuning on real YAM demos.
+
+## Factory Droids (TDM-29 decision; full details in the "S-04 decision" note)
+- **Protocol A, native resume:** a droid ends its turn with `WAITING_FOR <table>:<predicate>` and the session goes idle. To resume, `POST https://api.factory.ai/api/v0/sessions/{id}/messages {text}`, then poll `GET /sessions/{id}` until `status=idle`.
+  - The computer auto-pauses after ~5 min idle and wakes on a message (~4 s).
+  - Fallback is Protocol B: a new session seeded with `resume_payload`, used on a 404 or a computer error.
+  - Retry the transient 404 on the first message after `POST /sessions`.
+  - Sessions on one computer share its filesystem, so give each agent_session its own working directory.
+  - A trivial turn costs ~1–3.5k credits.
+  - **Don't use Missions for waits.**
+- **Tonight, droids run LOCALLY via `droid-sdk` (`Session.resume(id)` works) against this repo**, because the repo has no GitHub remote, so cloud computers can't clone it. Switch to cloud computers once the repo is pushed and added to the Factory Environment (default env id `173ec531-…` in `spikes/tdm-29-factory/spike_factory.py`).

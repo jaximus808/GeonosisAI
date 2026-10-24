@@ -68,6 +68,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(flywheel_router)
     from .decision_api import decision_router  # TDM-68: GET /tickets/{id}/decision (evidence trail)
     app.include_router(decision_router)
+    from .checkpoints_api import checkpoints_router  # TDM-42: GET /checkpoints, /checkpoints/resolve, /checkpoints/cleanup (dry run)
+    app.include_router(checkpoints_router)
     from .offers_api import offers_router  # TDM-91: /tickets/{id}/offers, /offers/{id}/{accept,uploads/sign,episodes,finalize}
     app.include_router(offers_router)
     from .agents_api import agents_router  # TDM-35: GET /agents (AgentFeed v1, ?replay=1)

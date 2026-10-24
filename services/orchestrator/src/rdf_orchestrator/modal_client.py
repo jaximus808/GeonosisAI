@@ -24,10 +24,16 @@ finetune is spawned then. The one gap: a crash in the ~100 ms between ``spawn()`
 row write leaves an orphan Modal call (a queued run spawns convert again; a running convert spawns
 finetune again).
 
-GPU cost = runtime x list price from ``GPU_CENTS_PER_HOUR`` (override with ``RDF_GPU_RATES_JSON``,
-e.g. ``{"H100": 395}``). Runtime is the finetune's reported ``metrics.wall_s`` if present, else wall
-clock since the finetune was spawned. The GPU type is ``metrics.gpu`` from the finetune (the TDM-38
-stub reports ``null`` = no GPU, cost 0), else ``RDF_TRAINING_GPU`` (default H100).
+GPU cost (TDM-42, ``rdf_training.cost``): ``gpu_cost_cents`` = the run's Modal compute cost, runtime x
+Modal's own rates (``services/training/config/modal_rates.json``, a snapshot of ``modal billing rates``;
+``RDF_GPU_RATES_JSON`` e.g. ``{"H100": 395}`` still overrides GPU cents/h) for the GPU plus the finetune
+container's reserved CPU and memory. The breakdown and its label (``source: estimate``,
+``method: runtime_x_modal_rate``) go into ``metrics_json.cost``. Runtime is the finetune's reported
+``gpu_seconds`` / ``metrics.wall_s`` if present, else wall clock since the finetune was spawned. The
+GPU type is ``metrics.gpu`` from the finetune (nvidia-smi name; the TDM-38 stub reports ``null`` = no
+GPU, cost 0), else ``RDF_TRAINING_GPU`` (default H100). Modal's billing report is per App per hour,
+so it cannot be pinned to one run on the shared deployed App; ``rdf_training.cost.reconcile`` checks
+the estimate against it.
 
 ``RDF_MODAL_STUB=1`` (TDM-28 harness, local SpacetimeDB only): nothing is spawned. A queued run is
 set running with modal_call_id ``stub-<hex>`` and ``metrics.fake = true``; the harness's
@@ -393,8 +399,10 @@ class TrainingRunner:
             res = PollResult("failed", error=f"Modal unreachable for {n} polls: {res.error}")
         self._untrack(rid)
         if res.state == "failed":
-            cost = self._cost(m, {}) if phase == "finetune" else None  # GPU time burnt before the failure
-            self._fail(run, f"{phase} failed: {res.error}", {**m, "phase": phase, "failed_call_id": call_id}, cost)
+            c = self._cost_breakdown(m, {}) if phase == "finetune" else None  # GPU time burnt before the failure
+            self._fail(run, f"{phase} failed: {res.error}", {**m, "phase": phase, "failed_call_id": call_id,
+                                                              **({"cost": c} if c else {})},
+                       c["total_cents"] if c else None)
             return "failed"
         if phase == "convert":
             uri = res.value if isinstance(res.value, str) else (res.value or {}).get("dataset_uri")
@@ -418,17 +426,27 @@ class TrainingRunner:
         if not ckpt:
             self._fail(run, f"finetune returned no checkpoint_uri: {res.value!r}"[:500], {**m, "phase": "finetune"})
             return "failed"
-        cost = self._cost(m, fm)
-        metrics = {**fm, "modal": {k: v for k, v in m.items() if k != "phase"} | {"phase": "done"}}
+        c = self._cost_breakdown(m, fm, out)
+        cost = int(c["total_cents"])
+        metrics = {**fm, "modal": {k: v for k, v in m.items() if k != "phase"} | {"phase": "done"}, "cost": c}
         log.info("training.done", extra={"fields": {"training_run_id": rid, "checkpoint_uri": ckpt, "gpu_cost_cents": cost}})
         self._set(rid, "done", ckpt=ckpt, metrics=metrics, cost=cost)
         return "done"
 
     @staticmethod
-    def _cost(m: dict, fm: dict) -> int:
-        if "wall_s" in fm or "gpu_seconds" in fm:
-            seconds = float(fm.get("gpu_seconds") or fm.get("wall_s") or 0)
-        else:
+    def _cost_breakdown(m: dict, fm: dict, out: dict | None = None) -> dict:
+        """TDM-42: runtime x Modal rates (GPU + reserved CPU/memory), labelled ``source: estimate``."""
+        from rdf_training import cost as tdm42_cost
+
+        seconds = tdm42_cost.run_seconds(fm, out)
+        measured = seconds is not None
+        if seconds is None:
             seconds = time.time() - float(m.get("finetune_spawned_at") or time.time())
         gpu = fm["gpu"] if "gpu" in fm else os.environ.get("RDF_TRAINING_GPU", "H100")
-        return gpu_cost_cents(seconds, gpu, gpus=int(fm.get("gpu_count") or 1))
+        c = tdm42_cost.estimate(seconds, gpu, gpus=int(fm["gpu_count"]) if fm.get("gpu_count") else None)
+        c["runtime_from"] = "finetune_reported" if measured else "orchestrator_wall_clock_since_spawn"
+        return c
+
+    @classmethod
+    def _cost(cls, m: dict, fm: dict, out: dict | None = None) -> int:
+        return int(cls._cost_breakdown(m, fm, out)["total_cents"])

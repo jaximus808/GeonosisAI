@@ -186,6 +186,25 @@ def _eval_view(r: dict | None, trials: list[dict], finalized: dict | None) -> di
     return view
 
 
+def _tdm42_by_source(runs: list[dict]) -> dict:
+    out: dict[str, int] = {}
+    for r in runs:
+        c = _i(r.get("gpu_cost_cents"))
+        src = (_json(r.get("metrics_json")).get("cost") or {}).get("source") or ("unlabelled" if c else "none")
+        out[src] = out.get(src, 0) + c
+    return out
+
+
+def _tdm42_cost_label(c: dict) -> str:
+    """``estimate: 482.8 s x Modal rates (GPU H100 $0.53 + CPU/mem $0.20)`` or ``Modal billing ...``."""
+    usd2 = lambda cents: f"${float(cents or 0) / 100:.2f}"  # noqa: E731
+    if c.get("source") == "modal_billing":
+        return f"Modal billing, app {(c.get('billing') or {}).get('app_id')}; GPU {usd2(c.get('gpu_cents'))}"
+    rest = float(c.get("cpu_cents") or 0) + float(c.get("mem_cents") or 0)
+    return (f"estimate: {c.get('seconds')} s x Modal rates as of {(c.get('rates') or {}).get('as_of', '?')}; "
+            f"GPU {c.get('gpu') or 'none'} {usd2(c.get('gpu_cents'))} + reserved CPU/mem {usd2(rest)}")
+
+
 def _training_view(r: dict | None) -> dict | None:
     if r is None:
         return None
@@ -198,6 +217,8 @@ def _training_view(r: dict | None) -> dict | None:
             "error": r.get("error"), "created_at": _i(r.get("created_at")), "started_at": started or None,
             "finished_at": finished or None,
             "duration_s": round((finished - started) / 1e6, 1) if started and finished else None,
+            # TDM-42: how gpu_cost_cents was computed (source estimate | modal_billing, formula, GPU part)
+            "cost": _json(r.get("metrics_json")).get("cost"),
             "fake": bool(fake_markers(r))}
 
 
@@ -506,11 +527,14 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
                  "before_first_plan_cents": pre_plan,
                  "payment_count": len(payment_views), "providers": providers},
         "gpu": {"cents": gpu_total, "runs": len(mine["training_run"]),
-                "run_ids": [_i(r["id"]) for r in mine["training_run"]]},
+                "run_ids": [_i(r["id"]) for r in mine["training_run"]],
+                # TDM-42: estimate (runtime x Modal rates) vs modal_billing; "unlabelled" = written before TDM-42
+                "by_source_cents": _tdm42_by_source(mine["training_run"])},
         "total_cents": data_committed + gpu_total,
         "budget_cents": _i(ticket.get("budget_cents")), "approved_cents": _i(ticket.get("approved_cents")),
         "ticket_spent_cents": _i(ticket.get("spent_cents")),
-        "note": "data = payouts paid or reserved (pending/awaiting_onboarding); gpu = sum of training_run.gpu_cost_cents",
+        "note": ("data = payouts paid or reserved (pending/awaiting_onboarding); gpu = sum of training_run.gpu_cost_cents "
+                 "(Modal compute: GPU + reserved CPU/memory; see gpu.by_source_cents)"),
     }
     if not data_committed:
         missing.append("no data spend recorded (no paid or reserved payment rows)")
@@ -738,8 +762,9 @@ def render_markdown(r: dict) -> str:
         tr = it["training_run"]
         if tr:
             add(f"- Training run {tr['training_run_id']}: {tr['status']}, {tr['episodes']} episodes, "
-                f"{tr['duration_s'] if tr['duration_s'] is not None else 'n/a'} s, GPU {usd(tr['gpu_cost_cents'])}, "
-                f"checkpoint `{tr['checkpoint_uri']}`" + (" **[FAKE]**" if tr["fake"] else ""))
+                f"{tr['duration_s'] if tr['duration_s'] is not None else 'n/a'} s, GPU {usd(tr['gpu_cost_cents'])}"
+                + (f" ({_md_text(_tdm42_cost_label(tr['cost']))})" if tr.get("cost") else "")
+                + f", checkpoint `{tr['checkpoint_uri']}`" + (" **[FAKE]**" if tr["fake"] else ""))
         add(f"- Eval after this iteration: {_eval_line(it['eval'])}")
         add("")
 

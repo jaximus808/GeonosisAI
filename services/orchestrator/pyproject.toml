@@ -15,6 +15,7 @@ dependencies = [
     "rdf-payments",  # TDM-63 Stripe test-mode payouts
     "modal>=1.6.0",
     "rdf-factory",  # TDM-27 resume bridge -> TDM-30 FactoryClient.resume
+    "rdf-training",  # TDM-42 checkpoint registry + Modal cost (rdf_training.registry / cost)
 ]
 
 [project.scripts]
@@ -24,6 +25,7 @@ rdf-orchestrator = "rdf_orchestrator.__main__:main"
 rdf-common = { path = "../common", editable = true }
 rdf-payments = { path = "../payments", editable = true }
 rdf-factory = { path = "../factory", editable = true }
+rdf-training = { path = "../training", editable = true }
 
 [build-system]
 requires = ["hatchling"]

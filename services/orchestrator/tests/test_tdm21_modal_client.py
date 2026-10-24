@@ -123,8 +123,11 @@ def test_happy_path_convert_then_finetune_then_done(monkeypatch):
                                                     "metrics": {"loss": 0.1, "wall_s": 3600, "gpu": "H100"}})
     assert r.poll_once(5) == "done"
     row = run_row(db)
-    assert row["status"] == "done" and row["checkpoint_uri"].endswith("/99") and row["gpu_cost_cents"] == 395
-    assert json.loads(row["metrics_json"])["loss"] == 0.1
+    # TDM-42: 1 h x (H100 395c/h + 16 cores x 4.73c/h + 96 GiB x 0.8c/h) = 547c; GPU part = 395c
+    assert row["status"] == "done" and row["checkpoint_uri"].endswith("/99") and row["gpu_cost_cents"] == 547
+    m = json.loads(row["metrics_json"])
+    assert m["loss"] == 0.1 and m["cost"]["source"] == "estimate" and m["cost"]["gpu_cost_cents"] == 395
+    assert m["cost"]["runtime_from"] == "finetune_reported"
     assert r.poll_once(5) == "untracked"
 
 

@@ -29,6 +29,8 @@ help:
 	@echo "make env-check  report which .env keys are set (never prints values)"
 	@echo "make deploy-modal  modal deploy services/training/modal_app.py (app rdf-training, TDM-38)"
 	@echo "make modal-secrets create/refresh Modal secret rdf-training from .env (names only printed)"
+	@echo "make checkpoints [TICKET=42]  checkpoint registry on rdf-checkpoints (TDM-42); make checkpoint-cleanup = dry run (APPLY=1 deletes)"
+	@echo "make download-checkpoint TICKET=42 [WHICH=latest|deployed] [URI=modal-vol://...] [DEST=dir]  local-serving backup (TDM-42)"
 	@echo "make policy-up / policy-down / policy-status  warm, cool, inspect the policy server (TDM-41)"
 	@echo "make test-loop  full-loop integration tests: local SpacetimeDB + fake robot, no arm (TDM-28)"
 	@echo "make fake-stack boot local SpacetimeDB + fake robot and keep them running (TDM-28)"
@@ -116,6 +118,19 @@ deploy-modal:
 
 modal-secrets:
 	cd services/training && uv run --quiet --with 'modal>=1.6.0' python scripts/sync_modal_secret.py
+
+# TDM-42: checkpoint registry / cleanup / download and Modal rates (services/training/scripts/tdm42_checkpoints.py).
+# Cleanup keeps base + deployed + policy-server active/previous + latest KEEP (default 2) per ticket; dry run unless APPLY=1.
+.PHONY: checkpoints checkpoint-cleanup download-checkpoint modal-rates
+TDM42_CLI = cd services/training && uv run --quiet python scripts/tdm42_checkpoints.py
+checkpoints:
+	$(TDM42_CLI) list $(if $(TICKET),--ticket $(TICKET))
+checkpoint-cleanup:
+	$(TDM42_CLI) cleanup --keep $(or $(KEEP),2) $(if $(filter 1,$(APPLY)),--apply)
+download-checkpoint:
+	$(TDM42_CLI) download $(if $(TICKET),--ticket $(TICKET)) --which $(or $(WHICH),latest) $(if $(URI),--uri $(URI)) $(if $(DEST),--dest $(DEST)) $(ARGS)
+modal-rates:
+	$(TDM42_CLI) rates --refresh
 
 # TDM-41: policy server (rdf-training Policy) warm-up / warm-down. `up` bills one GPU until `down`.
 .PHONY: policy-up policy-down policy-status

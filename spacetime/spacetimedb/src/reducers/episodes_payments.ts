@@ -14,7 +14,10 @@
 //   a second episode on the same task is refused while the first is
 //   pending/accepted, and reservation refuses a task that is already paid).
 // - Budget guard, atomic because a reducer is one serializable transaction:
-//     ticket.spent_cents + amount <= ticket.budget_cents, always; and for a
+//     ticket.spent_cents + GPU + amount <= ticket.budget_cents, always, where
+//     GPU = sum of the ticket's training_run.gpu_cost_cents (TDM-42: the same
+//     total the flywheel's budget stop uses; spent_cents stays payouts only);
+//     and for a
 //     task tied to a data plan, (that plan's reserved payouts) + amount <=
 //     data_plan.approved_cents (set by approve_spend).
 //   ticket.spent_cents is the sum of payments in a "reserved" status
@@ -146,9 +149,10 @@ function tdm11Reserve(ctx: RdfCtx, actor: string, r: Tdm11Reserve): Tdm11Payment
 
   let blocked: string | undefined;
   const after = ticket.spent_cents + r.amount_cents;
-  if (after > ticket.budget_cents) {
+  const gpu = tdm42GpuCents(ctx, ticket.id);
+  if (after + gpu > ticket.budget_cents) {
     blocked =
-      `budget: spent ${ticket.spent_cents} + ${r.amount_cents} = ${after} ` +
+      `budget: spent ${ticket.spent_cents} + GPU ${gpu} + ${r.amount_cents} = ${after + gpu} ` +
       `> budget_cents ${ticket.budget_cents} on ticket ${ticket.id}`;
   } else if (r.data_plan_id !== 0n) {
     const plan = ctx.db.dataPlan.id.find(r.data_plan_id);
@@ -193,11 +197,19 @@ function tdm11Reserve(ctx: RdfCtx, actor: string, r: Tdm11Reserve): Tdm11Payment
     retry_of_status: r.existing?.status,
     spent_cents_before: ticket.spent_cents,
     spent_cents_after: blocked ? ticket.spent_cents : after,
+    gpu_cost_cents: gpu,
     budget_cents: ticket.budget_cents,
     reason: blocked,
     ...r.detail,
   });
   return row;
+}
+
+/** TDM-42: GPU spend on the ticket (sum of training_run.gpu_cost_cents), as the flywheel counts it. */
+function tdm42GpuCents(ctx: RdfCtx, ticket_id: bigint): bigint {
+  let total = 0n;
+  for (const run of ctx.db.trainingRun.ticket_id.filter(ticket_id)) total += run.gpu_cost_cents;
+  return total;
 }
 
 /** Releases reserved spend (failed / reversed). Saturates at 0. */

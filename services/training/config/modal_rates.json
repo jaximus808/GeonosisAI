@@ -1,0 +1,21 @@
+{
+  "source": "modal billing rates --json (Modal's published list prices)",
+  "as_of": "2026-10-24T08:13:01Z",
+  "gpu_usd_per_hour": {
+    "A100-40GB": 2.1,
+    "A100-80GB": 2.5,
+    "A10G": 1.1,
+    "B200": 6.25,
+    "B300": 7.1,
+    "H100": 3.95,
+    "H200": 4.54,
+    "L4": 0.8,
+    "L40S": 1.95,
+    "RTX6000": 3.03,
+    "T4": 0.59
+  },
+  "cpu_core_usd_per_hour": 0.0473,
+  "mem_gib_usd_per_hour": 0.008,
+  "volume_storage_gib_month_usd": 0.09,
+  "note": "Read by rdf_training.cost (TDM-42). Refresh: make modal-rates."
+}

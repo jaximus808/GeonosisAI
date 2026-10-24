@@ -25,9 +25,10 @@ Interface for TDM-65 (web push)::
 Rules (``approve_spend`` is the gate):
   * Only plans with status approved/executing are dispatched. Never more than
     ``min(plan.amount, plan.approved_cents // unit_price)`` tasks are live-or-accepted at once.
-  * Ticket budget: a task is created only if ``budget_cents - spent_cents - committed >= price``,
+  * Ticket budget: a task is created only if ``budget_cents - spent_cents - GPU - committed >= price``,
     where ``committed`` is the price of every task on the ticket that may still be paid but is not
-    yet in ``spent_cents`` (open/claimed/submitted, or completed and awaiting review / payment).
+    yet in ``spent_cents`` (open/claimed/submitted, or completed and awaiting review / payment) and
+    GPU is the ticket's sum of ``training_run.gpu_cost_cents`` (TDM-42; the flywheel's budget term).
     Short of budget -> ``dispatch.budget_exhausted`` in event_log and no task.
   * Stop at the target: once ``plan.amount`` episodes from the plan's tasks are accepted, the
     plan's still-open tasks are cancelled (``target_reached``). A rejected episode frees its slot,
@@ -260,14 +261,16 @@ class Dispatcher:
         return "in_flight" if done_us and self.clock() * 1e6 - done_us < NO_EPISODE_GRACE_S * 1e6 else "free"
 
     def budget_remaining(self, ticket_id: int) -> int:
-        """budget_cents - spent_cents - committed (unpaid tasks that may still be paid)."""
+        """budget_cents - spent_cents - GPU - committed (unpaid tasks that may still be paid)."""
         ticket = self.m.get("ticket", ticket_id)
         if ticket is None:
             return 0
         eps, paid = self._episodes_by_task(ticket_id), self._reset_paid_refs(ticket_id)
         committed = sum(_i(t.get("price_cents")) for t in self._tasks(ticket_id)
                         if self._task_state(t, eps, paid) == "in_flight")
-        return _i(ticket.get("budget_cents")) - _i(ticket.get("spent_cents")) - committed
+        gpu = sum(_i(r.get("gpu_cost_cents")) for r in self.m.rows("training_run")
+                  if _i(r.get("ticket_id")) == ticket_id)  # TDM-42: GPU spend counts against the budget
+        return _i(ticket.get("budget_cents")) - _i(ticket.get("spent_cents")) - gpu - committed
 
     def _unit(self, plan: dict) -> int:
         return _i(plan.get("unit_price_cents")) or PRICES_CENTS.get(plan.get("data_type"), 0)

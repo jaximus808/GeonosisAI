@@ -281,9 +281,11 @@ def main() -> int:
 
         # =========================== scenario B: soft e-stop mid-trial
         ev1 = max(int(e["id"]) for e in events())
+        # the dispatcher may send a reset_request job after the last trial (run_eval was already done):
+        # wait until the robot is free BEFORE the ticket exists, or kick_robot starts B by itself
+        wait_for(lambda: not ev.open_jobs(rid), 60, "robot job lock free")
         tid2 = new_ticket("test.tdm51: e-stop mid-trial [SIM]")
-        wait_for(lambda: not ev.open_jobs(rid), 20, "robot job lock free")
-        log("ensure_eval B", outcome=ev.ensure_eval(tid2, why="tdm51 proof scenario B"))
+        log("ensure_eval B", outcome=ev.ensure_eval(tid2, why="tdm51 proof scenario B"))  # dispatched | in_progress
         run2 = wait_for(lambda: next((r for r in orch.sql(f"SELECT * FROM eval_run WHERE ticket_id = {tid2}")), None),
                         15, "eval_run B")
         run2_id = int(run2["id"])

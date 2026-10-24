@@ -1,0 +1,83 @@
+# TDM-45 safety limits for rdf_robot_client.safety.SafetyLayer.
+#
+# One profile per arm adapter name (ArmAdapter.name: "yam", "sim"). Override the file with
+# $RDF_SAFETY_CONFIG, the profile with $RDF_SAFETY_PROFILE, the start speed with
+# $RDF_SAFETY_SPEED_SCALE (it can never exceed max_speed_scale, see below).
+#
+# Units: radians, rad/s, rad/s^2, metres in the robot BASE frame (same frame as ArmAdapter.fk).
+# Velocity / acceleration caps are the values at speed_scale 1.0; the layer multiplies both by
+# the live speed scale (speed_scale x slow_mode_scale while slow mode is on).
+#
+# Joint limits can only TIGHTEN the adapter's own limits: null = use the adapter's
+# (ArmAdapter.limits), and the margin is applied on top of whichever is tighter.
+#
+# !!! The YAM numbers are conservative PLACEHOLDERS. Nobody was at the arm when this was written.
+# !!! Every value marked "TO VERIFY ON ARM" must be checked with the physical e-stop in hand
+# !!! (docs/safety-jetson-checklist.md), then set `verified: true`. Until then the layer caps
+# !!! the speed scale at `unverified_max_speed_scale` on real hardware.
+
+unverified_max_speed_scale: 0.3
+
+profiles:
+  yam:
+    verified: false            # TO VERIFY ON ARM: set true only after the checklist passes
+    speed_scale: 0.25          # low default for the first real runs (TO VERIFY ON ARM)
+    max_speed_scale: 1.0       # set_speed_scale() can never go above this
+    slow_mode_scale: 0.3       # teleop "slow mode" multiplies the speed scale by this
+    joints:
+      margin_rad: 0.10         # stay this far inside the joint limits (TO VERIFY ON ARM)
+      lower: null              # null = adapter limits (TDM-46 YamArm.limits); list of 6 to tighten
+      upper: null
+      max_velocity: [0.8, 0.8, 0.8, 1.2, 1.2, 1.2]       # rad/s at scale 1.0 (TO VERIFY ON ARM)
+      max_acceleration: [3.0, 3.0, 3.0, 5.0, 5.0, 5.0]   # rad/s^2 at scale 1.0 (TO VERIFY ON ARM)
+      max_jump_rad: 0.30       # a setpoint this far (any joint) from the last one is a glitch
+    reject:
+      action: hold             # hold = drop the command and hold the arm | raise = SafetyViolation
+      max_consecutive: 30      # ~1 s of rejected commands at 30 Hz -> raise SafetyViolation anyway
+    workspace:
+      enabled: true
+      # Tool-point box in the YAM base frame. TO VERIFY ON ARM: jog the tool to each face of the
+      # usable volume over the table and read ee_pose (stdin `status`), then shrink by 2-3 cm.
+      x: [0.10, 0.50]          # TO VERIFY ON ARM
+      y: [-0.35, 0.35]         # TO VERIFY ON ARM
+      z: [0.00, 0.45]          # TO VERIFY ON ARM
+      table_floor_z: 0.0       # table surface height in the base frame (TO VERIFY ON ARM)
+      table_clearance_m: 0.03  # the tool point never goes below table_floor_z + this
+    gripper:
+      min: 0.0                 # 0 = fully closed (adapter units are 0..1)
+      max: 1.0
+      max_effort: 0.5          # passed to the adapter's set_gripper_effort_limit() if it has one (TO VERIFY ON ARM)
+    watchdog_ms: 200           # no command for this long while streaming -> hold
+    log_every_s: 1.0           # rate limit for clamp/reject log lines (per kind)
+    event_every_s: 5.0         # rate limit for robot.limit_hit event_log rows (per kind)
+
+  sim:
+    # SimArm (TDM-49): limits sized for its kinematics and the --sim demo sweep. Not hardware.
+    verified: true
+    speed_scale: 1.0
+    max_speed_scale: 1.0
+    slow_mode_scale: 0.3
+    joints:
+      margin_rad: 0.05
+      lower: null
+      upper: null
+      max_velocity: [2.5, 2.5, 2.5, 3.5, 3.5, 3.5]
+      max_acceleration: [12.0, 12.0, 12.0, 16.0, 16.0, 16.0]
+      max_jump_rad: 0.5
+    reject:
+      action: hold
+      max_consecutive: 30
+    workspace:
+      enabled: true
+      x: [0.05, 0.70]
+      y: [-0.55, 0.55]
+      z: [0.00, 0.65]
+      table_floor_z: 0.0
+      table_clearance_m: 0.005
+    gripper:
+      min: 0.0
+      max: 1.0
+      max_effort: null
+    watchdog_ms: 200
+    log_every_s: 1.0
+    event_every_s: 5.0

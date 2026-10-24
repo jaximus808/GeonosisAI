@@ -4,7 +4,7 @@ This was built and tested on a laptop with the simulated arm (`--sim`). Nobody w
 
 ## Prereqs
 - [ ] TDM-46 `adapters/yam.py` (`YamArm`) has landed. Until then `rdf-robot-client` (the default `--adapter yam`) exits with "adapter 'yam' is not available".
-- [ ] TDM-45 `rdf_robot_client/safety.py` (`SafetyLayer`) has landed. Without it, the client refuses to drive real hardware.
+- [ ] TDM-45 `rdf_robot_client/safety.py` (`SafetyLayer`) has landed (it has). Before any motion, walk through `docs/safety-jetson-checklist.md` with the physical e-stop in hand: the YAM limits in `config/safety.yaml` are unverified placeholders.
 - [ ] `.env` on the Jetson has `SPACETIME_HOST`, `SPACETIME_DB_NAME` and `SPACETIME_TOKEN`. The token must be a **`robot_client` identity** (`POST /v1/identity`, then `register_service_identity(..., "robot_client", ...)`), not the owner token. Also set `ROBOT_ID` to the robot name, e.g. `yam-office-1`.
 
 ## Laptop dry run (no arm needed)

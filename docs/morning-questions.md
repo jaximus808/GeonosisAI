@@ -23,3 +23,5 @@ Work kept going around each of these. Answer in any order.
     - It's real-YAM data to warm-start the fine-tune.
 
     Check its license or terms before using it in the pitch.
+
+15. **Robot safety limits (TDM-45) need a human at the arm before any remote control**: the YAM profile in `services/robot-client/config/safety.yaml` is placeholders (marked `TO VERIFY ON ARM`): joint margins, velocity/acceleration caps, the workspace box (assumed +x forward, +z up from the base) and the table floor height. Walk through `services/robot-client/docs/safety-jetson-checklist.md` with the physical e-stop in hand (`uv run python -m rdf_robot_client.safety_check --floor-test`), then set `verified: true`. Until then real-arm speed is capped at 0.3 of the caps, and starts at 0.25.

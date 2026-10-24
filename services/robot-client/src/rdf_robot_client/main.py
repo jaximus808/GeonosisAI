@@ -6,7 +6,9 @@
     rdf-robot-client --fake ...           # TDM-28 fake robot (synthetic episodes), see fake.py
 
 Clearing a soft e-stop (robot ``locked`` / status ``estop``) is LOCAL ONLY, by a human at the
-arm: type ``clear`` + Enter in this terminal, or ``pkill -USR1 -f rdf-robot-client``.
+arm: type ``clear`` (or ``unlock``) + Enter in this terminal, or ``pkill -USR1 -f rdf-robot-client``.
+TDM-45 safety layer (safety.py) on stdin: ``speed <0..1>`` sets the speed scale (capped by
+config/safety.yaml), ``slow on`` / ``slow off`` toggles slow mode, ``safety`` prints the counters, ``pose`` the EE pose.
 """
 from __future__ import annotations
 
@@ -120,6 +122,8 @@ def run(argv: list[str] | None = None) -> None:
         clear_estop_on_boot=a.clear_estop_on_boot or sim, max_command_age_s=a.max_command_age_s,
         estop_auto_clear_s=a.estop_auto_clear_s,
     )
+    if hasattr(arm, "set_event_sink"):  # TDM-45: rate-limited robot.limit_hit event_log rows
+        arm.set_event_sink(client.event)
     done = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: done.set())
@@ -130,7 +134,7 @@ def run(argv: list[str] | None = None) -> None:
         def _stdin() -> None:
             for line in sys.stdin:
                 cmd = line.strip().lower()
-                if cmd == "clear":
+                if cmd in ("clear", "unlock"):
                     if not client.clear_estop(by="terminal"):
                         print("not locked", file=sys.stderr)
                 elif cmd in ("status", "s"):
@@ -138,6 +142,19 @@ def run(argv: list[str] | None = None) -> None:
                 elif cmd in ("estop", "stop"):  # local soft stop: same latch as soft_estop
                     arm.stop()
                     client.sm.lock("local terminal e-stop")
+                elif cmd.startswith("speed ") and hasattr(arm, "set_speed_scale"):  # TDM-45
+                    try:
+                        print(f"speed scale {arm.set_speed_scale(float(cmd.split()[1]))}", file=sys.stderr)
+                    except ValueError as e:
+                        print(f"speed: {e}", file=sys.stderr)
+                elif cmd in ("slow on", "slow off") and hasattr(arm, "set_slow_mode"):  # TDM-45
+                    arm.set_slow_mode(cmd == "slow on")
+                elif cmd == "safety" and hasattr(arm, "stats"):  # TDM-45
+                    print(json.dumps(arm.stats(), default=str), file=sys.stderr)
+                elif cmd == "pose":  # TDM-45: measure the workspace box / table floor by jogging
+                    st = arm.read_state()
+                    print(json.dumps({"joints": [round(v, 4) for v in st.joints], "gripper": round(st.gripper, 3),
+                                      "ee_pose": st.ee_pose.to_dict()}), file=sys.stderr)
         threading.Thread(target=_stdin, name="rdf-stdin", daemon=True).start()
     _log("running; 'status' / 'clear' / 'estop' on stdin, Ctrl-C to stop", robot_id=client.robot_id,
          adapter=a.adapter, state=str(client.sm.state))

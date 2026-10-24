@@ -77,6 +77,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(report_router)
     from .stream_api import stream_router  # TDM-55: POST /stream/token (camera stream, claimant only)
     app.include_router(stream_router)
+    from .practice_api import practice_router  # [SIM] practice sessions on sim robots (no lease, no recording)
+    app.include_router(practice_router)
     from .tdm57_control_api import tdm57_control_router  # TDM-57: POST /tasks/{id}/revoke (operator key)
     app.include_router(tdm57_control_router)
     from .flywheel_api import router as flywheel_router  # TDM-22: /tickets/{id}/advance, /flywheel/*

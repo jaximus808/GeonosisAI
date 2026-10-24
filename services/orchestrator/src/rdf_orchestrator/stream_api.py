@@ -141,6 +141,15 @@ def _norm_identity(v: Any) -> str:
     return s[2:] if s.startswith("0x") else s
 
 
+def robot_is_sim(robot: dict) -> bool:
+    """A simulated robot (``camera_config_json.sim`` or embodiment ``sim*``): no camera stream is required."""
+    try:
+        cfg = json.loads(robot.get("camera_config_json") or "{}") or {}
+    except (json.JSONDecodeError, AttributeError):
+        cfg = {}
+    return bool(cfg.get("sim")) or str(robot.get("embodiment") or "").startswith("sim")
+
+
 def stream_url_of(robot: dict) -> tuple[str | None, dict]:
     """(ws url, stream info) from ``RDF_STREAM_URL`` or ``robot.camera_config_json["stream"]``."""
     try:
@@ -163,7 +172,7 @@ async def _operator_view_token(body: StreamTokenRequest, stdb: Tdm55Stdb, secret
         raise HTTPException(404, f"Robot {body.robot_id} not found.")
     robot = robots[0]
     url, info = stream_url_of(robot)
-    if not url:
+    if not url and not robot_is_sim(robot):  # [SIM] robots are driven from /ws/state renders, not video
         raise HTTPException(503, "The robot has not published a stream URL yet (is it online?).")
     token, claims = mint(secret, robot_id=int(robot["id"]), robot_name=str(robot["name"]), task_id=0,
                          sub="operator:view", ttl_s=DEFAULT_TTL_S, scope="view")
@@ -221,7 +230,7 @@ async def stream_token(body: StreamTokenRequest, stdb: Tdm55Stdb = Depends(get_s
         raise HTTPException(404, f"Robot {task['robot_id']} not found.")
     robot = robots[0]
     url, info = stream_url_of(robot)
-    if not url:
+    if not url and not robot_is_sim(robot):  # [SIM] no camera gate: the browser renders the sim from /ws/state
         raise HTTPException(503, "The robot has not published a camera stream URL yet (is it online?).")
 
     try:

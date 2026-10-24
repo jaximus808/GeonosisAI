@@ -192,6 +192,17 @@ jetson-logs:
 jetson-ssh:
 	@$(JETSON_SH) ssh
 
+# Local demo: MuJoCo [SIM] YAM + full orchestrator + sim policy + web (scripts/demo/run.py).
+# Ports: DEMO_WEB_PORT (3737) DEMO_STDB_PORT (3030) DEMO_ORCH_PORT (8030) DEMO_STREAM_PORT (8791)
+# DEMO_SIM_STATE_PORT (8792) DEMO_POLICY_PORT (8765), or ARGS="--web-port ...". Options: ARGS="--real-modal",
+# "--policy production", "--auto-approve-max-cents 5000", "--passcode ...". Ctrl-C or `make demo-down` stops it.
+.PHONY: demo demo-down
+demo:
+	cd services/orchestrator && uv run --quiet python ../../scripts/demo/run.py up $(ARGS)
+
+demo-down:
+	cd services/orchestrator && uv run --quiet python ../../scripts/demo/run.py down
+
 # make demo-public: the local demo reachable from phones over HTTPS (scripts/demo/public.py; docs/MORNING.md
 # "Phone access"). One cloudflared tunnel (quick by default; RDF_PUBLIC_DOMAIN=example.com = named tunnel) to a
 # local edge (access code, rate limits, allow-lists) in front of a production web build + make demo.

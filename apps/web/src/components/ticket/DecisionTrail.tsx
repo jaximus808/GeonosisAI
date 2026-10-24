@@ -13,6 +13,7 @@
 // signing via GET /media/sign) so it does not depend on other tickets' helpers.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { LlmBadge } from '@/components/llm/LlmBadge';
+import { ApprovePlanButton } from './ApprovePlanButton';
 
 const ORCH = (process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:8000').replace(/\/$/, '');
 const POLL_MS = 15_000;
@@ -190,7 +191,7 @@ function TrialStrip({ ev }: { ev: EvalView }) {
   );
 }
 
-function Chain({ d }: { d: Decision }) {
+function Chain({ d, ticketId }: { d: Decision; ticketId: number | string }) {
   const p = d.plan;
   const failures = d.clusters.reduce((n, c) => n + c.count, 0);
   const bad = d.links.filter((l) => l.ok === false);
@@ -281,7 +282,12 @@ function Chain({ d }: { d: Decision }) {
             <div className="space-y-1 text-sm">
               {d.approvals.length ? d.approvals.map((ap) => (
                 <p key={ap.event_id}>Spend approved: {usd(ap.approved_cents)} by {ap.approved_by} <Cite ev={ap} /></p>
-              )) : <p className="text-zinc-500">Spend not approved yet (plan status {p.status}).</p>}
+              )) : (
+                <>
+                  <p className="text-zinc-500">Spend not approved yet (plan status {p.status}).</p>
+                  <ApprovePlanButton ticketId={ticketId} planId={p.data_plan_id} estCostCents={p.est_cost_cents} status={p.status} />
+                </>
+              )}
               {d.tasks.length ? (
                 <p>{d.tasks.length} paid task{d.tasks.length === 1 ? '' : 's'} dispatched ({d.tasks.map((t) => `#${t.task_id} ${t.status}`).join(', ')}).</p>
               ) : <p className="text-zinc-500">No tasks dispatched for data_plan #{p.data_plan_id} yet.</p>}
@@ -403,7 +409,7 @@ export function DecisionTrail({ ticketId, refreshKey }: { ticketId: string | num
         ))}
         {error && <span className="text-xs text-amber-700">refresh failed ({error}); showing the {time(trail.generated_at)} copy</span>}
       </div>
-      {shown ? <Chain d={shown} /> : (
+      {shown ? <Chain d={shown} ticketId={String(ticketId)} /> : (
         <Missing>No decision yet. {trail.missing.join('; ')}.</Missing>
       )}
     </div>

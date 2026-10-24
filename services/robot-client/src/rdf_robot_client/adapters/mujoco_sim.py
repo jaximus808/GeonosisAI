@@ -142,6 +142,8 @@ class MujocoSimArm(ArmAdapter):
         self.last_stop_at: float | None = None
         self.scene_seq = 0
         self._episode = {"lifted": False, "miss_since": None, "blocked_since": None}
+        self._snap: dict[str, Any] | None = None
+        self._held_now = False
         self._renderer: SimRenderer | None = None
         self._state_srv: ThreadingHTTPServer | None = None
         self._init_state()
@@ -270,17 +272,20 @@ class MujocoSimArm(ArmAdapter):
             target = t0_sim + (now - t0_wall)
             with self._lock:
                 m, d = self.model, self.data  # load_scene may have swapped them (TDM-104)
-                n = 0
-                while d.time < target and n < 50:
+                # ONE mj_step call for all the steps due (nstep): mj_step releases the GIL, so a Python
+                # loop of single steps under this lock would wait for the GIL between steps while holding
+                # the lock (read_state / the 30 Hz state feed then stalled 100-300 ms under load).
+                n = min(int(math.ceil((target - d.time) / dt - 1e-9)), 25) if d.time < target else 0
+                if n > 0:
                     d.ctrl[: self.dof] = self._setpoint(now)
                     d.ctrl[self.dof] = FINGER_TRAVEL * self._gripper_cmd
-                    mj.mj_step(m, d)
-                    n += 1
+                    mj.mj_step(m, d, nstep=n)
                 self._steps += n
                 if d.time < target - 0.1:  # fell > 100 ms behind (laptop stall): resync, don't race
                     t0_wall, t0_sim = time.monotonic(), float(d.time)
                     self._lag_resets += 1
                 self._track_episode()
+                self._publish()
             self._stop_evt.wait(max(0.0, dt - (time.monotonic() - now)) if self.realtime else 0.0)
 
     def step_for(self, seconds: float) -> None:
@@ -302,12 +307,37 @@ class MujocoSimArm(ArmAdapter):
     def _gripper_measured(self) -> float:
         return float(np.clip(self.data.qpos[self._fadr] / FINGER_TRAVEL, 0.0, 1.0))
 
+    # ---- lock-free snapshot for readers. The physics thread publishes one immutable snapshot per tick;
+    # read_state / task_status / scene_state read it WITHOUT the physics lock. (Holding the lock across
+    # mj_step meant readers also waited out the GIL handoffs around it: 100-300 ms stalls of the 30 Hz
+    # /ws/state feed and of the control loop while a teleop or policy thread was busy.)
+    def _publish(self) -> None:
+        d = self.data
+        tv = float(np.linalg.norm(d.qvel[self._cube_v:self._cube_v + 3])) if self._target in self._obj_free else 0.0
+        self._snap = {
+            "model": self.model, "mono": time.monotonic(), "sim_t": float(d.time),
+            "q": tuple(float(v) for v in d.qpos[self._qadr]), "qd": tuple(float(v) for v in d.qvel[self._vadr]),
+            "g": self._gripper_measured(), "held": self._held_now, "target_v": tv,
+            "obj": {oid: (tuple(float(v) for v in d.xpos[b]), tuple(float(v) for v in d.xquat[b]))
+                    for oid, b in self._obj_body.items()},
+        }
+
+    def _fresh(self) -> dict[str, Any] | None:
+        sn = self._snap
+        if sn is None or not self._connected or sn["model"] is not self.model or time.monotonic() - sn["mono"] > 0.25:
+            return None
+        return sn
+
     def read_state(self) -> ArmState:
-        with self._lock:
-            q = tuple(float(v) for v in self.data.qpos[self._qadr])
-            qd = tuple(float(v) for v in self.data.qvel[self._vadr])
-            g = self._gripper_measured()
-            target = self._seg_to.copy()
+        sn = self._fresh()
+        if sn is not None:
+            q, qd, g, target = sn["q"], sn["qd"], sn["g"], self._seg_to
+        else:
+            with self._lock:
+                q = tuple(float(v) for v in self.data.qpos[self._qadr])
+                qd = tuple(float(v) for v in self.data.qvel[self._vadr])
+                g = self._gripper_measured()
+                target = self._seg_to.copy()
         moving = any(abs(v) > 0.02 for v in qd) or bool(np.max(np.abs(target - np.array(q))) > 0.01)
         return ArmState(t=time.monotonic(), joints=q, gripper=g, ee_pose=self.fk(q), joint_velocities=qd, moving=moving)
 
@@ -474,11 +504,25 @@ class MujocoSimArm(ArmAdapter):
         elif not missed:
             self._episode["miss_since"] = None
         # an open hand resting on the object (a pad landed on top of it instead of beside it)
-        blocked = g > 0.85 and tool_z < self.scene.table_top + half * 2 + 0.03 and self._pad_on_cube()
+        pads = self._pads_touching()
+        self._held_now = len(pads) == 2
+        blocked = g > 0.85 and tool_z < self.scene.table_top + half * 2 + 0.03 and bool(pads)
         if blocked and self._episode["blocked_since"] is None:
             self._episode["blocked_since"] = float(d.time)
         elif not blocked:
             self._episode["blocked_since"] = None
+
+    def _pads_touching(self) -> set[int]:
+        d = self.data
+        touching: set[int] = set()
+        for i in range(d.ncon):
+            c = d.contact[i]
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if g1 == self._cube_geom and g2 in self._pad_geoms:
+                touching.add(g2)
+            elif g2 == self._cube_geom and g1 in self._pad_geoms:
+                touching.add(g1)
+        return touching
 
     def _pad_on_cube(self) -> bool:
         d = self.data
@@ -490,6 +534,9 @@ class MujocoSimArm(ArmAdapter):
         return False
 
     def _live_poses(self) -> dict[str, dict[str, list[float]]]:
+        sn = self._fresh()
+        if sn is not None:
+            return {oid: {"pos": list(p), "quat": list(q)} for oid, (p, q) in sn["obj"].items()}
         with self._lock:
             return {oid: {"pos": [float(v) for v in self.data.xpos[b]], "quat": [float(v) for v in self.data.xquat[b]]}
                     for oid, b in self._obj_body.items()}
@@ -531,16 +578,23 @@ class MujocoSimArm(ArmAdapter):
             return {"success": False, "failure": None, "held": False, "sim": True, "note": "scene has no success predicate"}
         sc, tid = self.scene, self._target
         dest = sc.container or sc.success.get("region")
-        with self._lock:
-            d = self.data
-            c = d.xpos[self._cube_body].copy()
-            held = self._cube_between_pads()
-            g = self._gripper_measured()
-            miss_since = self._episode["miss_since"]
-            blocked_since = self._episode["blocked_since"]
-            lifted = self._episode["lifted"]
-            t = float(d.time)
-            cube_v = float(np.linalg.norm(d.qvel[self._cube_v:self._cube_v + 3]))
+        sn = self._fresh()
+        if sn is not None and tid in sn["obj"]:
+            c = np.array(sn["obj"][tid][0])
+            held, g, t, cube_v = sn["held"], sn["g"], sn["sim_t"], sn["target_v"]
+            ep = self._episode
+            miss_since, blocked_since, lifted = ep["miss_since"], ep["blocked_since"], ep["lifted"]
+        else:
+            with self._lock:
+                d = self.data
+                c = d.xpos[self._cube_body].copy()
+                held = self._cube_between_pads()
+                g = self._gripper_measured()
+                miss_since = self._episode["miss_since"]
+                blocked_since = self._episode["blocked_since"]
+                lifted = self._episode["lifted"]
+                t = float(d.time)
+                cube_v = float(np.linalg.norm(d.qvel[self._cube_v:self._cube_v + 3]))
         try:  # TDM-104's predicate (same code the orchestrator and the browser twin use), on live poses
             from rdf_common import scene_spec as _ss
 
@@ -571,9 +625,13 @@ class MujocoSimArm(ArmAdapter):
         Generic ``objects = {id: {pos, quat, primitive, size?, radius?, height?, color}}`` plus, for
         older viewers, ``cube`` (the task's object) and ``plate`` (its target)."""
         sc = self.scene
-        with self._lock:
-            poses = {oid: ([round(float(v), 4) for v in self.data.xpos[b]], [round(float(v), 4) for v in self.data.xquat[b]])
-                     for oid, b in self._obj_body.items()}
+        sn = self._fresh()
+        if sn is not None:
+            poses = {oid: ([round(v, 4) for v in p], [round(v, 4) for v in q]) for oid, (p, q) in sn["obj"].items()}
+        else:
+            with self._lock:
+                poses = {oid: ([round(float(v), 4) for v in self.data.xpos[b]], [round(float(v), 4) for v in self.data.xquat[b]])
+                         for oid, b in self._obj_body.items()}
         objects: dict[str, Any] = {}
         for oid, (pos, quat) in poses.items():
             o = sc.objects[oid]

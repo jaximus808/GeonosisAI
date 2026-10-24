@@ -1,0 +1,20 @@
+# TDM-110: what `vercel deploy` uploads from the repo root (the project's Root Directory is apps/web).
+# Allow-list: the web app, the workspace packages it imports, and the pnpm workspace files. Everything
+# else (services, spikes, sim assets, .env and every other secret) never leaves this machine.
+/*
+!/apps
+/apps/*
+!/apps/web
+!/packages
+!/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/.npmrc
+**/node_modules
+**/.next
+**/.next-*
+**/.env
+**/.env.*
+!**/.env.example
+**/*.tsbuildinfo
+**/.vercel

@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
     '*.local',
     ...(process.env.RDF_DEV_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   ],
+  // TDM-110: /join's access-code form and JoinQr call /_rdf/access. Behind make demo-public's edge that path
+  // never reaches Next; on Vercel (no edge) the web app answers it itself (app/api/tdm110/access).
+  async rewrites() {
+    return [{ source: '/_rdf/access', destination: '/api/tdm110/access' }];
+  },
 };
 
 export default nextConfig;

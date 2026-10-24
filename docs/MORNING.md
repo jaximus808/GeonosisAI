@@ -84,3 +84,38 @@ Judges' phones open the local demo over HTTPS through Cloudflare. Nothing listen
 - **Safety notes:** privileged actions still need the operator login (the soft e-stop stays open to anyone who is past the access code, on purpose). SpacetimeDB is reachable only through an allow-list (subscribe socket and identity endpoints, no SQL or HTTP reducer calls), and its reducers check `ctx.sender`; the owner `SPACETIME_TOKEN` never reaches the browser or the edge. The orchestrator is not tunneled (browser GETs go through `/api/orch`), unless you pass `--api` for a remote Jetson or Modal, which exposes 5 upload/progress routes under a secret path. Rate limits apply per client IP. The web app runs `next start` (no dev overlay, no source maps).
 - **Real run (maincloud, remote Jetson):** `make demo-public ARGS="--stack attach --stdb-url https://maincloud.spacetimedb.com --db robo-factory-a706j --orch-url http://127.0.0.1:<orchestrator port> --api"`. Phones then use maincloud directly. The Jetson's robot client runs its own quick tunnel for video (`RDF_STREAM=cloudflared`, its default). For uploads, set `JETSON_ORCHESTRATOR_URL` to the URL in `$TMPDIR/rdf-demo-public/api_url` and run `make jetson-env`. The local demo database is never writable through the link, so a remote robot can't join `make demo`'s local SpacetimeDB this way.
 
+
+## Hybrid deploy (TDM-110): web app on Vercel, backend on this laptop
+The public site is the Vercel project **`geonosisai`** (scope `jaximus808s-projects`) at `https://geonosis.jaxonp.com`. The orchestrator and the robot stay here, behind two cloudflared **quick tunnels** whose random URLs change on every start. Nothing user-facing holds those URLs, so restarting the backend never needs a redeploy or an env change. `make demo-public` (everything on the laptop) is unchanged and still the fallback.
+- **How Vercel finds the orchestrator:** `make demo-hybrid` publishes an event_log row `orchestrator.endpoint` {url, robot_url} to SpacetimeDB. Vercel's server routes read the newest row (10 s cache), then check `GET <url>/_rdf/proof?nonce=…` against `HMAC(RDF_EDGE_SECRET, nonce + url)` before they send that URL anything. After that, each call carries `x-rdf-edge-secret`, and the edge refuses the orchestrator without it. Two things stop a forged URL. First, `append_event` refuses anonymous callers, and a non-orchestrator service can't log as actor `orchestrator`. Second, a URL that fails the proof never sees the secret. A real `RDF_ORCHESTRATOR_URL` on Vercel overrides discovery.
+- **How the browser finds the robot:** the robot's stream URL is announced in `robot.camera_config_json.stream`, as before. Its cameras, `/ws/state` and `/ws/control` all derive from that one base. `make demo-hybrid` points it at the robot tunnel, and re-announces it every 20 s if something overwrites it.
+- **One-time setup** (in order):
+  1. `npx vercel@65.2.0 login` (done: `jaximus808`).
+  2. Add the shared secret to `.env` (it is never printed): `echo "RDF_EDGE_SECRET=$(openssl rand -base64 33 | tr '+/' '-_')" >> .env`
+  3. Give the web a `web` identity on maincloud (needed for Approve plan and the direct e-stop): `cd services/orchestrator && uv run python ../../spikes/tdm-78-robot-page/setup_web_auth.py mint-web-identity --yes`. This writes `RDF_WEB_SPACETIME_TOKEN` and one `service_identity` row on maincloud.
+  4. Optional: set `RDF_WEB_ACCESS_CODE=<code>` in `.env`. Phones then enter it once at `/join`, the same way as `make demo-public`. A logged-in operator sees the code under the dashboard QR.
+  5. Push the env: `VERCEL_CWD=<linked checkout> scripts/vercel/env-push.sh production`. It prints names only.
+  6. Domain: in Vercel, open Project `geonosisai` → Settings → Domains → **Add** `geonosis.jaxonp.com` (or run `npx vercel@65.2.0 domains add geonosis.jaxonp.com geonosisai --scope jaximus808s-projects`). Then add **one** record in Squarespace DNS (Domains → jaxonp.com → DNS → Custom records): **Type `CNAME`, Host `geonosis`, Data `cname.vercel-dns.com`** (or the exact target Vercel shows next to the domain), TTL default. Leave the apex and other records alone.
+  7. Production deploy, from a clean worktree of HEAD (the shared checkout carries other tickets' half-done files): `git worktree add --detach $TMPDIR/geonosis-prod HEAD && cd $TMPDIR/geonosis-prod && npx vercel@65.2.0 link --yes --project geonosisai --scope jaximus808s-projects && npx vercel@65.2.0 deploy --prod`
+- **Each demo:**
+  1. Start the real orchestrator and robot against maincloud (the planner's real-run stack).
+  2. Run `make demo-hybrid ARGS="--stack attach --orch-url http://127.0.0.1:<orch port> --stream-port <robot stream port> --robot-name <robot> --stdb-url https://maincloud.spacetimedb.com --db robo-factory-a706j"`. Publishing uses `RDF_HYBRID_SPACETIME_TOKEN` (an orchestrator identity), else `SPACETIME_TOKEN`.
+  3. To check: `https://geonosis.jaxonp.com/api/tdm110/backend` returns `{"ok": true}`. Logged-in operators also see the URL. Stop with Ctrl-C or `make demo-hybrid-down`; it publishes `state: down`, and the site then says "backend offline".
+  - `make demo-hybrid` with no ARGS boots `make demo`'s throwaway local stack instead. That's for tests only: the browser can reach its DB only through `--expose-stdb`.
+- **Env split** (`scripts/vercel/env-push.sh` pushes the Vercel side):
+  - **Vercel, secret:** `RDF_EDGE_SECRET`, `RDF_OPERATOR_KEY` (same value as the orchestrator's), `RDF_OPERATOR_PASSCODE`, `RDF_WEB_SPACETIME_TOKEN`, optionally `RDF_WEB_ACCESS_CODE`.
+  - **Vercel, plain:**
+    - `NEXT_PUBLIC_SPACETIME_HOST=https://maincloud.spacetimedb.com`
+    - `NEXT_PUBLIC_SPACETIME_DB_NAME=robo-factory-a706j`
+    - `NEXT_PUBLIC_ORCHESTRATOR_URL=/api/orch`
+    - `NEXT_PUBLIC_RDF_ENV=production` and `RDF_DEPLOY_ENV=production` (the LLM switcher is hidden and locked to api)
+    - `RDF_WEB_PUBLIC_URL` and `NEXT_PUBLIC_WEB_PUBLIC_URL=https://geonosis.jaxonp.com`
+    - `ENABLE_EXPERIMENTAL_COREPACK=1` (pnpm 11)
+    - **No** `RDF_ORCHESTRATOR_URL`: unset means discovery.
+  - **Backend only, never on Vercel:** `ANTHROPIC_API_KEY`, `MODAL_*`, `FACTORY_*`, `HF_TOKEN`, `SPACETIME_TOKEN` (owner), `STRIPE_SECRET_KEY`, `RDF_STREAM_TOKEN_SECRET`, `RDF_MEDIA_*`, `VAPID_PRIVATE_KEY`, `POLICY_*`. The web app reads none of them.
+  - **Both sides:** `RDF_EDGE_SECRET` and `RDF_OPERATOR_KEY`.
+- **Limits:**
+  - Quick tunnels are best effort: no uptime guarantee, and Cloudflare caps in-flight requests per tunnel.
+  - Nothing in the app uses SSE (checked). WebSockets (robot stream, state, control) work through trycloudflare.
+  - **Stable fallback, no domain needed:** Tailscale Funnel. Run `tailscale funnel --bg --https=443 <edge port>` and `tailscale funnel --bg --https=8443 <stream port>`, then `make demo-hybrid ARGS="--tunnel external ..."` with `RDF_API_PUBLIC_URL=https://<machine>.<tailnet>.ts.net` and `RDF_ROBOT_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8443`.
+  - **Named tunnel** (when a zone is on Cloudflare): use `--tunnel named` with `RDF_PUBLIC_DOMAIN` (giving `api.` and `robot.` hosts), or with `RDF_API_HOST` and `RDF_ROBOT_HOST`.

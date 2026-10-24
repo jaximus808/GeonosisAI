@@ -41,6 +41,23 @@ make demo's own web, or run.py must read DEMO_OPERATOR_KEY).
 
 State (no secrets in public.json): $RDF_PUBLIC_ROOT (default $TMPDIR/rdf-demo-public): public.json,
 access_code (0600), api_url (0600, --api only), logs/, cloudflared.yml, demo/ (run.py's RDF_DEMO_ROOT).
+
+TDM-110 ``--mode hybrid`` (``make demo-hybrid``; docs/MORNING.md "Hybrid deploy"): the web app runs on Vercel,
+this machine runs only the backend. No web build here. Two public URLs:
+  api    -> the edge (public_guard.py without --web): /_rdf/proof, the orchestrator for requests carrying
+            x-rdf-edge-secret (RDF_EDGE_SECRET, shared with Vercel), /_api/<secret> (--api), and with
+            --expose-stdb the throwaway DB's /v1 allow-list (test only; production uses maincloud).
+  robot  -> the robot's TDM-55 stream server (cameras, /ws/state, /ws/control; every one needs a stream token).
+``--tunnel quick`` (default): two cloudflared quick tunnels, new random URLs on every start. Nothing user-facing
+holds them: the api URL is published to SpacetimeDB as event_log ``orchestrator.endpoint`` (actor
+``orchestrator``; append_event refuses anonymous callers and a non-orchestrator service may not log as
+``orchestrator``), Vercel's server routes read it (10 s cache) and use it only after /_rdf/proof matches; the
+robot URL is announced in robot.camera_config_json.stream (re-announced if the robot overwrites it).
+``--tunnel named``: one named tunnel serving RDF_API_HOST and RDF_ROBOT_HOST (default api./robot.<RDF_PUBLIC_DOMAIN>).
+  --stack demo     run.py's throwaway stack (local DB; the browser reaches it only via --expose-stdb): tests.
+  --stack attach   an orchestrator (--orch-url) and robot (--stream-port, --robot-name) you already run, e.g.
+                   against maincloud. Publishing needs an orchestrator (or owner) token: --token-file, else
+                   RDF_HYBRID_SPACETIME_TOKEN, else SPACETIME_TOKEN (env or .env).
 """
 from __future__ import annotations
 
@@ -169,24 +186,26 @@ class Procs:
                 pass
 
     def stop_all(self) -> None:
-        if "tunnel" in self.procs:  # cut the public link first
-            self.stop("tunnel", 5)
+        for t in [n for n in self.procs if n.startswith("tunnel")]:  # cut the public links first
+            self.stop(t, 5)
         for name in reversed(list(self.procs)):
             self.stop(name, 40 if name == "demo" else 10)
 
 
 # ----------------------------------------------------------------------------------------- tunnels
-def start_quick_tunnel(procs: Procs, port: int) -> str:
+def start_quick_tunnel(procs: Procs, port: int, name: str = "tunnel") -> str:
     cf = shutil.which("cloudflared")
     if not cf:
         raise RuntimeError("cloudflared not found: brew install cloudflared")
-    procs.spawn("tunnel", [cf, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"])
-    log = LOGS / "tunnel.log"
+    log = LOGS / f"{name}.log"
+    log.write_bytes(b"")  # a URL from a previous run must not be picked up
+    procs.spawn(name, [cf, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"])
 
     def url():
         m = TRYCLOUDFLARE.findall(log.read_text(errors="replace")) if log.exists() else []
         return m[-1] if m else None
-    return _wait(url, 60, "the cloudflared quick tunnel URL", 0.5, alive=lambda: procs.procs["tunnel"].poll() is None)
+    return _wait(url, 60, f"the cloudflared quick tunnel URL ({name})", 0.5,
+                 alive=lambda: procs.procs[name].poll() is None)
 
 
 def named_tunnel_steps(tunnel: str, hostname: str) -> str:
@@ -313,6 +332,11 @@ def banner(url: str, code: str, local: str, robot_id, api_note: str | None, oper
 
 # ----------------------------------------------------------------------------------------- up / down
 def up(a: argparse.Namespace) -> int:
+    if a.mode == "hybrid":
+        sys.modules.setdefault("public", sys.modules[__name__])  # hybrid.py shares this module's state
+        from hybrid import up_hybrid  # scripts/demo/hybrid.py (TDM-110)
+
+        return up_hybrid(a)
     if STATE.exists():
         s = json.loads(STATE.read_text())
         try:
@@ -482,10 +506,10 @@ def down(_: argparse.Namespace) -> int:
         return 0
     s = json.loads(STATE.read_text())
     pg = s.get("pgids") or {}
-    if "tunnel" in pg:  # the public link goes first, even if the supervisor is stuck
+    for t in [n for n in pg if n.startswith("tunnel")]:  # the public links go first, even if the supervisor is stuck
         try:
-            os.killpg(int(pg["tunnel"]), signal.SIGTERM)
-            _log("tunnel stopped")
+            os.killpg(int(pg[t]), signal.SIGTERM)
+            _log(f"{t} stopped")
         except (ProcessLookupError, PermissionError):
             pass
     try:
@@ -516,7 +540,7 @@ def status(_: argparse.Namespace) -> int:
         return 1
     s = json.loads(STATE.read_text())
     code_file = ROOT / "access_code"
-    for k in ("url", "local", "mode", "robot_id", "ports", "pid", "pgids"):
+    for k in ("url", "robot_url", "local", "mode", "tunnel", "robot_id", "ports", "pid", "pgids"):
         if k in s:
             print(f"  {k:<10} {s[k]}")
     if code_file.exists():
@@ -528,8 +552,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     u = sub.add_parser("up")
-    u.add_argument("--mode", choices=["quick", "named"], default=None,
-                   help="quick = trycloudflare (default); named = RDF_PUBLIC_DOMAIN (the default when it is set)")
+    u.add_argument("--mode", choices=["quick", "named", "hybrid"], default=None,
+                   help="quick = trycloudflare (default); named = RDF_PUBLIC_DOMAIN (the default when it is set); "
+                        "hybrid = backend only, the web app is on Vercel (TDM-110, scripts/demo/hybrid.py)")
+    u.add_argument("--tunnel", choices=["quick", "named", "external"], default=None,
+                   help="hybrid: quick tunnels (default), one named tunnel on RDF_API_HOST / RDF_ROBOT_HOST, or "
+                        "external (RDF_API_PUBLIC_URL / RDF_ROBOT_PUBLIC_URL already serve the ports, e.g. Tailscale Funnel)")
+    u.add_argument("--expose-stdb", action="store_true",
+                   help="hybrid: serve the local DB's /v1 allow-list on the api URL (default with --stack demo)")
+    u.add_argument("--token-file", default=None,
+                   help="hybrid attach: orchestrator (or owner) SpacetimeDB token for orchestrator.endpoint")
+    u.add_argument("--robot-name", default=None, help="hybrid attach: the robot whose stream URL to announce")
     u.add_argument("--port", type=int, default=int(os.environ.get("RDF_PUBLIC_PORT", 3747)), help="the edge (tunnel target)")
     u.add_argument("--web-port", type=int, default=int(os.environ.get("RDF_PUBLIC_WEB_PORT", 0)) or None,
                    help="next start (default --port + 1)")

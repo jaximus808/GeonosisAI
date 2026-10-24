@@ -115,7 +115,11 @@ def test_local_requests_pass_ungated(run):
 def test_tunnel_needs_the_access_code(run):
     async def t(c: TestClient):
         r = await c.get("/marketplace?task=3", headers={**CF, **HTML}, allow_redirects=False)
-        assert r.status == 302 and r.headers["location"] == "/join?next=/marketplace?task=3"
+        assert r.status == 302 and r.headers["location"] == "/join?next=/marketplace%3Ftask%3D3"
+        r = await c.get("/marketplace?task=3&src=discord", headers={**CF, **HTML}, allow_redirects=False)
+        from urllib.parse import parse_qs, urlsplit
+        assert parse_qs(urlsplit(r.headers["location"]).query)["next"] == ["/marketplace?task=3&src=discord"], \
+            "next keeps every query param (was cut at the first &)"
         r = await c.get("/api/tdm64/payments/mode", headers=CF)
         assert r.status == 401 and (await r.json())["code"] == "access_code_required"
         r = await c.get("/join", headers={**CF, **HTML, "x-rdf-access": "ok"})  # a spoofed header is dropped

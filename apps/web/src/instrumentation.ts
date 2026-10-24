@@ -7,6 +7,10 @@
 // and nothing here reaches the browser.
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  // TDM-110 hybrid deploy (Vercel): with RDF_EDGE_SECRET set, server-side fetches to the orchestrator go to the
+  // URL the backend published in SpacetimeDB (after an HMAC proof) and carry the edge secret. No-op without it.
+  const { tdm110InstallFetchHook } = await import('@/lib/tdm110/edge');
+  tdm110InstallFetchHook();
   const { loadEnv, webEnv } = await import('@rdf/env');
   const e = process.env;
   loadEnv(webEnv, 'web', {

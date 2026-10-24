@@ -215,3 +215,17 @@ demo-public-down:
 	$(DEMO_PUBLIC) down
 demo-public-status:
 	$(DEMO_PUBLIC) status
+
+# TDM-110 make demo-hybrid: the BACKEND of the hybrid deploy (web app on Vercel; docs/MORNING.md "Hybrid deploy").
+# Quick tunnels (api -> edge, robot -> stream) whose URLs are published to SpacetimeDB (event_log
+# orchestrator.endpoint), so Vercel needs no change when they rotate. Needs RDF_EDGE_SECRET in .env.
+# Default --stack demo (throwaway local stack, tests); production: ARGS="--stack attach --orch-url ... ".
+.PHONY: demo-hybrid demo-hybrid-down demo-hybrid-status
+DEMO_HYBRID = cd services/orchestrator && RDF_PUBLIC_ROOT=$${RDF_HYBRID_ROOT:-$${TMPDIR:-/tmp}/rdf-demo-hybrid} \
+	uv run --quiet python ../../scripts/demo/public.py
+demo-hybrid:
+	$(DEMO_HYBRID) up --mode hybrid $(ARGS)
+demo-hybrid-down:
+	$(DEMO_HYBRID) down
+demo-hybrid-status:
+	$(DEMO_HYBRID) status

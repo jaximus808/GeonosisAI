@@ -25,6 +25,17 @@ Routes (by path):
                             the code form), /_next/static and the icons. Without the cookie: pages redirect
                             to /join?next=..., API and WebSocket calls get 401.
 
+TDM-110 hybrid backend edge (``make demo-hybrid``: the web app is on Vercel, this edge has no --web):
+  /_rdf/proof?nonce=N       200 {v, url, proof}, proof = hex HMAC-SHA256(RDF_EDGE_SECRET,
+                            "rdf-edge-proof-v1\n<nonce>\n<RDF_PUBLIC_URL>"). Vercel checks it before it trusts
+                            the URL published in event_log (``orchestrator.endpoint``), so a URL that is not
+                            this edge never receives the secret. Reveals nothing about the secret.
+  /v1/...                   as above, plus POST .../sql and .../call/<reducer> for a request carrying the edge
+                            secret (a throwaway test DB behind this edge; production uses maincloud directly)
+  everything else           the orchestrator (--orch), server-to-server only: refused (401) unless the request
+                            carries ``x-rdf-edge-secret: <RDF_EDGE_SECRET>`` (stripped before forwarding). The
+                            orchestrator itself stays on 127.0.0.1, so this edge is its only public door.
+
 "Through the tunnel" = the request carries Cloudflare's ``cf-connecting-ip`` (or a non-loopback Host).
 Only those are gated and rate limited, per client IP; the laptop itself (http://localhost:<port>) is not.
 The guard listens on 127.0.0.1 only. Upstream, Next gets ``x-rdf-access: local|ok|required`` (any client
@@ -60,6 +71,8 @@ HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", 
 WS_HANDSHAKE = {"sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol",
                 "sec-websocket-accept"}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+EDGE_SECRET_HEADER = "x-rdf-edge-secret"
+PROOF_LABEL = "rdf-edge-proof-v1"
 STATIC_OPEN = re.compile(r"^/(_next/static/|favicon\.ico$|icon|apple-icon|manifest\.webmanifest$)")
 API_ALLOW = {("GET", "/healthz"), ("POST", "/uploads/sign"), ("POST", "/uploads/sign-batch"),
              ("POST", "/modal/progress"), ("POST", "/modal/callback")}
@@ -124,6 +137,7 @@ def default_rules() -> list[Rule]:
         Rule("stdb_identity", lambda m, p, w: m == "POST" and p == "/v1/identity", 60, 60),
         Rule("stdb_connect", lambda m, p, w: w and p.startswith("/v1/"), 120, 60),
         Rule("cam_connect", lambda m, p, w: w and p.startswith("/_cam/"), 300, 60),
+        Rule("edge_proof", lambda m, p, w: p == "/_rdf/proof", 600, 60),
         Rule("api", lambda m, p, w: p.startswith("/api/"), 1500, 60),
         Rule("any", lambda m, p, w: True, 6000, 60),
     ]
@@ -176,14 +190,30 @@ class Bucket:
 # ----------------------------------------------------------------------------------------- the guard
 @dataclass
 class Config:
-    web: str
-    stdb: str
+    web: str | None
+    stdb: str | None
     db: str
     stream: str | None = None
     api: str | None = None
     api_secret: str = ""
     access_code: str = ""
     public_url: str = ""
+    orch: str | None = None   # TDM-110 hybrid: the orchestrator, for requests carrying the edge secret
+    edge_secret: str = ""     # RDF_EDGE_SECRET (shared with the Vercel web app)
+
+
+def edge_proof(secret: str, nonce: str, url: str) -> str:
+    """TDM-110: what this edge answers at /_rdf/proof (the web app computes the same and compares)."""
+    msg = f"{PROOF_LABEL}\n{nonce}\n{url.rstrip('/')}".encode()
+    return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def stdb_server_allowed(method: str, path: str, db: str) -> bool:
+    """TDM-110: extra SpacetimeDB routes for the web SERVER (edge secret only): SQL and HTTP reducer calls."""
+    if method != "POST":
+        return False
+    return path == f"/v1/database/{db}/sql" or re.fullmatch(rf"/v1/database/{re.escape(db)}/call/[A-Za-z0-9_]+",
+                                                           path) is not None
 
 
 def stdb_allowed(method: str, path: str, is_ws: bool, db: str) -> bool:
@@ -222,6 +252,12 @@ class Guard:
     def has_access(self, req: web.Request) -> bool:
         return verify_access(self.cfg.access_code, req.cookies.get(ACCESS_COOKIE))
 
+    def edge_ok(self, req: web.Request) -> bool:
+        got = req.headers.get(EDGE_SECRET_HEADER, "")
+        want = self.cfg.edge_secret
+        return bool(want and got) and hmac.compare_digest(hashlib.sha256(got.encode()).digest(),
+                                                          hashlib.sha256(want.encode()).digest())
+
     @staticmethod
     def is_ws(req: web.Request) -> bool:
         return req.headers.get("upgrade", "").lower() == "websocket"
@@ -248,6 +284,8 @@ class Guard:
             return web.json_response({"ok": True}, headers={"cache-control": "no-store"})
         if path == "/_rdf/access":
             return await self.access(req, tunneled)
+        if path == "/_rdf/proof":
+            return self.proof(req)
 
         gate = bool(self.cfg.access_code) and tunneled
         if path.startswith("/_api/"):
@@ -257,13 +295,23 @@ class Guard:
                 return self.jerr(404, "no_stream", "No robot stream is served here.")
             return await self.proxy(req, self.cfg.stream, path[len("/_cam"):] or "/", tunneled, access="n/a")
         if path.startswith("/v1/"):
-            if not stdb_allowed(method, path, ws, self.cfg.db):
+            if not self.cfg.stdb:
+                return self.jerr(404, "no_spacetimedb", "No SpacetimeDB is served here.")
+            edge = self.edge_ok(req)
+            if not (stdb_allowed(method, path, ws, self.cfg.db) or (edge and stdb_server_allowed(method, path, self.cfg.db))):
                 self.stats["blocked"] += 1
                 return self.jerr(403, "not_allowed", "This SpacetimeDB route is not exposed publicly.")
-            if gate and not self.has_access(req):
+            if gate and not edge and not self.has_access(req):
                 self.stats["refused_access"] += 1
                 return self.jerr(401, "access_code_required", "Enter the access code at /join first.")
             return await self.proxy(req, self.cfg.stdb, path, tunneled, access="n/a", ws_limit=tunneled)
+        if self.cfg.web is None:  # TDM-110 hybrid backend edge: the rest is the orchestrator, server-to-server
+            if not self.cfg.orch:
+                return self.jerr(404, "not_found", "Not found.")
+            if not self.edge_ok(req):
+                self.stats["refused_access"] += 1
+                return self.jerr(401, "edge_secret_required", "Server-to-server only.")
+            return await self.proxy(req, self.cfg.orch, path, tunneled, access="n/a")
 
         if not gate:
             access = "local" if not tunneled else "off"
@@ -275,8 +323,9 @@ class Guard:
                 self.stats["refused_access"] += 1
                 if method in ("GET", "HEAD") and not ws and not path.startswith("/api/") \
                         and "text/html" in req.headers.get("accept", ""):
-                    nxt = quote(req.path_qs, safe="/?=&")
-                    raise web.HTTPFound(f"/join?next={nxt}")
+                    nxt = quote(req.path_qs, safe="/")  # ? & = encoded, so ?next= keeps every query param
+                    # a raw Location (web.HTTPFound runs it through yarl, which un-escapes the %3F)
+                    return web.Response(status=302, headers={"location": f"/join?next={nxt}", "cache-control": "no-store"})
                 return self.jerr(401, "access_code_required", "Enter the access code at /join first.")
         return await self.proxy(req, self.cfg.web, path, tunneled, access=access)
 
@@ -307,6 +356,17 @@ class Guard:
             "SameSite=Lax", *(["Secure"] if tunneled else [])])
         return resp
 
+    # -- /_rdf/proof (TDM-110)
+    def proof(self, req: web.Request) -> web.Response:
+        nonce = req.query.get("nonce", "")
+        if not (self.cfg.edge_secret and self.cfg.public_url):
+            return self.jerr(404, "not_found", "Not found.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", nonce):
+            return self.jerr(400, "bad_nonce", "nonce: 16-128 url-safe characters")
+        return web.json_response({"v": 1, "url": self.cfg.public_url,
+                                  "proof": edge_proof(self.cfg.edge_secret, nonce, self.cfg.public_url)},
+                                 headers={"cache-control": "no-store"})
+
     # -- /_api/<secret>/...
     async def api(self, req: web.Request) -> web.StreamResponse:
         m = re.fullmatch(r"/_api/([A-Za-z0-9_-]{16,})(/.*)", req.path)
@@ -322,7 +382,7 @@ class Guard:
     # -- proxying
     def upstream_headers(self, req: web.Request, tunneled: bool, access: str) -> dict[str, str]:
         h = {k: v for k, v in req.headers.items() if k.lower() not in HOP and k.lower() not in WS_HANDSHAKE
-             and k.lower() != "x-rdf-access"}
+             and k.lower() not in ("x-rdf-access", EDGE_SECRET_HEADER)}
         if access != "n/a":
             h["x-rdf-access"] = access
         if req.headers.get("host"):
@@ -436,11 +496,13 @@ def make_app(cfg: Config) -> web.Application:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--listen", default="127.0.0.1:3747")
-    ap.add_argument("--web", required=True)
-    ap.add_argument("--stdb", required=True)
-    ap.add_argument("--db", required=True)
+    ap.add_argument("--web", default=None, help="the Next.js app; omit for the TDM-110 hybrid backend edge (--orch)")
+    ap.add_argument("--stdb", default=None)
+    ap.add_argument("--db", default="")
     ap.add_argument("--stream", default=None)
     ap.add_argument("--api", default=None)
+    ap.add_argument("--orch", default=None, help="TDM-110 hybrid: the orchestrator, for requests carrying "
+                                                  "x-rdf-edge-secret (RDF_EDGE_SECRET); needs RDF_PUBLIC_URL")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     host, port = a.listen.rsplit(":", 1)
@@ -450,12 +512,20 @@ def main() -> int:
     cfg = Config(web=a.web, stdb=a.stdb, db=a.db, stream=a.stream, api=a.api,
                  api_secret=os.environ.get("RDF_PUBLIC_API_SECRET", ""),
                  access_code=os.environ.get("RDF_PUBLIC_ACCESS_CODE", ""),
-                 public_url=os.environ.get("RDF_PUBLIC_URL", "").rstrip("/"))
+                 public_url=os.environ.get("RDF_PUBLIC_URL", "").rstrip("/"),
+                 orch=a.orch, edge_secret=os.environ.get("RDF_EDGE_SECRET", ""))
     if cfg.api and len(cfg.api_secret) < 16:
         print("--api needs RDF_PUBLIC_API_SECRET (16+ url-safe chars)", file=sys.stderr)
         return 2
-    log.info("guard on %s:%s -> web %s, stdb %s (db %s), stream %s, api %s, access code %s", host, port, a.web, a.stdb,
-             a.db, a.stream or "-", "on" if cfg.api else "off", "on" if cfg.access_code else "OFF")
+    if cfg.orch and (len(cfg.edge_secret) < 24 or not cfg.public_url):
+        print("--orch needs RDF_EDGE_SECRET (24+ chars) and RDF_PUBLIC_URL", file=sys.stderr)
+        return 2
+    if cfg.stdb and not cfg.db:
+        print("--stdb needs --db", file=sys.stderr)
+        return 2
+    log.info("guard on %s:%s -> web %s, stdb %s (db %s), stream %s, api %s, orch %s, access code %s", host, port,
+             a.web or "-", a.stdb or "-", a.db or "-", a.stream or "-", "on" if cfg.api else "off",
+             "on (edge secret)" if cfg.orch else "off", "on" if cfg.access_code else "OFF")
     web.run_app(make_app(cfg), host=host, port=int(port), print=None, access_log=None)
     return 0
 

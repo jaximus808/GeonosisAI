@@ -130,3 +130,191 @@ export function legacyScene(live: SceneLive | null): SceneSpecV1 | null {
   const ids = new Set<string>([...(live.cube ? ['cube'] : []), ...(live.plate ? ['plate'] : []), ...Object.keys(live.objects ?? {})]);
   return { ...base, objects: base.objects.filter((o) => ids.has(o.id)), regions: [] };
 }
+
+// ============================================================================================ TDM-104
+// The canonical scene spec (the JSON the orchestrator stores per ticket and the MuJoCo sim loads):
+// Python `rdf_common.scene_spec`, same field names. Everything above (`SceneSpecV1`) is the RENDER form
+// RobotTwin3D draws; `toRenderSpec(spec)` maps one to the other so the twin shows exactly what MuJoCo
+// simulates. Units: metres, radians, RGBA 0..1; world frame = robot base frame, table top = `table.top_z`.
+//   box       size = FULL extents [sx, sy, sz], pose.pos = centre
+//   cylinder  radius + FULL height,           pose.pos = centre
+//   sphere    radius,                          pose.pos = centre
+//   plate     radius + height (a fixed dish with a rim), pose.pos = its BOTTOM
+
+export type Rgba = [number, number, number, number];
+export type ScenePrimitiveV1 = 'box' | 'cylinder' | 'sphere' | 'plate';
+
+export interface SceneSpecObject {
+  id: string;
+  label?: string;
+  primitive: ScenePrimitiveV1;
+  size?: Vec3;
+  radius?: number;
+  height?: number;
+  color: Rgba;
+  rim_color?: Rgba;
+  mass?: number;
+  friction?: Vec3;
+  dynamic: boolean;
+  graspable?: boolean;
+  pose: { pos: Vec3; yaw: number };
+  randomize?: { region: string; yaw?: [number, number] };
+}
+
+export interface SceneSpecRegion {
+  x: [number, number];
+  y: [number, number];
+  color?: Rgba;
+  /** Drawn on the table (a goal zone). Spawn regions are invisible. */
+  visible?: boolean;
+  label?: string;
+}
+
+export interface SceneSpecCamera {
+  pos?: Vec3;
+  target?: Vec3;
+  fovy?: number;
+  width?: number;
+  height?: number;
+  /** 'wrist_d405' = rides the flange. */
+  mount?: string;
+}
+
+export interface SceneSuccess {
+  type: 'object_in' | 'object_on';
+  object: string;
+  target?: string;
+  region?: string;
+  margin?: number;
+  released?: boolean;
+}
+
+export interface SceneSpec {
+  version: 1;
+  name: string;
+  task: string;
+  notes?: string;
+  physics?: { timestep: number };
+  robot?: { model: string; mount: { pos: Vec3; yaw: number } };
+  table: { center: [number, number]; size: [number, number]; top_z: number; color: Rgba };
+  objects: SceneSpecObject[];
+  regions: Record<string, SceneSpecRegion>;
+  cameras: Record<string, SceneSpecCamera>;
+  success: SceneSuccess;
+  meta?: { ticket_id?: number; revision?: number; scene_id?: string; source?: string; fixes?: string[] };
+}
+
+const hex2 = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, '0');
+/** RGBA 0..1 (or an already-CSS string) -> '#rrggbb'. */
+export function cssColor(c: Rgba | number[] | string | undefined, fallback = '#b3b3b3'): string {
+  if (typeof c === 'string') return c;
+  if (!Array.isArray(c) || c.length < 3) return fallback;
+  return `#${hex2(c[0])}${hex2(c[1])}${hex2(c[2])}`;
+}
+
+const yawQuat = (yaw: number): Quat => [Math.cos(yaw / 2), 0, 0, Math.sin(yaw / 2)];
+
+/** The spoken form of the success predicate: `inside(cube, plate)` / `on_top(red_block, blue_block)`. */
+export function describeSuccess(s: SceneSuccess | undefined | null): string {
+  if (!s) return '';
+  return `${s.type === 'object_on' ? 'on_top' : 'inside'}(${s.object}, ${s.target ?? s.region})`;
+}
+
+/** Canonical spec -> what RobotTwin3D draws. Plates become fixed cylinders (centre = bottom + h/2) with a rim. */
+export function toRenderSpec(spec: SceneSpec): SceneSpecV1 {
+  const objects: SceneObject[] = spec.objects.map((o) => {
+    const [x, y, z] = o.pose.pos;
+    const quat = yawQuat(o.pose.yaw || 0);
+    const base = { id: o.id, color: cssColor(o.color), mass: o.mass, friction: o.friction?.[0], fixed: !o.dynamic };
+    if (o.primitive === 'box') {
+      const s = o.size ?? [0.04, 0.04, 0.04];
+      return { ...base, type: 'box', size: [s[0] / 2, s[1] / 2, s[2] / 2], pose: { pos: [x, y, z], quat } };
+    }
+    if (o.primitive === 'sphere') return { ...base, type: 'sphere', size: [o.radius ?? 0.02], pose: { pos: [x, y, z], quat } };
+    const h = o.height ?? 0.02;
+    if (o.primitive === 'plate') {
+      return {
+        ...base,
+        type: 'cylinder',
+        size: [o.radius ?? 0.075, h / 2],
+        fixed: true,
+        rim_color: cssColor(o.rim_color ?? o.color),
+        pose: { pos: [x, y, z + h / 2], quat },
+      };
+    }
+    return { ...base, type: 'cylinder', size: [o.radius ?? 0.02, h / 2], pose: { pos: [x, y, z], quat } };
+  });
+  const regions: SceneRegion[] = Object.entries(spec.regions ?? {})
+    .filter(([, r]) => r.visible)
+    .map(([id, r]) => ({
+      id,
+      type: 'box',
+      size: [(r.x[1] - r.x[0]) / 2, (r.y[1] - r.y[0]) / 2],
+      pos: [(r.x[0] + r.x[1]) / 2, (r.y[0] + r.y[1]) / 2, spec.table.top_z],
+      color: r.color ? cssColor(r.color) : undefined,
+    }));
+  const cameras: SceneCamera[] = Object.entries(spec.cameras ?? {}).map(([id, c]) =>
+    c.mount || id === 'wrist'
+      ? { id, fovy: c.fovy ?? 72, attach: 'wrist' }
+      : { id, pos: c.pos, target: c.target, fovy: c.fovy ?? 50, attach: 'world' },
+  );
+  const m = spec.robot?.mount;
+  return {
+    version: 1,
+    task: spec.task,
+    robot: { mount: { pos: m?.pos ?? [0, 0, 0], quat: yawQuat(m?.yaw ?? 0) } },
+    table: { size: spec.table.size, center: spec.table.center, top_z: spec.table.top_z, thickness: 0.04, color: cssColor(spec.table.color) },
+    objects,
+    regions,
+    cameras,
+    success: describeSuccess(spec.success),
+  };
+}
+
+/** One revision in `GET /tickets/{id}/scene` (orchestrator scene_api). */
+export interface SceneRevisionMeta {
+  ticket_id: number;
+  revision: number;
+  scene_id: string;
+  source: 'llm' | 'manual' | 'default' | string;
+  task?: string;
+  summary?: { name?: string; task?: string; objects?: string[]; success?: string };
+  event_id?: number;
+  by?: string;
+  fixes?: string[];
+}
+
+export type SceneDeployStatus = 'none' | 'pending' | 'loaded' | 'failed';
+
+export interface SceneDeployView {
+  deploy_id: string;
+  robot_id: number;
+  ticket_id: number;
+  revision: number;
+  scene_id: string;
+  by?: string;
+  event_id?: number;
+  status: Exclude<SceneDeployStatus, 'none'>;
+  loaded: { ok: boolean; error?: string | null; event_id?: number; objects?: string[] } | null;
+}
+
+/** `GET /tickets/{id}/scene`. */
+export interface TicketSceneResponse {
+  ticket_id: number;
+  revision: number | null;
+  scene_id: string | null;
+  spec: SceneSpec | null;
+  source: string | null;
+  success?: string;
+  revisions: SceneRevisionMeta[];
+  deployed: SceneDeployView | null;
+  last_error: { error?: string; errors?: string[]; attempts?: number } | null;
+}
+
+/** `GET /robots/{id}/scene`. */
+export interface RobotSceneResponse {
+  robot_id: number;
+  deployed: SceneDeployView | null;
+  spec: SceneSpec | null;
+  status: SceneDeployStatus;
+}

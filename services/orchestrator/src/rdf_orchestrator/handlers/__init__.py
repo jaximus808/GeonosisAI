@@ -20,3 +20,4 @@ from . import evaluate  # noqa: F401  (TDM-67 eval orchestration; after flywheel
 from . import interventions  # noqa: F401  (TDM-69 DAgger interventions: pause on failure, takeover task, recovery episode)
 from . import resume_bridge  # noqa: F401  (TDM-27 SpacetimeDB predicate -> Factory session resume)
 from . import data_droid  # noqa: F401  (TDM-33 Data Droid: started when a ticket enters review; RDF_DATA_DROID=1)
+from . import scene  # noqa: F401  (TDM-104 generate a 3D task scene for every new ticket; RDF_SCENE_AUTOGEN=0 off)

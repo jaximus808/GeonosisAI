@@ -204,6 +204,9 @@ def run(argv: list[str] | None = None) -> None:
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, lambda *_: threading.Thread(target=client.clear_estop, kwargs={"by": "SIGUSR1"}, daemon=True).start())
     client.start()
+    from .scene_watch import start_scene_watch  # TDM-104: the MuJoCo sim loads deployed scenes (no-op elsewhere)
+
+    start_scene_watch(client)
     if sys.stdin and sys.stdin.isatty():
         def _stdin() -> None:
             for line in sys.stdin:

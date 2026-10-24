@@ -44,6 +44,7 @@ import {
 import type { RobotLive } from '@/lib/robotview/types';
 import type { TwinCamera } from './RobotTwin3D';
 import { useRobotLive, type RobotLiveResult, type UseRobotLiveOptions } from '@/lib/robotview/useRobotLive';
+import { useRobotScene } from '@/lib/robotview/useRobotScene';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
@@ -469,6 +470,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
   const cam = camPick && cams.includes(camPick) ? camPick : cams[0];
 
   const sim = mode === 'sim';
+  const scene = useRobotScene(sim ? source?.id : null); // TDM-104: the deployed scene spec (sim only)
   // What the twin pane may show. Live never shows sim data; sim never claims to be live.
   let block: { title: string; body?: ReactNode; tone: 'neutral' | 'warn' | 'sim'; offerOther?: boolean } | null = null;
   if (!ready) block = { title: 'Connecting to the factory…', tone: 'neutral' };
@@ -529,7 +531,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
         <>
           <Tdm78Boundary label="3D view">
             <div className={`h-full w-full transition-opacity ${live.stale ? 'opacity-60' : ''}`}>
-              <RobotTwin3D state={twinState} camera={preset} sim={sim} ghost={twinState?.chunk_preview} className="h-full w-full" />
+              <RobotTwin3D state={twinState} camera={preset} sim={sim} spec={sim ? scene.spec : null} ghost={twinState?.chunk_preview} className="h-full w-full" />
             </div>
           </Tdm78Boundary>
           {!live.state && (

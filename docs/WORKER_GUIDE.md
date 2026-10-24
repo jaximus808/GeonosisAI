@@ -219,3 +219,10 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **HUD (TDM-99):** `<RobotHud robotId ticketId? state />`, passed into `RobotView` via `hud`.
 - **Until a dependency lands,** code against these signatures with a recorded fixture under `apps/web/src/lib/robotview/fixtures/`.
 - **The MuJoCo sim robot** (`make demo`) is being built off the board. Check `git log` for `mujoco`.
+
+## Scene spec (TDM-104): one 3D task scene per ticket, for the MuJoCo sim and the twin
+- **Schema:** `services/common/src/rdf_common/scene_spec.py` (`validate(raw) -> spec` or `SceneSpecError(.errors)`, `evaluate_success(spec, poses, held=)`, `describe_success` -> `inside(cube, plate)` / `on_top(a, b)`, `sample_poses`). Example: `sim_assets/scenes/cube_plate.json`. Web: `SceneSpec` + `toRenderSpec()` in `apps/web/src/lib/robotview/scene.ts` (the twin draws the render form).
+- **Storage (event_log, actor `orchestrator:scene`):** `scene.created` {ticket_id, revision, scene_id `t<ticket>r<rev>`, source, spec}, `scene.generation_failed`, `scene.deployed` {robot_id, deploy_id, spec}, `scene.loaded` (robot) {deploy_id, ok, error?}.
+- **Orchestrator:** `GET /tickets/{id}/scene[?revision=]`, `POST /tickets/{id}/scene/generate {hint?}`, `PUT /tickets/{id}/scene {spec}`, `POST /tickets/{id}/scene/deploy {revision?, robot_id?}` (operator key; sim robots only), `GET /robots/{id}/scene`, `POST /scenes/validate`, `GET /scenes/default`. Web proxy: `/api/tdm104/...` (operator login for the writes).
+- **Robot:** `rdf_robot_client/scene_watch.py` applies the newest `scene.deployed` for its robot through `MujocoSimArm.load_scene(spec)` (hot swap, waits for any running job). `/ws/state` `scene.objects = {id: {pos, quat}}` carries live poses; geometry comes from the spec (`useRobotScene(robotId)`).
+- **Proof:** `cd services/orchestrator && RDF_LLM_BACKEND=claude_code uv run python ../../spikes/tdm-104/prove_scene_e2e.py` (local SpacetimeDB on :3104).

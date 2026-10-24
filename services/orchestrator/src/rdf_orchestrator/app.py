@@ -101,6 +101,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(reset_router)
     from .admin_llm_api import admin_llm_router  # GET/PUT /admin/llm: switch the LLM backend (locked to api in production)
     app.include_router(admin_llm_router)
+    from .scene_api import scene_router  # TDM-104: /tickets/{id}/scene[/generate|/deploy], /robots/{id}/scene, /scenes/*
+    app.include_router(scene_router)
     # TDM-68: the dashboard (apps/web, :3737) reads GET routes from the browser (decision trail,
     # /media/sign). GET only, listed origins only (RDF_WEB_ORIGINS adds more, comma-separated).
     import os

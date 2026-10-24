@@ -168,6 +168,12 @@ function Driver({ stateRef, ghostRef, smooth, objectsRef }: {
       }
       const lp = livePose(live, o.id);
       if (!lp) continue;
+      if (o.fixed) {
+        // TDM-104: fixed objects (plates, fixtures) never move: keep the spec pose (the sim reports a plate's
+        // body origin, its bottom, while the render pose is its centre)
+        cur.live = true;
+        continue;
+      }
       // the legacy `plate` field carries the plate's top surface height; keep the spec's z for it
       const z = o.id === 'plate' && !live?.objects?.plate ? o.pose.pos[2] : lp.pos[2];
       const k = cur.live ? a : 1;

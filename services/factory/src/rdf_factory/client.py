@@ -231,7 +231,7 @@ class FactoryClient:
     async def start_session(self, role: str, brief: str, env: dict | None = None, repo_ref: str = "", *,
                             ticket_id: int = 0, name: str = "", mode: str | None = None,
                             write_roots: list[str] | None = None, allow_commands: list[str] | None = None,
-                            finish_on_idle: bool = False, max_turns: int = 0, autonomy: str = "low") -> TurnResult:
+                            finish_on_idle: bool = False, max_turns: int = 0, autonomy: str = "off") -> TurnResult:
         """Create the agent_session row and a Factory session, run the first turn with ``brief``.
 
         ``env``: extra context passed to the droid (JSON). ``repo_ref``: local = checkout dir (default

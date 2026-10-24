@@ -7,6 +7,7 @@ const NAV = [
   { href: '/agents', label: 'Agents' },
   { href: '/events', label: 'Event log' },
   { href: '/marketplace', label: 'Tasks' },
+  { href: '/earnings', label: 'Earnings' }, // TDM-64
 ];
 
 export function Header() {

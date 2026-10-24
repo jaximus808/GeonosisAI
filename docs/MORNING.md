@@ -38,3 +38,7 @@ The build ran overnight from the Tandem board (`HL4RZKEQ`, http://127.0.0.1:7891
 
 ## Secrets added to `.env` overnight (never printed)
 `SPACETIME_*`, `MCP_TOKEN`, `RDF_STREAM_TOKEN_SECRET`, `RDF_MEDIA_SIGNING_KEY`, `POLICY_SERVER_TOKEN`, `RDF_OPERATOR_KEY`, `RDF_OPERATOR_PASSCODE` (read it from `.env` to log in at `/ops/login`), the VAPID push keys (don't regenerate them), and `MCP_OAUTH_SECRET` if set.
+
+## Board loose ends
+- **TDM-41 (policy server)** is still `executing` with a stale claim. Its worker went quiet after committing the code (e9082b9, 15 unit tests; TDM-40 verified loading its checkpoints through this server path). It's unproven on a deployed endpoint until the Modal deploy is approved. Close it on the board after the deploy and one `/policy/activate` hot-swap check.
+- **TDM-81 (Claude connector)** is deliberately left `executing`: it's ready, and you finish it by deploying and connecting claude.ai (`docs/connector.md`).

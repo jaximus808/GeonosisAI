@@ -10,8 +10,21 @@ configurable success probability, and the robot asks for a scene reset after eve
 EVERYTHING IT WRITES IS FAKE AND SAYS SO:
   * robot:       name ``fake-...``, embodiment ``fake_yam``, adapter_version ``fake-tdm28``,
                  camera_config_json ``{"fake": true, ...}``
-  * episode:     storage_uri / actions_uri point at ``.../FAKE-ep-*`` placeholder files,
-                 cameras_json ``{"wrist": {"uri": ..., "fake": true}, ...}``
+  * episode:     a real-format episode (TDM-25 ``rdf_common.episode_format``) of SYNTHETIC data, in
+                 ``<media-dir>/FAKE-ep-*/`` (storage_uri): ``actions.parquet`` written with
+                 ``write_actions`` (metadata ``fixture: true``, ``fake: true``, note ``[FAKE] ...``) and
+                 one small cartoon mp4 per camera (``exo.mp4``, ``wrist.mp4``) rendered by
+                 ``services/orchestrator/tests/tdm25_fixtures.py``. cameras_json is
+                 ``{"exo": {"uri": "file://...", "fake": true}, "wrist": {...}}``. URIs are local
+                 ``file://`` paths: the reviewer reads them directly, nothing is uploaded.
+                 Clips (rendered once per process, then hard-linked): ``clean`` (10 s pick-and-place,
+                 human-driven; clean_teleop), ``takeover`` (11.5 s: policy misses the grasp, human takes
+                 over at 4.0 s and hands back at 9.8 s; recovery_takeover, takeover_ts/handback_ts and
+                 control_source match), ``missed_grasp`` (6 s, policy; failed eval trials). Successful
+                 eval trials use ``clean`` driven by the policy. The episode's duration_ms is the clip's
+                 length; --trial-ms / --teleop-ms only set how long the simulated job takes.
+                 The production reviewer rejects ``fixture: true``; the harness review config
+                 (tests/integration/review_fixtures.yaml) allows it.
   * eval_trial:  failure_note always starts with ``[FAKE]`` (successes too)
   * robot_command.result_json and every event it appends: ``"fake": true``
   * it refuses any non-local SpacetimeDB host unless --allow-remote is passed, and refuses
@@ -48,7 +61,6 @@ import queue
 import random
 import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import threading
@@ -62,6 +74,42 @@ from urllib.parse import urlparse
 FAKE_TAG = "[FAKE]"
 JOB_TYPES = {"run_baseline", "run_eval", "start_teleop", "reset_request", "home", "load_checkpoint"}
 FAILURE_MODES = ["missed grasp", "dropped object", "collision with bin rim", "timeout before place"]
+FAKE_CAMERAS = ("exo", "wrist")
+# The TDM-25 synthetic-episode generator (cartoon video + min-jerk joints with encoder noise). It is
+# test code in the orchestrator package; the fake robot only ever runs from this repo.
+_FIXTURES_DIR = Path(__file__).resolve().parents[3] / "orchestrator" / "tests"
+# policy closes beside the cup (a missed grasp), opens and returns home; cup untouched
+MISSED_GRASP_PLAN = [
+    (0.5, "home", 1.0, False), (2.5, "above_cup", 1.0, False), (3.2, "beside_cup", 1.0, False),
+    (3.6, "beside_cup", 0.0, False), (4.0, "beside_cup", 0.0, False), (6.0, "home", 1.0, False),
+]
+
+
+def _fixtures():
+    try:
+        import tdm25_fixtures
+    except ImportError:
+        if str(_FIXTURES_DIR) not in sys.path:
+            sys.path.append(str(_FIXTURES_DIR))
+        try:
+            import tdm25_fixtures
+        except ImportError as e:
+            raise RuntimeError(f"fake robot episodes need {_FIXTURES_DIR / 'tdm25_fixtures.py'} "
+                               f"(or pass --no-episodes): {e}") from e
+    return tdm25_fixtures
+
+
+@dataclass
+class _Clip:
+    """One synthetic recording, rendered once: sampled plan + one mp4 per camera."""
+    name: str
+    t: Any  # (N,) seconds from the start
+    joints: Any  # (N, 6) commanded joints, rad
+    pix: Any
+    grip: Any
+    takeover_s: float | None
+    handback_s: float | None
+    videos: dict[str, tuple[Path, int]]  # camera -> (mp4, frames)
 
 
 def _log(msg: str, **fields: Any) -> None:
@@ -112,7 +160,8 @@ class FakeRobot:
         self.abort = threading.Event()
         self.stopping = threading.Event()
         self.has_create_episode = False
-        self._placeholder: Path | None = None
+        self._clips: dict[str, _Clip] = {}
+        self._clips_lock = threading.Lock()
         self._estop_timer: threading.Timer | None = None
         self._scale = cfg.time_scale
 
@@ -143,7 +192,11 @@ class FakeRobot:
             # TODO(TDM-11): create_episode is not in the published module yet; trials are
             # recorded with episode_id 0 until it lands.
             _log("create_episode reducer missing: trials will have no episode rows (TODO TDM-11)")
-        cams = {"fake": True, "tag": FAKE_TAG, "cameras": {"wrist": "fake://wrist", "front": "fake://front"}}
+        if self.cfg.episodes:
+            _fixtures()  # fail at boot, not on the first episode
+            if not shutil.which("ffmpeg"):
+                raise RuntimeError("fake robot episodes need ffmpeg to render the camera mp4s (or pass --no-episodes)")
+        cams = {"fake": True, "tag": FAKE_TAG, "cameras": {c: f"fake://{c}" for c in FAKE_CAMERAS}}
         self.call("register_robot", self.cfg.name, "fake_yam", "fake-tdm28", json.dumps(cams))
         rows = self.http.sql(f"SELECT * FROM robot WHERE name = '{self.cfg.name}'")
         if not rows:
@@ -305,62 +358,115 @@ class FakeRobot:
         return int(self.rng.uniform(lo, hi))
 
     # ---- media + episodes
-    def _placeholder_mp4(self) -> Path:
-        if self._placeholder and self._placeholder.exists():
-            return self._placeholder
-        d = self.cfg.media_dir
-        d.mkdir(parents=True, exist_ok=True)
-        p = d / "FAKE-placeholder.mp4"
-        if not p.exists() and shutil.which("ffmpeg"):
-            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-                            "color=c=magenta:s=64x48:d=1:r=5", "-pix_fmt", "yuv420p", str(p)],
-                           check=False, timeout=30)
-        if not p.exists():
-            p.write_bytes(b"FAKE placeholder video (TDM-28 fake robot; ffmpeg unavailable)\n")
-        self._placeholder = p
-        return p
+    def _clip(self, name: str) -> _Clip:
+        """Render a synthetic clip once per process (``<media-dir>/FAKE-clips/<name>-<camera>.mp4``)."""
+        with self._clips_lock:
+            if name in self._clips:
+                return self._clips[name]
+            fx = _fixtures()
+            plan, tk, hb = {
+                "clean": (fx.CLEAN_PLAN, None, None),
+                "takeover": (fx.TAKEOVER_PLAN, fx.TAKEOVER_AT_S, fx.HANDBACK_AT_S),
+                "missed_grasp": (MISSED_GRASP_PLAN, None, None),
+            }[name]
+            t, joints, pix, grip, attached = fx.sample_plan(plan)
+            d = self.cfg.media_dir / "FAKE-clips"
+            d.mkdir(parents=True, exist_ok=True)
+            videos = {}
+            for i, cam in enumerate(FAKE_CAMERAS):
+                mp4 = d / f"{name}-{cam}.mp4"
+                # same cartoon for both cameras; the "wrist" copy gets a little pixel jitter so they differ
+                frames = fx.render_video(mp4, t, pix, grip, attached, seed=i, jitter_px=0.5 * i)
+                videos[cam] = (mp4, frames)
+            clip = _Clip(name, t, joints, pix, grip, tk, hb, videos)
+            self._clips[name] = clip
+            _log("rendered fake clip", clip=name, seconds=round(float(t[-1]), 2), frames=len(t))
+            return clip
 
-    def _make_episode(self, row: dict, kind: str, *, duration_ms: int, success: bool | None,
-                      checkpoint_uri: str | None, task_id: int = 0, contributor_id: int = 0,
-                      takeover: bool = False) -> int:
-        """Write placeholder media + an episode row; returns the episode id (0 if not possible).
+    def _write_episode(self, d: Path, clip: _Clip, control_source: str, seed: int) -> dict:
+        """actions.parquet (rdf_common.episode_format) + per-camera mp4 links for one episode, on the
+        wall clock (the recording "ended" now). Returns the create_episode fields."""
+        import numpy as np
+        from rdf_common.episode_format import make_metadata, write_actions
 
-        cameras_json is ``{camera: {"uri": ..., "fake": true}}`` (the shape diagnose reads). URIs are
-        ``file://`` paths on this machine.
-        TODO(TDM-4/TDM-48): upload through the orchestrator's signed-URL media API like the real
-        recorder, so storage_uri is a ``modal-vol://``/``s3://`` URI other services can fetch.
-        """
-        if not (self.cfg.episodes and self.has_create_episode):
-            return 0
-        tid = int(row.get("ticket_id") or 0)
-        if not tid:
-            return 0
-        ep_key = f"FAKE-ep-{uuid.uuid4().hex[:12]}"
-        d = self.cfg.media_dir / ep_key
-        d.mkdir(parents=True, exist_ok=True)
-        src = self._placeholder_mp4()
-        cams = {}
-        for cam in ("wrist", "front"):
+        fx = _fixtures()
+        t, n = clip.t, len(clip.t)
+        t0_us = int(time.time() * 1_000_000) - int(round(float(t[-1]) * 1e6))
+        t_us = (t0_us + np.rint(t * 1e6)).astype(np.int64)
+        src = np.array([control_source] * n, dtype=object)
+        if clip.takeover_s is not None:
+            src[t < clip.takeover_s] = "policy"
+            src[t >= clip.takeover_s] = "human"
+            if clip.handback_s is not None:
+                src[t >= clip.handback_s] = "policy"
+        cams, meta_cams = {}, {}
+        for cam, (mp4, frames) in clip.videos.items():
             dst = d / f"{cam}.mp4"
             try:
-                os.link(src, dst)
+                os.link(mp4, dst)
             except OSError:
-                shutil.copyfile(src, dst)
+                shutil.copyfile(mp4, dst)
             cams[cam] = {"uri": dst.as_uri(), "fake": True}
-        frames = max(1, duration_ms * 30 // 1000)
-        (d / "actions.json").write_text(json.dumps({
-            "fake": True, "note": "TDM-28 fake robot: no real actions", "frames": frames}))
-        now_us = int(time.time() * 1_000_000)
-        takeover_ts = now_us - duration_ms * 600 if takeover else None
-        handback_ts = now_us - duration_ms * 200 if takeover else None
+            meta_cams[cam] = {"frames": frames, "fps": fx.FPS, "width": fx.W, "height": fx.H, "fake": True}
+        rows = {
+            "frame_index": np.arange(n, dtype=np.int32),
+            "timestamp_us": t_us,
+            "joint_pos": fx.measured(clip.joints, seed).astype(np.float32),
+            "gripper_pos": clip.grip.astype(np.float32),
+            "ik_target_pos": np.column_stack([clip.pix / 1000.0, np.full(n, 0.1)]).astype(np.float32),
+            "ik_target_quat": np.tile([1.0, 0.0, 0.0, 0.0], (n, 1)).astype(np.float32),
+            "gripper_cmd": clip.grip.astype(np.float32),
+            "control_source": list(src),
+            "joint_cmd": clip.joints.astype(np.float32),
+        }
+        meta = make_metadata(fps=fx.FPS, joint_names=fx.JOINTS, embodiment="fake_yam", cameras=meta_cams,
+                             fixture=True, note=f"{FAKE_TAG} TDM-28 fake robot, synthetic '{clip.name}' clip "
+                                                "(tdm25_fixtures cartoon), not real robot data")
+        meta["fake"] = True
+        pq = d / "actions.parquet"
+        write_actions(pq, rows, meta)
+        return {
+            "actions_uri": pq.as_uri(), "cameras": cams, "frames": n,
+            "duration_ms": int(round((int(t_us[-1]) - int(t_us[0])) / 1000)),
+            "takeover_ts": None if clip.takeover_s is None else t0_us + int(round(clip.takeover_s * 1e6)),
+            "handback_ts": None if clip.handback_s is None else t0_us + int(round(clip.handback_s * 1e6)),
+        }
+
+    def _make_episode(self, row: dict, kind: str, *, success: bool | None,
+                      checkpoint_uri: str | None, task_id: int = 0, contributor_id: int = 0) -> tuple[int, int]:
+        """Write a synthetic real-format episode + its episode row; returns (episode id, duration_ms),
+        id 0 if not possible.
+
+        Clip by kind: recovery_takeover -> ``takeover``; other teleop -> ``clean`` (human);
+        eval/baseline -> ``clean`` (policy) on success, ``missed_grasp`` (policy) on failure.
+        TODO(TDM-4/TDM-48): upload through the orchestrator's signed-URL media API like the real
+        recorder, so storage_uri is a ``modal-vol://``/``s3://`` URI other machines can fetch.
+        """
+        if not (self.cfg.episodes and self.has_create_episode):
+            return 0, 0
+        tid = int(row.get("ticket_id") or 0)
+        if not tid:
+            return 0, 0
+        ep_hex = uuid.uuid4().hex[:12]
+        ep_key = f"FAKE-ep-{ep_hex}"
+        d = self.cfg.media_dir / ep_key
+        d.mkdir(parents=True, exist_ok=True)
+        if kind == "recovery_takeover":
+            clip, source = self._clip("takeover"), "human"
+        elif kind in ("eval", "baseline"):
+            clip, source = self._clip("clean" if success else "missed_grasp"), "policy"
+        else:
+            clip, source = self._clip("clean"), "human"
+        # per-episode encoder noise from the uuid, not self.rng (keeps the seeded trial outcomes unchanged)
+        ep = self._write_episode(d, clip, source, seed=int(ep_hex, 16) % (2 ** 31))
         self.call(
             "create_episode", tid, task_id, contributor_id, kind,
-            d.as_uri(), (d / "actions.json").as_uri(),
-            json.dumps(cams),
-            frames, duration_ms, takeover_ts, handback_ts, success, checkpoint_uri,
+            d.as_uri(), ep["actions_uri"],
+            json.dumps(ep["cameras"]),
+            ep["frames"], ep["duration_ms"], ep["takeover_ts"], ep["handback_ts"], success, checkpoint_uri,
         )
         found = self.http.sql(f"SELECT * FROM episode WHERE storage_uri = '{d.as_uri()}'")
-        return int(found[0]["id"]) if found else 0
+        return (int(found[0]["id"]) if found else 0), ep["duration_ms"]
 
     def _request_reset(self, row: dict, **ctx: Any) -> None:
         self.event("robot.reset_requested", ticket_id=row.get("ticket_id"), command_id=row["id"], **ctx)
@@ -404,7 +510,7 @@ class FakeRobot:
             self._sleep(dur)
             ok = self.rng.random() < p
             note = f"{FAKE_TAG} success" if ok else f"{FAKE_TAG} {self.rng.choice(FAILURE_MODES)}"
-            ep = self._make_episode(row, ep_kind, duration_ms=dur, success=ok, checkpoint_uri=ckpt)
+            ep, _ = self._make_episode(row, ep_kind, success=ok, checkpoint_uri=ckpt)
             if run is not None:
                 self.call("record_eval_trial", int(run["id"]), i, ok, dur, ep, note)
             outcomes.append({"index": i, "success": ok, "note": note, "episode_id": ep})
@@ -427,11 +533,10 @@ class FakeRobot:
         kind = payload.get("kind") or "clean_teleop"
         dur = self._rand_ms(self.cfg.teleop_ms)
         self._sleep(dur)
-        ep = self._make_episode(row, kind, duration_ms=dur, success=True, checkpoint_uri=None,
-                                task_id=int(payload.get("task_id") or 0),
-                                contributor_id=int(payload.get("contributor_id") or 0),
-                                takeover=kind == "recovery_takeover")
-        return {"episode_id": ep, "kind": kind, "duration_ms": dur}
+        ep, ep_ms = self._make_episode(row, kind, success=True, checkpoint_uri=None,
+                                       task_id=int(payload.get("task_id") or 0),
+                                       contributor_id=int(payload.get("contributor_id") or 0))
+        return {"episode_id": ep, "kind": kind, "duration_ms": ep_ms or dur, "session_ms": dur}
 
     def _do_reset_request(self, row: dict, payload: dict) -> dict:
         self._request_reset(row, requested_by=row.get("issued_by"))

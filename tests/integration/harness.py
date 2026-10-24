@@ -15,7 +15,9 @@ What ``up`` / the pytest fixture does:
      allow-lists them with ``spacetime call register_service_identity``. Tokens are written to
      $TMPDIR/tdm-28/run-<port>/tokens/*.token (0600) and never printed.
   4. Starts ``rdf-robot-client --fake`` (services/robot-client) as the robot_client identity.
-  5. Optionally starts ``rdf-orchestrator`` pointed at the same DB (``--with-orchestrator``).
+  5. Optionally starts ``rdf-orchestrator`` pointed at the same DB (``--with-orchestrator``), with
+     ``RDF_REVIEW_CONFIG=tests/integration/review_fixtures.yaml`` (the TDM-25 reviewer accepts the
+     fake robot's synthetic episodes and skips the Claude judgement).
 
 Point your own service at it with the env lines ``up`` prints (SPACETIME_HOST etc.).
 Logs: $TMPDIR/tdm-28/run-<port>/logs/{spacetime,fake-robot,orchestrator}.log
@@ -38,6 +40,9 @@ from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parents[2]
 MODULE_SRC = REPO / "spacetime" / "spacetimedb"
+# The orchestrator started by the harness reviews episodes with this (RDF_REVIEW_CONFIG): it allows
+# the fake robot's synthetic fixture:true episodes and turns the Claude judgement off (a stub).
+REVIEW_CONFIG = Path(__file__).resolve().parent / "review_fixtures.yaml"
 DEFAULT_PORT = int(os.environ.get("TDM28_PORT", "3028"))
 DEFAULT_DB = os.environ.get("TDM28_DB", "tdm28loop")
 ROOT = Path(os.environ.get("TDM28_ROOT", Path(tempfile.gettempdir()) / "tdm-28"))
@@ -178,7 +183,9 @@ class LocalStack:
         return p
 
     def spawn_orchestrator(self, port: int = 8028, extra_env: dict | None = None) -> subprocess.Popen:
-        env = {**self.env("orchestrator"), "PORT": str(port), **(extra_env or {})}
+        # TDM-25 reviewer: harness config (fixtures allowed, Claude judgement stubbed off).
+        env = {**self.env("orchestrator"), "PORT": str(port), "RDF_REVIEW_CONFIG": str(REVIEW_CONFIG),
+               **(extra_env or {})}
         p = self._spawn("orchestrator", ["uv", "run", "--quiet", "--project", str(REPO / "services" / "orchestrator"),
                                          "rdf-orchestrator", "--host", "127.0.0.1", "--port", str(port)], env=env)
         wait_for(lambda: json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1).read())

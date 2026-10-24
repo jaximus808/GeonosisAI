@@ -1,0 +1,41 @@
+# TDM-28 harness review config: the TDM-25 reviewer settings for the full-loop test ONLY.
+# tests/integration/harness.py points the harness orchestrator at it (RDF_REVIEW_CONFIG); production
+# uses services/orchestrator/config/review.yaml. Same thresholds as production, except:
+#   * fixtures.allow: true   the fake robot's episodes are synthetic (parquet metadata fixture:true)
+#   * claude.enabled: false  STUB for the harness: no Claude vision call (no API spend, deterministic).
+#                            The reviewer then accepts on deterministic checks + readable camera video
+#                            and records decided_by "all_passed" with claude {"skipped": "disabled in config"}.
+version: 1
+
+duration:
+  min_s: 2.0
+  max_s: 120.0
+  tolerance_s: 0.5
+
+frame_drops:
+  max_ratio: 0.02
+  max_frame_count_mismatch: 2
+
+jerk:
+  max_rms_rad_s3: 60.0
+  window: 9
+
+takeover:
+  kinds: [recovery_takeover]
+  min_pre_takeover_s: 0.5
+  min_takeover_s: 1.0
+  ts_tolerance_s: 0.5
+  min_control_source_agreement: 0.9
+
+success:
+  required_kinds: [clean_teleop, recovery_takeover, purchased]
+
+fixtures:
+  allow: true         # harness only: accept the fake robot's synthetic (fixture:true) episodes
+
+claude:
+  enabled: false      # harness stub: skip the real Claude judgement
+  model: claude-opus-5-5
+  effort: high
+  frames: 3
+  frame_width: 512

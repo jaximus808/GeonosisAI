@@ -13,6 +13,7 @@
 import { t, SenderError } from 'spacetimedb/server';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { requireRole, requireService } from '../auth';
+import { logEvent } from '../event_log'; // TDM-15
 import { DEFAULT_RUN_SETTINGS, ROBOT_STATUSES, TICKET_STATUSES, oneOf } from '../enums';
 
 type TicketStatus = (typeof TICKET_STATUSES)[number];
@@ -41,14 +42,8 @@ const TDM9_TICKET_TRANSITIONS: Record<TicketStatus, readonly TicketStatus[]> = {
 const TDM9_LOOP_TARGETS: readonly TicketStatus[] = ['diagnose', 'plan_data', 'dispatch'];
 
 function tdm9Log(ctx: RdfCtx, actor: string, type: string, payload: Record<string, unknown>) {
-  ctx.db.eventLog.insert({
-    id: 0n,
-    ts: ctx.timestamp,
-    actor,
-    type,
-    payload_json: JSON.stringify(payload, (_k, v) =>
-      typeof v === 'bigint' ? (v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v.toString()) : v),
-  });
+  logEvent(ctx, actor, type, JSON.stringify(payload, (_k, v) =>
+    typeof v === 'bigint' ? (v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v.toString()) : v)); // TDM-15: sole event_log writer
 }
 
 function tdm9ParseObject(field: string, text: string): Record<string, unknown> {

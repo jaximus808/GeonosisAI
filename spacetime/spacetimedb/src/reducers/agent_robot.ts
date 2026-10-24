@@ -36,6 +36,7 @@
 import { t, SenderError } from 'spacetimedb/server';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { requireRole, requireService, serviceRole } from '../auth';
+import { logEvent } from '../event_log'; // TDM-15
 import {
   AGENT_ROLES,
   AGENT_STATUSES,
@@ -70,13 +71,7 @@ const TDM13_CLAIMANT_TYPES = [
 const TDM13_OPEN_COMMAND = ['issued', 'acked'];
 
 function tdm13Log(ctx: RdfCtx, actor: string, type: string, payload: unknown) {
-  ctx.db.eventLog.insert({
-    id: 0n,
-    ts: ctx.timestamp,
-    actor,
-    type,
-    payload_json: JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)),
-  });
+  logEvent(ctx, actor, type, JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))); // TDM-15: sole event_log writer
 }
 
 function tdm13ParseJson(field: string, text: string): unknown {

@@ -8,4 +8,4 @@
 export const APPEND_ONLY_ENFORCED = false;
 
 /** The command that prints the same count and chain hash from the terminal. */
-export const VERIFY_COMMAND = 'python3 -I spikes/tdm-77-events/chain_hash_ref.py';
+export const VERIFY_COMMAND = 'python3 -I scripts/verify_event_log.py';

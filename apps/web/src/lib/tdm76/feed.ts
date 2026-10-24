@@ -1,16 +1,16 @@
 'use client';
 
-// TDM-76: the agents panel's data, behind one small adapter.
+// TDM-76: the agents panel's view model, built on TDM-35's normalised feed.
 //
-// A FeedSource is "agent_session rows + agent-related event rows", already normalised. Today it
-// comes from two direct subscriptions (agent_session, event_log) or from a recorded droid jsonl
-// (replay). When TDM-35's normalised feed lands, swap useLiveFeedSource for its hook: nothing
-// below the FeedSource line needs to change.
+// useAgentFeed (apps/web/src/lib/agentfeed) does the subscriptions (agent_session + event_log) or the
+// replay of a recorded run, and normalises every row into AgentFeed v1. toPanelSource turns that
+// into the panel's own small shape (sessions + per-session events keyed by their source type), and
+// the builders below group droid events into turns, match tool results to calls, and find the
+// moments a SpacetimeDB update woke a droid.
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRows } from '@/lib/spacetime/hooks';
-import { parsePayload } from '@/lib/eventlog/classify';
-import { parsePredicate, toNode, type PredicateNode } from './predicate';
+import { useAgentFeed as useTdm35Feed, type AgentFeed as Tdm35Feed, type AgentView as Tdm35Agent } from '@/lib/agentfeed/useAgentFeed';
+import { toNode, type PredicateNode } from './predicate';
 
 // ------------------------------------------------------------------------------ source shape
 
@@ -25,212 +25,92 @@ export type FeedSession = {
   currentStep: string;
   waitingFor?: PredicateNode;
   waitingForRaw?: string;
-  resumePayload?: unknown;
+  /** First event seen for the session (agent_session.created_at is not in the feed). */
   createdUs: number;
   lastUpdateUs: number;
-  /** Rebuilt from events because there is no agent_session row (replay of a recording). */
-  derived?: boolean;
 };
 
 export type FeedEvent = {
   key: string;
-  /** event_log id, when the row came from event_log. */
-  id?: number;
   tsUs: number;
   actor: string;
-  /** event_log type, e.g. droid.tool_call, agent.resumed, planner.data_plan. */
+  /** Source type, e.g. droid.tool_call, agent.resumed. */
   type: string;
+  /** For droid.* rows the TDM-30 v1 event shape ({agent_session_id, turn, text, tool, data, ...}); else the payload. */
   payload: Record<string, unknown>;
 };
 
-export type FeedSource = {
+export type PanelSource = {
   ready: boolean;
   mode: 'live' | 'replay';
+  error?: string;
+  replaySource?: string[];
   sessions: FeedSession[];
   events: FeedEvent[];
-  /** Replay only: which recording and how far through it we are. */
-  replay?: { file: string; shown: number; total: number; speed: number };
+  services: Tdm35Agent[];
 };
 
 const num = (v: unknown, d = 0): number => (typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : typeof v === 'string' && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 
-function jsonArr(s: string): string[] {
-  try {
-    const v = JSON.parse(s);
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
+/** Events kept per agent. The panel shows whole turn timelines, so ask for plenty. */
+const PANEL_LIMIT = 400;
+
+export function toPanelSource(feed: Tdm35Feed): Omit<PanelSource, 'ready' | 'mode' | 'error'> {
+  const sessions: FeedSession[] = [];
+  const events: FeedEvent[] = [];
+  const services: Tdm35Agent[] = [];
+  for (const a of feed.agents) {
+    if (a.kind === 'service') {
+      services.push(a);
+      continue;
+    }
+    const sid = a.agent_session_id ?? -1;
+    const first = a.events[0]?.ts_us;
+    let wf = a.waiting_for && typeof a.waiting_for === 'object' ? (a.waiting_for as object) : undefined;
+    let status = a.status;
+    if (feed.replay) {
+      // A recording has no agent_session row: take status and the predicate from the droid's own events.
+      const turnEvents = a.events.filter((e) => e.type === 'droid.turn_started' || e.type === 'droid.turn_completed');
+      const lastTurn = turnEvents[turnEvents.length - 1];
+      if (lastTurn?.type === 'droid.turn_started') status = 'running';
+      else if (lastTurn) status = String(lastTurn.data.status ?? status);
+      const lastWait = [...a.events].reverse().find((e) => e.type === 'droid.waiting_for');
+      if (!wf && status === 'waiting_for' && lastWait && typeof lastWait.data.predicate === 'object') wf = lastWait.data.predicate as object;
+    }
+    sessions.push({
+      id: sid,
+      ticketId: a.ticket_id ?? 0,
+      role: a.role,
+      // TDM-35 labels are '<name> (<role words> #<id>)'; the card shows role and id itself.
+      name: a.label.replace(/\s*\([^()]*#\d+\)$/, ''),
+      factorySessionId: a.factory_session_id ?? undefined,
+      factorySessionIds: a.factory_session_ids,
+      status,
+      currentStep: a.current_step,
+      waitingFor: toNode(wf),
+      waitingForRaw: wf && typeof (wf as { raw?: unknown }).raw === 'string' ? (wf as { raw: string }).raw : undefined,
+      createdUs: first ?? a.last_update_us,
+      lastUpdateUs: a.last_update_us,
+    });
+    for (const e of a.events) {
+      const payload: Record<string, unknown> = e.type.startsWith('droid.')
+        ? { agent_session_id: sid, turn: e.turn, text: e.text, tool: e.tool, factory_session_id: e.data.factory_session_id ?? null, role: e.data.role, data: e.data }
+        : e.data;
+      events.push({ key: e.id, tsUs: e.ts_us, actor: e.actor, type: e.type, payload });
+    }
   }
+  return { sessions, events, services, replaySource: feed.replay_source };
 }
 
-function jsonAny(s: string | undefined): unknown {
-  if (!s) return undefined;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
-}
-
-/** Rows this panel cares about: droid steps, session lifecycle, and the orchestrator's own agents. */
-export function isAgentEventType(type: string): boolean {
-  return ORCH_AGENTS.some((a) => a.match(type)) || type.startsWith('droid.') || type.startsWith('agent.');
-}
-
-/** Live source: direct subscriptions to agent_session and event_log (until TDM-35 lands). */
-export function useLiveFeedSource(): FeedSource {
-  const [sessionRows, sReady] = useRows('agentSession');
-  const [eventRows, eReady] = useRows('eventLog');
-
-  const sessions = useMemo<FeedSession[]>(
-    () =>
-      sessionRows.map((r) => {
-        const raw = r.waitingForJson ?? undefined;
-        return {
-          id: Number(r.id),
-          ticketId: Number(r.ticketId),
-          role: r.role,
-          name: r.name,
-          factorySessionId: r.factorySessionId ?? undefined,
-          factorySessionIds: jsonArr(r.factorySessionIdsJson),
-          status: r.status,
-          currentStep: r.currentStep,
-          waitingFor: parsePredicate(raw),
-          waitingForRaw: raw,
-          resumePayload: jsonAny(r.resumePayloadJson ?? undefined),
-          createdUs: Number(r.createdAt.microsSinceUnixEpoch),
-          lastUpdateUs: Number(r.lastUpdate.microsSinceUnixEpoch),
-        };
-      }),
-    [sessionRows],
-  );
-
-  const events = useMemo<FeedEvent[]>(() => {
-    const out: FeedEvent[] = [];
-    for (const r of eventRows) {
-      if (!isAgentEventType(r.type)) continue;
-      out.push({
-        key: `e${r.id}`,
-        id: Number(r.id),
-        tsUs: Number(r.ts.microsSinceUnixEpoch),
-        actor: r.actor,
-        type: r.type,
-        payload: parsePayload(r.payloadJson) ?? { raw: r.payloadJson },
-      });
-    }
-    return out.sort((a, b) => a.id! - b.id!);
-  }, [eventRows]);
-
-  return { ready: sReady && eReady, mode: 'live', sessions, events };
-}
-
-// ------------------------------------------------------------------------------ replay source
-
-type RecordedEvent = { kind: string; agent_session_id: number; role: string; ts_us: number; turn: number; seq: number } & Record<string, unknown>;
-
-/**
- * Replays a recorded droid session (services/factory/work/state/<id>.events.jsonl, served by
- * /api/tdm76/recording) at `speed`x its real pacing, so the panel can be shown without spending
- * credits. Labelled REPLAY in the UI: these are real past events, not live ones.
- */
-export function useReplayFeedSource(file: string | undefined, speed = 4): FeedSource {
-  const [all, setAll] = useState<RecordedEvent[] | undefined>(undefined);
-  const [shown, setShown] = useState(0);
-
-  useEffect(() => {
-    if (!file) return;
-    let alive = true;
-    setAll(undefined);
-    setShown(0);
-    fetch(`/api/tdm76/recording?file=${encodeURIComponent(file)}`)
-      .then((r) => (r.ok ? r.text() : ''))
-      .then((t) => {
-        if (!alive) return;
-        const evs = t
-          .split('\n')
-          .filter(Boolean)
-          .map((l) => {
-            try {
-              return JSON.parse(l) as RecordedEvent;
-            } catch {
-              return undefined;
-            }
-          })
-          .filter((e): e is RecordedEvent => !!e && typeof e.kind === 'string');
-        setAll(evs);
-      })
-      .catch(() => alive && setAll([]));
-    return () => {
-      alive = false;
-    };
-  }, [file]);
-
-  useEffect(() => {
-    if (!all || shown >= all.length) return;
-    const gapMs = shown === 0 ? 400 : Math.min(2500, Math.max(120, (all[shown].ts_us - all[shown - 1].ts_us) / 1000 / speed));
-    const t = setTimeout(() => setShown((s) => s + 1), gapMs);
-    return () => clearTimeout(t);
-  }, [all, shown, speed]);
-
-  return useMemo<FeedSource>(() => {
-    if (!file) return { ready: true, mode: 'replay', sessions: [], events: [] };
-    const evs = (all ?? []).slice(0, shown);
-    // Re-time the replay to "now" so elapsed/age read naturally while it plays.
-    const offset = all && all.length ? Date.now() * 1000 - (evs.length ? evs[evs.length - 1].ts_us : all[0].ts_us) : 0;
-    const events: FeedEvent[] = evs.map((e, i) => ({
-      key: `r${i}`,
-      tsUs: e.ts_us + offset,
-      actor: `droid:${String(e.role).replace(/_droid$/, '')}`,
-      type: `droid.${e.kind}`,
-      payload: { ...e, ts_us: e.ts_us + offset },
-    }));
-    return {
-      ready: all !== undefined,
-      mode: 'replay',
-      sessions: deriveSessions(events),
-      events,
-      replay: { file, shown, total: all?.length ?? 0, speed },
-    };
-  }, [file, all, shown, speed]);
-}
-
-/** agent_session-like rows rebuilt from droid events (only used when there is no real row). */
-export function deriveSessions(events: FeedEvent[]): FeedSession[] {
-  const by = new Map<number, FeedSession>();
-  for (const e of events) {
-    if (!e.type.startsWith('droid.')) continue;
-    const p = e.payload;
-    const id = num(p.agent_session_id, -1);
-    if (id < 0) continue;
-    const kind = e.type.slice(6);
-    let s = by.get(id);
-    if (!s) {
-      s = {
-        id, ticketId: 0, role: String(p.role ?? 'droid'), name: String(p.role ?? 'droid'), factorySessionIds: [],
-        status: 'starting', currentStep: '', createdUs: e.tsUs, lastUpdateUs: e.tsUs, derived: true,
-      };
-      by.set(id, s);
-    }
-    const fsid = typeof p.factory_session_id === 'string' ? p.factory_session_id : undefined;
-    if (fsid && !s.factorySessionIds.includes(fsid)) s.factorySessionIds.push(fsid);
-    if (fsid) s.factorySessionId = fsid;
-    s.lastUpdateUs = e.tsUs;
-    const data = (p.data ?? {}) as Record<string, unknown>;
-    if (kind === 'turn_started') {
-      s.status = 'running';
-      s.waitingFor = undefined;
-    }
-    if (kind === 'waiting_for') {
-      s.status = 'waiting_for';
-      s.waitingFor = toNode(data.predicate);
-      s.resumePayload = data.resume_payload;
-      const pred = data.predicate as Record<string, unknown> | undefined;
-      if (pred && pred.ticket_id !== undefined) s.ticketId = num(pred.ticket_id);
-    }
-    if (kind === 'turn_completed' && typeof data.status === 'string') s.status = data.status;
-    if (kind !== 'tool_result' && kind !== 'turn_completed' && typeof p.text === 'string') s.currentStep = kind === 'assistant_text' ? `says: ${p.text}` : p.text;
-  }
-  return [...by.values()];
+/** The panel's data, live or (replay) from the recorded run TDM-35 serves. */
+export function usePanelSource(opts: { ticketId?: number; replay?: boolean }): PanelSource {
+  const { feed, ready, mode, error } = useTdm35Feed({
+    ticketId: opts.ticketId,
+    limit: PANEL_LIMIT,
+    replay: opts.replay ? true : undefined,
+    replaySpeed: opts.replay ? 4 : undefined,
+  });
+  return useMemo(() => ({ ready, mode, error, ...toPanelSource(feed) }), [feed, ready, mode, error]);
 }
 
 // ------------------------------------------------------------------------------ view model
@@ -317,7 +197,7 @@ export function buildAgentView(session: FeedSession, events: FeedEvent[]): Agent
     if (e.type.startsWith('droid.') && num(p.agent_session_id, -1) === session.id) droidEvents.push(e);
     else if (e.type === 'agent.resumed' && num(p.session_id, -1) === session.id) resumes.push(asResume(e));
   }
-  droidEvents.sort((a, b) => (a.id !== undefined && b.id !== undefined ? a.id - b.id : a.tsUs - b.tsUs));
+  // Already in (ts_us, id) order from TDM-35.
 
   const turns: Turn[] = [];
   const byTurn = new Map<number, Turn>();
@@ -409,64 +289,75 @@ export function buildAgentView(session: FeedSession, events: FeedEvent[]): Agent
 
 // ------------------------------------------------------------------------------ orchestrator agents
 
-/**
- * The orchestrator's own agents run in-process (no agent_session row, no Factory session), so the
- * panel shows them from the rows they write. Order matters: the first match wins.
- */
-export const ORCH_AGENTS: { key: string; label: string; does: string; match: (type: string) => boolean }[] = [
-  { key: 'clustering', label: 'Failure clustering', does: 'groups failed eval trials into failure modes', match: (t) => t === 'planner.failure_cluster' || t.startsWith('diagnose.') },
-  { key: 'planner', label: 'Planner', does: 'decides what data to buy next and why', match: (t) => t.startsWith('planner.') },
-  { key: 'reviewer', label: 'Reviewer', does: 'accepts or rejects each recorded episode', match: (t) => t === 'review.accepted' || t === 'review.rejected' || t.startsWith('review.') },
-  { key: 'qa', label: 'Dataset QA', does: 'checks bought and recorded data before training', match: (t) => t.startsWith('qa.') || t.startsWith('dataset_qa.') || t.startsWith('llm_qa.') },
-  { key: 'dispatcher', label: 'Dispatcher', does: 'turns the data plan into paid tasks', match: (t) => t.startsWith('dispatch.') },
-  { key: 'bridge', label: 'Resume bridge', does: 'watches SpacetimeDB and wakes parked droids', match: (t) => t.startsWith('resume_bridge.') || t.startsWith('agent.resume_') },
-];
+/** What each of the orchestrator's own agents (TDM-35 service keys) does, in a few words. */
+export const SERVICE_DOES: Record<string, string> = {
+  clustering: 'groups failed eval trials into failure modes',
+  planner: 'decides what data to buy next and why',
+  reviewer: 'accepts or rejects each recorded episode',
+  qa: 'checks bought and recorded data before training',
+  dispatcher: 'turns the data plan into paid tasks',
+  eval: 'runs the eval trials on the robot',
+  flywheel: 'moves the ticket from stage to stage',
+};
+const SERVICE_ORDER = ['clustering', 'planner', 'reviewer', 'qa', 'dispatcher', 'eval', 'flywheel'];
+const SERVICE_LABEL: Record<string, string> = {
+  clustering: 'Failure clustering', planner: 'Planner', reviewer: 'Reviewer', qa: 'Dataset QA',
+  dispatcher: 'Dispatcher', eval: 'Eval runner', flywheel: 'Flywheel',
+};
 
 export type OrchAgentView = {
   key: string;
   label: string;
   does: string;
+  status: string; // active | idle | error | none
   count: number;
-  last?: FeedEvent;
-  recent: FeedEvent[];
+  last?: { tsUs: number; text: string; type: string };
+  recent: { key: string; tsUs: number; type: string; text: string; isError: boolean }[];
 };
 
-export function buildOrchAgents(events: FeedEvent[], ticketId?: number): OrchAgentView[] {
-  const views = ORCH_AGENTS.map((a) => ({ key: a.key, label: a.label, does: a.does, count: 0, recent: [] as FeedEvent[], last: undefined as FeedEvent | undefined }));
-  for (const e of events) {
-    if (e.type.startsWith('droid.')) continue;
-    if (ticketId !== undefined && num(e.payload.ticket_id ?? e.payload.ticketId, -1) !== ticketId) continue;
-    const i = ORCH_AGENTS.findIndex((a) => a.match(e.type));
-    if (i < 0) continue;
-    const v = views[i];
-    v.count++;
-    v.last = e;
-    v.recent.push(e);
-    if (v.recent.length > 50) v.recent.shift();
-  }
-  return views;
+/** Every orchestrator agent, including the ones that have not acted yet (so judges see the cast). */
+export function buildOrchAgents(services: Tdm35Agent[]): OrchAgentView[] {
+  const by = new Map(services.map((s) => [s.role, s]));
+  const keys = [...SERVICE_ORDER, ...services.map((s) => s.role).filter((k) => !SERVICE_ORDER.includes(k))];
+  return keys.map((k) => {
+    const s = by.get(k);
+    const evs = s?.events ?? [];
+    const last = evs[evs.length - 1];
+    return {
+      key: k,
+      label: SERVICE_LABEL[k] ?? s?.label ?? k,
+      does: SERVICE_DOES[k] ?? '',
+      status: s && s.event_count > 0 ? s.status : 'none',
+      count: s?.event_count ?? 0,
+      last: last ? { tsUs: last.ts_us, text: last.text, type: last.type } : undefined,
+      recent: evs.slice(-50).map((e) => ({ key: e.id, tsUs: e.ts_us, type: e.type, text: e.text, isError: e.is_error })),
+    };
+  });
 }
 
 // ------------------------------------------------------------------------------ the hook
 
-export type AgentFeed = {
+export type PanelModel = {
   ready: boolean;
   mode: 'live' | 'replay';
-  replay?: FeedSource['replay'];
+  error?: string;
+  replaySource?: string[];
   agents: AgentView[];
   orchestrator: OrchAgentView[];
 };
 
-/** Everything the agents panel renders, from whichever source is active. */
-export function useAgentFeed(source: FeedSource, opts: { ticketId?: number } = {}): AgentFeed {
-  const { ticketId } = opts;
+/** Everything the agents panel renders. */
+export function usePanelModel(opts: { ticketId?: number; replay?: boolean } = {}): PanelModel {
+  const source = usePanelSource(opts);
   return useMemo(() => {
-    const sessions = source.sessions.filter((s) => ticketId === undefined || s.ticketId === ticketId);
-    const agents = sessions
+    const agents = source.sessions
       .map((s) => buildAgentView(s, source.events))
       .sort((a, b) => b.session.lastUpdateUs - a.session.lastUpdateUs);
-    return { ready: source.ready, mode: source.mode, replay: source.replay, agents, orchestrator: buildOrchAgents(source.events, ticketId) };
-  }, [source, ticketId]);
+    return {
+      ready: source.ready, mode: source.mode, error: source.error, replaySource: source.replaySource,
+      agents, orchestrator: buildOrchAgents(source.services),
+    };
+  }, [source]);
 }
 
 /** A clock that re-renders every `ms` (elapsed timers, "updated 3 s ago"). */

@@ -1,6 +1,6 @@
 import { AgentsBoard, RecordingLinks } from '@/components/agents/AgentsBoard';
 
-// TDM-76: every agent in the factory, live. ?replay=<n>.events.jsonl plays back a recorded droid run.
+// TDM-76: every agent in the factory, live. ?replay=1 plays back a recorded droid run (TDM-35 replay mode).
 export default async function AgentsPage({ searchParams }: { searchParams: Promise<{ replay?: string }> }) {
   const { replay } = await searchParams;
   return (
@@ -12,8 +12,8 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
           orchestrator&apos;s agents plan, review and check. Steps appear here as they happen.
         </p>
       </header>
-      <AgentsBoard replayFile={replay} />
-      {!replay && <RecordingLinks className="mt-10" lead="Recorded droid runs you can replay:" />}
+      <AgentsBoard replay={!!replay} />
+      {!replay && <RecordingLinks className="mt-10" lead="Nothing running right now? You can" />}
     </>
   );
 }

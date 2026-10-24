@@ -228,7 +228,7 @@ function ResumeBand({ turn, mark, nowMs }: { turn: Turn; mark?: ResumeMark; nowM
         <span className="mt-0.5 text-zinc-400">↻</span>
         <div>
           <p className="font-medium text-zinc-700 dark:text-zinc-300">Resumed{mark?.reason ? ` (${mark.reason.slice(0, 120)})` : ''}</p>
-          <p className="text-xs text-zinc-500">{how} Not woken by the resume bridge, so no database condition is claimed here.</p>
+          <p className="text-xs text-zinc-500">{how} There is no resume-bridge record for this wake-up (a manual resume, or a recording), so no database condition is claimed.</p>
         </div>
       </div>
     );

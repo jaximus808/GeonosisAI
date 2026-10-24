@@ -29,7 +29,7 @@ export function AgentCard({ a, nowMs, live, defaultOpen }: { a: AgentView; nowMs
       <div className="px-4 pb-3 pt-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <h3 className="text-base font-semibold tracking-tight">{role}</h3>
-          {s.name && s.name !== s.role && <span className="text-sm text-zinc-500">{s.name}</span>}
+          {s.name && s.name !== s.role && !/#\d+$/.test(s.name) && <span className="text-sm text-zinc-500">{s.name}</span>}
           <span className="text-xs tabular-nums text-zinc-400">session #{s.id}</span>
           {s.ticketId > 0 && (
             <a href={`/tickets/${s.ticketId}`} className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100">

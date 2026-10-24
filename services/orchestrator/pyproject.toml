@@ -3,7 +3,7 @@ name = "rdf-orchestrator"
 version = "0.0.0"
 description = "Planner and reviewer loops, dispatcher; writes decisions to the event log"
 requires-python = ">=3.11,<3.12"
-dependencies = ["rdf-common"]
+dependencies = ["rdf-common", "anthropic>=2.3.0"]  # anthropic: TDM-23 failure clustering
 
 [project.scripts]
 rdf-orchestrator = "rdf_orchestrator.__main__:main"

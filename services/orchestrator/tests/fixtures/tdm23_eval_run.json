@@ -1,0 +1,26 @@
+{
+  "_comment": "TDM-23 labelled fixture: a synthetic 10-trial baseline (NOT real robot data). 3 successes; 7 failures in 3 known modes. expected = the ground-truth grouping the test checks against.",
+  "ticket": {"id": 7, "robot_id": 1, "iteration": 0, "status": "baseline",
+             "task_description": "Pick up the red cup from the table and place it on the coaster."},
+  "eval_run": {"id": 3, "ticket_id": 7, "robot_id": 1, "training_run_id": 0, "kind": "baseline",
+               "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base/params", "status": "done",
+               "trials": 10, "completed": 10, "successes": 3, "ci_low": 0.108, "ci_high": 0.603,
+               "finished_at": 1792800000000000},
+  "trials": [
+    {"id": 101, "eval_run_id": 3, "trial_index": 0, "success": true,  "duration_ms": 14200, "episode_id": 40, "failure_note": null},
+    {"id": 102, "eval_run_id": 3, "trial_index": 1, "success": false, "duration_ms": 9800,  "episode_id": 41, "failure_note": "Gripper closed on the cup rim, cup slid out of the fingers as the arm lifted and dropped back onto the table upright."},
+    {"id": 103, "eval_run_id": 3, "trial_index": 2, "success": false, "duration_ms": 21000, "episode_id": 42, "failure_note": "Arm came down about 4 cm to the left of the cup and closed on air. Kept hovering next to the cup until timeout."},
+    {"id": 104, "eval_run_id": 3, "trial_index": 3, "success": true,  "duration_ms": 13100, "episode_id": 43, "failure_note": null},
+    {"id": 105, "eval_run_id": 3, "trial_index": 4, "success": false, "duration_ms": 10400, "episode_id": 44, "failure_note": "Picked the cup but it slipped during lift, fell back on the table still standing."},
+    {"id": 106, "eval_run_id": 3, "trial_index": 5, "success": false, "duration_ms": 30000, "episode_id": 45, "failure_note": "Robot never moved from home pose. Policy output ~zero actions for the whole trial."},
+    {"id": 107, "eval_run_id": 3, "trial_index": 6, "success": false, "duration_ms": 20500, "episode_id": 46, "failure_note": "Grasp missed: fingers closed beside the cup (left side), cup untouched."},
+    {"id": 108, "eval_run_id": 3, "trial_index": 7, "success": true,  "duration_ms": 15000, "episode_id": 47, "failure_note": null},
+    {"id": 109, "eval_run_id": 3, "trial_index": 8, "success": false, "duration_ms": 11200, "episode_id": 48, "failure_note": "Weak grip - cup slipped out mid-lift, landed upright near the coaster."},
+    {"id": 110, "eval_run_id": 3, "trial_index": 9, "success": false, "duration_ms": 19800, "episode_id": 0,  "failure_note": "Missed the cup to the left again, closed on nothing (not recorded)."}
+  ],
+  "expected": {
+    "clusters": 3,
+    "groups": [[1, 4, 8], [2, 6, 9], [5]],
+    "recoverable": {"1": true, "2": true, "5": false}
+  }
+}

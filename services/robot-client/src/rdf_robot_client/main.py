@@ -19,7 +19,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import rollout as _rollout  # noqa: F401 - TDM-50: registers load_checkpoint + run_baseline (policy rollout)
 from .adapters import ArmAdapter, make_adapter
+from .handlers import load_checkpoint as pointer_load_checkpoint
 from .handlers import sim_demo_rollout
 from .loop import RobotClient, _log
 
@@ -59,6 +61,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--estop-auto-clear-s", type=float, default=0.0, help="--sim only: auto-clear a soft e-stop")
     p.add_argument("--cameras", choices=["off", "synthetic", "config"], default=None,
                    help="TDM-47 CameraRig: off (default with --sim) | synthetic | config (default on the Jetson)")
+    p.add_argument("--sim-policy", action="store_true",
+                   help="with --sim: run_baseline uses the real TDM-50 policy rollout ($POLICY_BACKEND) instead of the demo")
     p.add_argument("--unsafe-no-safety-layer", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     a.adapter = "sim" if a.sim else (a.adapter or "yam")
@@ -105,7 +109,11 @@ def run(argv: list[str] | None = None) -> None:
     arm = build_arm(a.adapter, safety=not a.unsafe_no_safety_layer)
     services: dict[str, Any] = {}
     cams = _start_cameras(a.cameras, services)
-    handlers = {"run_eval": sim_demo_rollout, "run_baseline": sim_demo_rollout} if sim else {}
+    handlers = {"run_eval": sim_demo_rollout, "run_baseline": sim_demo_rollout,
+                "load_checkpoint": pointer_load_checkpoint} if sim else {}
+    if sim and a.sim_policy:  # TDM-50: the real rollout + policy endpoint, on the sim arm
+        handlers.pop("run_baseline")
+        handlers.pop("load_checkpoint")
     client = RobotClient(
         arm, name=name, stdb=cfg, camera_config={**cams, **({"sim": True} if sim else {})},
         heartbeat_s=a.heartbeat_s, handlers=handlers, services=services,
@@ -138,6 +146,8 @@ def run(argv: list[str] | None = None) -> None:
     rig = services.get("cameras")
     if rig is not None:
         rig.stop()
+    if services.get("policy") is not None:  # TDM-50 PolicyClient (built on first rollout)
+        services["policy"].close()
 
 
 __all__ = ["build_arm", "parse_args", "run"]

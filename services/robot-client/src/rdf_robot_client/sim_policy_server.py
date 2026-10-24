@@ -11,9 +11,9 @@ Speaks the TDM-41 production wire format, so the TDM-50 rollout (``policy_client
                           (``checkpoint_mismatch`` when a request names another checkpoint than the active one)
   POST /infer             the same over HTTP (``POLICY_TRANSPORT=http``)
 
-It reads the scene (cube pose, finger contacts, task status) from the sim robot's loopback
-``/sim/state`` (``--state-url``, robot env ``RDF_SIM_STATE_PORT``) and plans with
-``sim_policy.ScriptedPickPlace``. Latency like the H100 endpoint is injected with TDM-50's
+It reads the scene (the TDM-104 scene spec, live object poses, finger contacts, task status) from the sim
+robot's loopback ``/sim/state`` (``--state-url``, robot env ``RDF_SIM_STATE_PORT``) and plans with
+``sim_policy.ScriptedPickPlace`` from the spec's geometry (``sim_policy.task_geometry``). Latency like the H100 endpoint is injected with TDM-50's
 ``fake_policy_server.jitter_schedule`` (default 120 +- 20 ms), so the async chunk executor sees a
 realistic round trip. Optional bearer auth: ``SIM_POLICY_TOKEN`` (the orchestrator sends
 ``POLICY_SERVER_TOKEN``; the demo sets both to one throwaway value).

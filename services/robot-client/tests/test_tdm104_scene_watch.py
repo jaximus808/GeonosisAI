@@ -48,6 +48,7 @@ def tdm104_watcher(sim: Tdm104FakeSim, client: Tdm104FakeClient) -> sw.SceneWatc
     w.client, w.poll_s, w.sim, w.sub = client, 0.02, sim, None
     w.applied, w.current, w._pending = None, None, None
     w._cv, w._stop = threading.Condition(), threading.Event()
+    w._snapshot, w._apply_lock = threading.Event(), threading.Lock()
     w._thread = threading.Thread(target=w._apply_loop, daemon=True)
     w._thread.start()
     return w
@@ -103,3 +104,33 @@ def test_real_arm_does_not_watch():
     client = Tdm104FakeClient()
     client.arm = object()
     assert sw.start_scene_watch(client) is None
+
+
+def test_settle_loads_a_pending_deploy_before_the_eval_runs_its_trials():
+    """Live bug (ticket 3): run_eval was queued before the robot restarted; the subscription snapshot with the
+    ticket's scene.deployed landed a second after the eval started, so trial 0 ran on the old scene. The eval
+    now calls settle() first: it waits for the snapshot and loads the deploy from the job's own thread."""
+    sim, client = Tdm104FakeSim(), Tdm104FakeClient()
+    client.job = SimpleNamespace(command=SimpleNamespace(label=lambda: "#3 run_eval"))  # the eval is the job
+    w = tdm104_watcher(sim, client)
+    threading.Timer(0.15, lambda: w._on_applied({"event_log": [tdm104_row(5, 2, "d5", "cube_bin")]})).start()
+    t0 = time.monotonic()
+    out = w.settle(timeout_s=3.0)
+    assert out is not None and out["ok"] and out["deploy_id"] == "d5"
+    assert 0.1 < time.monotonic() - t0 < 2.0  # waited for the snapshot, not for the timeout
+    assert [s["name"] for s in sim.loaded] == ["cube_bin"]
+    time.sleep(0.1)  # the apply loop does not load it again once the job ends
+    client.job = None
+    time.sleep(0.1)
+    assert len(sim.loaded) == 1
+    assert w.settle(timeout_s=0.1) is None  # nothing pending: a no-op
+    w.stop()
+
+
+def test_settle_without_a_snapshot_gives_up_after_the_timeout():
+    sim, client = Tdm104FakeSim(), Tdm104FakeClient()
+    w = tdm104_watcher(sim, client)
+    t0 = time.monotonic()
+    assert w.settle(timeout_s=0.2) is None
+    assert 0.15 < time.monotonic() - t0 < 1.0 and not sim.loaded
+    w.stop()

@@ -22,8 +22,9 @@ What is real here and what is not:
 Scene helpers for sim-only flows (never used on the real arm; ``find_sim(arm)`` returns None there):
   * the scene comes from a scene spec (``mujoco_scene.load_scene``; ``scene=`` kwarg or ``$RDF_SIM_SCENE``,
     default ``sim_assets/scenes/cube_plate.json``); ``reset_scene(seed=None)`` re-places its randomized objects;
-  * ``task_status()``: success (cube resting in the empty plate, released) / failure (missed grasp,
-    dropped outside the plate, off the table) computed from sim state;
+  * ``task_status()``: success (the spec's ``success`` predicate: e.g. the cube resting in the bin, released) /
+    failure (missed grasp, dropped outside the target, off the table) computed from sim state, named with the
+    spec's labels ("the red cube dropped outside the bin");
   * ``privileged_state()``: cube pose, finger contacts and task status for the scripted [SIM] policy
     (``sim_policy_server.py``), served as JSON on ``GET http://127.0.0.1:$RDF_SIM_STATE_PORT/sim/state``
     when that env is set (loopback only); ``scene_state()`` is the light TDM-96 ``/ws/state`` scene.
@@ -165,6 +166,13 @@ class MujocoSimArm(ArmAdapter):
         self._cube_geom = int(m.geom(self._target).id) if self._target else -1
         self._cube_v = self._obj_free[self._target][1] if self._target in self._obj_free else 0
         self._pad_geoms = {int(m.geom("tip_left_pad").id), int(m.geom("tip_right_pad").id)}
+        # "closed on nothing": the fingers shut well past the object's width (a 4 cm cube holds them at ~0.42;
+        # a 1.2 cm block at ~0.13, so a fixed 0.12 would call a good grasp of a thin object a miss)
+        self._empty_g = 0.12
+        if self._target:
+            o = sc.objects[self._target]
+            w = min(float(v) for v in o["size"][:2]) if o["primitive"] == "box" else 2 * float(o.get("radius") or 0.02)
+            self._empty_g = min(0.12, 0.5 * w / (2 * FINGER_TRAVEL))
         self._grasp_site = int(m.site("grasp_site").id)
 
     # ------------------------------------------------------------------ setup
@@ -499,7 +507,7 @@ class MujocoSimArm(ArmAdapter):
             self._episode["lifted"] = True
         g = self._gripper_measured()
         tool_z = float(d.site_xpos[self._grasp_site][2])
-        missed = self._gripper_cmd < 0.3 and g < 0.12 and tool_z < self.scene.table_top + 0.09
+        missed = self._gripper_cmd < 0.3 and g < self._empty_g and tool_z < self.scene.table_top + 0.09
         if missed and self._episode["miss_since"] is None:
             self._episode["miss_since"] = float(d.time)
         elif not missed:
@@ -607,16 +615,18 @@ class MujocoSimArm(ArmAdapter):
             released = not held if sc.success.get("released", True) else True
             success = bool(in_target and released and cube_v < 0.05)
         half = sc.half_height(tid)
+        names = sc.goal_phrases()  # the spec's own words: "the red cube", "the bin"
         failure = None
         if c[2] < sc.table_top - 0.05:
-            failure = f"{tid} fell off the table"
+            failure = f"{names['object']} fell off the table"
         elif miss_since is not None and t - miss_since > 0.15:
             failure = "missed grasp: gripper closed on nothing"
         elif blocked_since is not None and t - blocked_since > 1.5:
-            failure = f"missed grasp: fingers landed on top of the {tid}"
+            failure = f"missed grasp: fingers landed on top of {names['object']}"
         elif lifted and not held and c[2] < sc.table_top + half + 0.005 and not in_target and cube_v < 0.05 and g > 0.5:
-            failure = f"{tid} dropped outside the {dest}"
+            failure = f"{names['object']} dropped outside {names['target']}"
         return {"success": success, "failure": failure, "object": tid, "target": dest, "in_target": in_target,
+                "object_label": names["object"], "target_label": names["target"], "relation": names["relation"],
                 "cube_in_plate": in_target, "held": held, "cube_xyz": [round(float(v), 4) for v in c],
                 "plate_dist_m": round(dxy, 4), "sim": True}
 
@@ -663,7 +673,11 @@ class MujocoSimArm(ArmAdapter):
                          "primitive": sc.objects[oid]["primitive"], "half": sc.half_height(oid)}
                    for oid, (p, qq) in objs.items()}
         out: dict[str, Any] = {"sim": True, "scene": sc.name, "task_text": sc.task, "scene_seq": seq, "t": time.time(),
-                               "objects": objects, "joints": [float(v) for v in q], "gripper": g, "task": st}
+                               "objects": objects, "joints": [float(v) for v in q], "gripper": g, "task": st,
+                               "table_top": sc.table_top,
+                               # the scene spec itself: the scripted policy reads the target's geometry from it
+                               # (plate rim / box top / region on the table, the object's size, obstacles)
+                               "spec": sc.spec}
         if self._target:
             out["pick"] = {"id": self._target, **objects[self._target]}
             px, py, ptop = self._live_place(objs)

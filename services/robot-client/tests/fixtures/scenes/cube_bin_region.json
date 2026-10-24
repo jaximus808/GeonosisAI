@@ -1,0 +1,134 @@
+{
+ "version": 1,
+ "name": "cube_bin_region",
+ "task": "Pick up the cube and place it in the bin.",
+ "notes": "A red cube on the right and the bin drawn on the table as a goal zone on the left (success.region). [fixture: the region form of the generator's cube_bin; the shape ticket 3's live scene had: release height on the table]",
+ "objects": [
+  {
+   "id": "cube",
+   "label": "the red cube",
+   "primitive": "box",
+   "color": [
+    0.8588,
+    0.1216,
+    0.102,
+    1.0
+   ],
+   "dynamic": true,
+   "size": [
+    0.04,
+    0.04,
+    0.04
+   ],
+   "mass": 0.05,
+   "pose": {
+    "pos": [
+     0.32,
+     -0.14,
+     0.02
+    ],
+    "yaw": 0.0
+   },
+   "randomize": {
+    "region": "cube_spawn",
+    "yaw": [
+     -0.7,
+     0.7
+    ]
+   },
+   "graspable": true
+  }
+ ],
+ "regions": {
+  "cube_spawn": {
+   "x": [
+    0.26,
+    0.38
+   ],
+   "y": [
+    -0.21,
+    -0.07
+   ]
+  },
+  "bin": {
+   "x": [
+    0.28,
+    0.4
+   ],
+   "y": [
+    0.08,
+    0.22
+   ],
+   "visible": true,
+   "color": [
+    0.25,
+    0.27,
+    0.3,
+    1.0
+   ],
+   "label": "the bin"
+  }
+ },
+ "success": {
+  "type": "object_in",
+  "object": "cube",
+  "region": "bin",
+  "margin": 0.012,
+  "released": true
+ },
+ "robot": {
+  "model": "yam_linear_4310",
+  "mount": {
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "yaw": 0.0
+  }
+ },
+ "physics": {
+  "timestep": 0.002
+ },
+ "table": {
+  "center": [
+   0.3,
+   0.0
+  ],
+  "size": [
+   0.96,
+   0.96
+  ],
+  "top_z": 0.0,
+  "color": [
+   0.62,
+   0.5,
+   0.37,
+   1.0
+  ]
+ },
+ "cameras": {
+  "top": {
+   "pos": [
+    0.86,
+    -0.5,
+    0.58
+   ],
+   "target": [
+    0.27,
+    0.03,
+    0.06
+   ],
+   "fovy": 52,
+   "width": 640,
+   "height": 480
+  },
+  "wrist": {
+   "mount": "wrist_d405",
+   "fovy": 72,
+   "width": 640,
+   "height": 480
+  }
+ },
+ "meta": {}
+}

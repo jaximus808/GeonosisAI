@@ -1,15 +1,22 @@
 """[SIM] Scripted IK pick-and-place policy for the MuJoCo YAM demo. NOT pi0.5, not learned.
 
-A stand-in for the policy server when there is no GPU: it plans "pick up the cube and place it in
-the empty plate" with inverse kinematics and returns the same 50-step ``joint_pos_abs`` action
-chunks a fine-tuned YAM checkpoint returns (TDM-41 wire format). ``sim_policy_server.py`` serves it.
+A stand-in for the policy server when there is no GPU: it plans the scene's pick-and-place task ("pick up
+the cube and place it in the bin": the TDM-104 scene spec's ``success`` object and target) with inverse
+kinematics and returns the same 50-step ``joint_pos_abs`` action chunks a fine-tuned YAM checkpoint returns
+(TDM-41 wire format). ``sim_policy_server.py`` serves it.
 
 How it decides (stateless per request, like a learned policy: the arm state comes in the request):
   * the robot state (6 joints + gripper) from the request, and PRIVILEGED sim state from the sim
     robot's ``/sim/state``: the scene spec's task object (``pick``), where it goes (``place``),
     finger contacts and task status (it does not look at the images; a real policy would);
-  * phases: approach above the cube -> descend -> close -> lift -> carry above the empty plate ->
-    lower -> release -> retreat. A grasp that closes on nothing re-opens and tries again;
+  * phases: approach above the object -> descend -> close -> lift -> carry above the target -> lower ->
+    release -> retreat. A grasp that closes on nothing re-opens and tries again;
+  * every height comes from the scene spec's geometry (``task_geometry``): the grasp height and the pre-grasp
+    clearance from the picked object's real size (cube, block, ball, cup); the carry height clears the
+    target's walls (a plate / bin / bowl rim) and anything near the carry path; the release height is just
+    above the floor the object will rest on (the plate or bin floor, a box top for stacking, the table for a
+    region), whatever the target is. Phases are decided from where the tool is relative to THOSE heights, so a
+    target whose floor is the table (a region) no longer loops between "lower" and "lift";
   * each phase is a straight Cartesian line at ``speed_mps`` with the tool tilted 20 deg from
     vertical (a straight-down tool puts the YAM's joint4 on its limit), the fingers aligned with
     the nearest cube faces; IK is TDM-46's PoE model of the YAM.
@@ -21,7 +28,10 @@ checkpoint's profile. The same standard-normal draw is used for every profile, s
 
   * ``baseline``  (the base checkpoint, ``gs://openpi-assets/checkpoints/pi05_base`` / ``base``):
     sigma 2.2 cm, yaw 0.3 rad  ->  misses a meaningful share of grasps (calibrated: see tests);
-  * ``finetuned`` (any other checkpoint URI, e.g. the stub trainer's): sigma 0.5 cm, yaw 0.08 rad.
+  * ``finetuned`` (any other checkpoint URI, e.g. the stub trainer's): sigma 1.0 cm, yaw 0.12 rad.
+
+The noise is the same on every scene; ``spikes/mujoco-sim/calibrate_sim_policy.py --scene ...`` measures the
+rates per scene (e.g. cube_plate and a generated cube_bin).
 
 Every reply says ``"sim": true`` and names the profile. The outcome of every trial is still
 real MuJoCo physics: the noise only moves where the scripted policy reaches.
@@ -67,6 +77,169 @@ def profile_for(checkpoint_uri: str | None) -> NoiseProfile:
     return PROFILES["baseline"] if uri in BASE_ALIASES or uri.rstrip("/").endswith("pi05_base") else PROFILES["finetuned"]
 
 
+TABLE_CLEAR = 0.012  # the grasp point stays this far above the table (fingertips)
+GRASP_ABOVE_CENTRE = 0.002  # grasp height = the object's centre + this
+PRE_GRASP_Z, PRE_GRASP_CLEAR = 0.10, 0.05  # approach height: >= 10 cm, and >= 5 cm above the object's top
+CARRY_Z, CARRY_CLEAR, CARRY_MAX = 0.14, 0.03, 0.25  # carry: >= 14 cm; the object's bottom >= 3 cm over walls
+RELEASE_GAP = 0.02  # release with the object's bottom this far above the floor it lands on
+RETREAT_Z = 0.20
+RIM_HEIGHT = 0.009  # a plate's rim above its surface (adapters/mujoco_scene.PLATE_RIM_HEIGHT)
+OPEN_WIDTH = 0.095  # m between the pads at gripper 1.0 (2 x FINGER_TRAVEL)
+PATH_MARGIN = 0.04  # an object this close to the carry path (plus both footprints) counts as an obstacle
+
+
+@dataclass(frozen=True)
+class TaskGeometry:
+    """Where the task's object is, how big it is, and where / how high it goes: read from the scene spec
+    (TDM-104 ``rdf_common.scene_spec``) and the sim's live poses. All heights are world z (m)."""
+
+    pick_id: str
+    pick_xyz: tuple[float, float, float]
+    pick_yaw: float
+    pick_half: float  # half height of the picked object
+    pick_width: float  # narrowest horizontal width (what the fingers close across)
+    pick_boxy: bool  # a box: align the fingers with its faces (round objects: any wrist roll)
+    pick_long_axis: float | None  # a non-square box: the yaw of its LONG side (close across the short one)
+    place_id: str
+    place_kind: str  # "container" (plate / bin / bowl), "surface" (a box / cylinder top), "region" (the table)
+    place_xy: tuple[float, float]
+    place_room: float  # the object's centre must end within this radius of place_xy (success margin applied)
+    floor_z: float  # the surface the object comes to rest on
+    wall_z: float  # the highest rim / wall around the place (>= floor_z)
+    clear_z: float  # the highest thing the carried object passes over (walls + obstacles near the path)
+    table_z: float = 0.0
+    pick_rest_z: float | None = None  # the object's centre z resting where it spawns (the spec pose)
+
+    @property
+    def lift_below(self) -> float:
+        """Holding it with the tool below this (away from the target) = just grasped: lift straight up first.
+        From the RESTING height: the live z rides up with the gripper once it is held."""
+        rest = self.pick_rest_z if self.pick_rest_z is not None else self.pick_xyz[2]
+        return max(rest, self.table_z + TABLE_CLEAR) + GRASP_ABOVE_CENTRE + 0.03
+
+    @property
+    def grasp_z(self) -> float:
+        return max(self.pick_xyz[2], self.table_z + TABLE_CLEAR) + GRASP_ABOVE_CENTRE
+
+    @property
+    def pre_z(self) -> float:
+        return max(PRE_GRASP_Z, self.pick_xyz[2] + self.pick_half + PRE_GRASP_CLEAR)
+
+    @property
+    def carry_z(self) -> float:
+        # held at its centre (+2 mm): the object's bottom is at tool z - half - 2 mm
+        return min(max(CARRY_Z, self.clear_z + self.pick_half + GRASP_ABOVE_CENTRE + CARRY_CLEAR), CARRY_MAX)
+
+    @property
+    def place_z(self) -> float:
+        return self.floor_z + self.pick_half + GRASP_ABOVE_CENTRE + RELEASE_GAP
+
+    @property
+    def empty_g(self) -> float:
+        """Gripper opening below which the fingers closed on nothing (holding the object keeps them ~w/0.095)."""
+        return min(0.15, 0.5 * self.pick_width / OPEN_WIDTH)
+
+    def describe(self) -> dict[str, Any]:
+        return {"pick": self.pick_id, "place": self.place_id, "place_kind": self.place_kind,
+                "grasp_z": round(self.grasp_z, 4), "pre_z": round(self.pre_z, 4), "carry_z": round(self.carry_z, 4),
+                "place_z": round(self.place_z, 4), "floor_z": round(self.floor_z, 4), "wall_z": round(self.wall_z, 4)}
+
+
+def _seg_dist(p: Sequence[float], a: Sequence[float], b: Sequence[float]) -> float:
+    """Horizontal distance from point ``p`` to the segment ``a``-``b``."""
+    ax, ay, bx, by, px, py = a[0], a[1], b[0], b[1], p[0], p[1]
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    t = 0.0 if l2 < 1e-12 else min(1.0, max(0.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def task_geometry(scene: dict[str, Any]) -> TaskGeometry:
+    """The task's geometry from the sim robot's ``/sim/state``: its ``spec`` (the TDM-104 scene spec) plus the
+    live object poses (``objects``). A state without a spec (an older sim) falls back to ``pick`` / ``place``."""
+    spec = scene.get("spec") if isinstance(scene.get("spec"), dict) else None
+    if not spec or not (spec.get("success") or {}).get("object"):
+        return _legacy_geometry(scene)
+    from rdf_common import scene_spec as ss
+
+    objs = {o["id"]: o for o in spec.get("objects") or []}
+    live = scene.get("objects") or {}
+    succ = spec["success"]
+    table_z = float((spec.get("table") or {}).get("top_z") or 0.0)
+
+    def pos(oid: str) -> list[float]:
+        v = (live.get(oid) or {}).get("xyz")
+        return [float(x) for x in v] if v else [float(x) for x in objs[oid]["pose"]["pos"]]
+
+    def top(oid: str) -> float:  # the highest point of the object (a plate: its rim)
+        o = objs[oid]
+        return ss.top_z(o, pos(oid)[2]) + (RIM_HEIGHT if o["primitive"] == "plate" else 0.0)
+
+    pid = succ["object"]
+    po = objs[pid]
+    pxyz = pos(pid)
+    pyaw = float((live.get(pid) or {}).get("yaw", po["pose"].get("yaw", 0.0)) or 0.0)
+    long_axis = None
+    if po["primitive"] == "box":
+        sx, sy = float(po["size"][0]), float(po["size"][1])
+        if abs(sx - sy) > 0.1 * min(sx, sy):
+            long_axis = pyaw if sx > sy else pyaw + math.pi / 2
+    margin = float(succ.get("margin", 0.012))
+    tgt, reg = succ.get("target"), succ.get("region")
+    if tgt:
+        t = objs[tgt]
+        tx, ty, tz = pos(tgt)
+        floor = ss.top_z(t, tz)  # a plate / bin / bowl: its surface; a box or cylinder: its top face
+        kind = "container" if t["primitive"] == "plate" else "surface"
+        wall = floor + (RIM_HEIGHT if kind == "container" else 0.0)
+        room = max(ss.inner_radius(t) - margin, 0.004)
+        outer = ss.footprint_radius(t)
+        place_id, place_xy = str(tgt), (tx, ty)
+    else:  # a region drawn on the table: the floor is the table
+        r = spec["regions"][reg]
+        place_xy = ((r["x"][0] + r["x"][1]) / 2, (r["y"][0] + r["y"][1]) / 2)
+        floor = wall = table_z
+        kind = "region"
+        room = max(min(r["x"][1] - r["x"][0], r["y"][1] - r["y"][0]) / 2 - margin, 0.004)
+        outer = math.hypot(r["x"][1] - r["x"][0], r["y"][1] - r["y"][0]) / 2
+        place_id = str(reg)
+    clear = wall
+    for oid, o in objs.items():
+        if oid in (pid, tgt):
+            continue
+        ox, oy, oz = pos(oid)
+        d = math.hypot(ox - place_xy[0], oy - place_xy[1])
+        if not o.get("dynamic") and d < ss.inner_radius(o) and ss.top_z(o, oz) < floor + 0.06:
+            floor = max(floor, ss.top_z(o, oz))  # a fixed floor under the goal (a tray in a region)
+            wall = max(wall, top(oid))
+        elif d < outer + ss.footprint_radius(o) + 0.02:
+            wall = max(wall, top(oid))  # a wall / rim / neighbour around the goal
+        elif _seg_dist((ox, oy), pxyz, place_xy) < ss.footprint_radius(o) + ss.footprint_radius(po) + PATH_MARGIN:
+            clear = max(clear, top(oid))  # in the way of the carry
+    wall = max(wall, floor)
+    return TaskGeometry(pick_id=str(pid), pick_xyz=(pxyz[0], pxyz[1], pxyz[2]), pick_yaw=pyaw,
+                        pick_half=ss.half_height(po), pick_width=ss.grip_width(po), pick_boxy=po["primitive"] == "box",
+                        pick_long_axis=long_axis, place_id=place_id, place_kind=kind, place_xy=place_xy,
+                        place_room=room, floor_z=floor, wall_z=wall, clear_z=max(clear, wall), table_z=table_z,
+                        pick_rest_z=float(po["pose"]["pos"][2]))
+
+
+def _legacy_geometry(scene: dict[str, Any]) -> TaskGeometry:
+    """An older sim's ``/sim/state`` (no ``spec``): the pick / place summary only."""
+    cube = scene.get("pick") or scene["cube"]
+    place = scene.get("place") or scene["plate"]
+    half = float(cube.get("half", 0.02))
+    top = float(place["top_z"])
+    xyz = [float(v) for v in cube["xyz"]]
+    return TaskGeometry(pick_id=str(cube.get("id") or "cube"), pick_xyz=(xyz[0], xyz[1], xyz[2]),
+                        pick_yaw=float(cube.get("yaw", 0.0)), pick_half=half, pick_width=2 * half,
+                        pick_boxy=cube.get("primitive", "box") == "box", pick_long_axis=None,
+                        place_id=str(place.get("id") or "plate"), place_kind="container",
+                        place_xy=(float(place["xy"][0]), float(place["xy"][1])),
+                        place_room=float(place.get("radius", 0.075)) - 0.012, floor_z=top, wall_z=top + RIM_HEIGHT,
+                        clear_z=top + RIM_HEIGHT, table_z=float(scene.get("table_top") or 0.0), pick_rest_z=half)
+
+
 def _unit(v: np.ndarray) -> np.ndarray:
     return v / max(float(np.linalg.norm(v)), 1e-9)
 
@@ -88,9 +261,13 @@ def tool_pose(x: float, y: float, z: float, phi: float, tilt: float = 0.35) -> n
     return t
 
 
-def grasp_heading(x: float, y: float, cube_yaw: float) -> float:
-    """Closing-axis heading aligned with a cube face, nearest the arm's natural wrist roll."""
+def grasp_heading(x: float, y: float, cube_yaw: float, long_axis: float | None = None) -> float:
+    """Closing-axis heading aligned with a cube face, nearest the arm's natural wrist roll. For a box that is
+    longer one way (``long_axis``: the yaw of its long side) the fingers close across the SHORT side."""
     natural = math.atan2(y, x) + math.pi / 2
+    if long_axis is not None:
+        across = long_axis + math.pi / 2
+        return across + round((natural - across) / math.pi) * math.pi
     k = round((natural - cube_yaw) / (math.pi / 2))
     return cube_yaw + k * math.pi / 2
 
@@ -129,40 +306,40 @@ class ScriptedPickPlace:
     def plan(self, state: Sequence[float], scene: dict[str, Any], profile: NoiseProfile) -> tuple[np.ndarray, dict[str, Any]]:
         q = np.asarray(state[:6], dtype=float)
         g = float(state[6]) if len(state) > 6 else 1.0
-        cube = scene.get("pick") or scene["cube"]  # the task's object (scene spec success.object)
-        place = scene.get("place") or scene["plate"]  # where it goes (success.target / region)
+        geo = task_geometry(scene)  # the scene spec's object + target geometry, live poses
         task = scene.get("task") or {}
         z = self.episode_z(int(scene.get("scene_seq") or 0))
-        cx, cy, cz = cube["xyz"]
-        half = float(cube.get("half", 0.02))
-        px, py = place["xy"]
-        top = float(place["top_z"])
+        cx, cy, _ = geo.pick_xyz
+        px, py = geo.place_xy
         # perceived poses (the injected error)
         pcx, pcy = cx + profile.pos_sigma_m * z[0], cy + profile.pos_sigma_m * z[1]
-        pyaw = float(cube["yaw"]) + profile.yaw_sigma_rad * z[2]
+        pyaw = geo.pick_yaw + profile.yaw_sigma_rad * z[2]
+        long_axis = None if geo.pick_long_axis is None else geo.pick_long_axis + profile.yaw_sigma_rad * z[2]
         ppx, ppy = px + profile.place_sigma_m * z[3], py + profile.place_sigma_m * z[4]
 
         t_ee = self.kin.fk(q)
         ee = t_ee[:3, 3]
         held = bool(task.get("held")) and g < 0.85
-        grasp_z = half + 0.002
-        pre_z = 0.10
-        carry_z = 0.14
-        place_z = top + half + 0.022
-        boxy = cube.get("primitive", "box") == "box"  # round objects: any wrist roll works
-        phi_cube = grasp_heading(pcx, pcy, pyaw) if boxy else math.atan2(pcy, pcx) + math.pi / 2
+        grasp_z, pre_z, carry_z, place_z = geo.grasp_z, geo.pre_z, geo.carry_z, geo.place_z
+        # round objects: any wrist roll works
+        phi_cube = grasp_heading(pcx, pcy, pyaw, long_axis) if geo.pick_boxy else math.atan2(pcy, pcx) + math.pi / 2
         phi_plate = math.atan2(ppy, ppx) + math.pi / 2
         gripper = 1.0
         hold_first = 0
 
         if task.get("success"):
-            phase, target, gripper = "retreat", tool_pose(ppx, ppy, 0.20, phi_plate), 1.0
+            phase, target, gripper = "retreat", tool_pose(ppx, ppy, max(RETREAT_Z, carry_z), phi_plate), 1.0
         elif held:
             dxy_plate = math.hypot(ee[0] - ppx, ee[1] - ppy)
             lowering = ee[2] < carry_z - 0.02  # hysteresis: once lowering, small xy drift is fine
-            if ee[2] < half + 0.03 and math.hypot(ee[0] - cx, ee[1] - cy) < 0.03:
+            over = dxy_plate <= (0.03 if lowering else 0.012)
+            if not over and ee[2] < geo.lift_below:
+                # just closed on it, low: straight up first. Only AWAY from the target: over the target a low
+                # tool means lowering / releasing, however low the target's floor is (a region on the table
+                # puts the release height below this lift band, and the old "near the object" test, always
+                # true while holding it, looped lower -> lift -> lower until the time limit)
                 phase, target, gripper, hold_first = "lift", tool_pose(ee[0], ee[1], carry_z, phi_cube), 0.0, 6
-            elif dxy_plate > (0.03 if lowering else 0.012):
+            elif not over:
                 phase = "carry"
                 target = tool_pose(ppx, ppy, carry_z, phi_plate if dxy_plate < 0.25 else phi_cube)
                 gripper = 0.0
@@ -170,7 +347,7 @@ class ScriptedPickPlace:
                 phase, target, gripper = "lower", tool_pose(ppx, ppy, place_z, phi_plate), 0.0
             else:
                 phase, target, gripper = "release", tool_pose(ppx, ppy, place_z, phi_plate), 1.0
-        elif g < 0.15 and ee[2] < pre_z + 0.03:
+        elif g < geo.empty_g and ee[2] < pre_z + 0.03:
             phase, target, gripper = "regrasp", tool_pose(ee[0], ee[1], pre_z + 0.02, phi_cube), 1.0
         else:
             dxy = math.hypot(ee[0] - pcx, ee[1] - pcy)
@@ -183,7 +360,8 @@ class ScriptedPickPlace:
                 phase, target = "approach", tool_pose(pcx, pcy, pre_z, phi_cube)
         acts = self._line(q, t_ee, target, gripper, hold_first)
         info = {"phase": phase, "perceived_cube_xy": [round(pcx, 4), round(pcy, 4)],
-                "error_cm": round(math.hypot(pcx - cx, pcy - cy) * 100, 2), **profile.describe()}
+                "error_cm": round(math.hypot(pcx - cx, pcy - cy) * 100, 2), "geometry": geo.describe(),
+                **profile.describe()}
         return acts, info
 
     def _line(self, q: np.ndarray, t0: np.ndarray, t1: np.ndarray, gripper: float, hold_first: int = 0) -> np.ndarray:
@@ -224,5 +402,5 @@ class ScriptedPickPlace:
         return out
 
 
-__all__ = ["HOME", "POLICY_LABEL", "POLICY_NAME", "PROFILES", "NoiseProfile", "ScriptedPickPlace", "grasp_heading",
-           "profile_for", "tool_pose"]
+__all__ = ["HOME", "POLICY_LABEL", "POLICY_NAME", "PROFILES", "NoiseProfile", "ScriptedPickPlace", "TaskGeometry",
+           "grasp_heading", "profile_for", "task_geometry", "tool_pose"]

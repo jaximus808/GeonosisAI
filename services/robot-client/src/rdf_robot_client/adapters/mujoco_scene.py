@@ -67,6 +67,10 @@ KD = (5.0, 5.0, 5.0, 1.5, 1.5, 1.5)
 TORQUE_LIMIT = 10.0
 PRIMITIVES = ("box", "cylinder", "sphere", "plate")
 DEFAULT_FRICTION = (1.0, 0.01, 0.001)
+# A plate's rim: a ring of boxes centred PLATE_RIM_Z above the plate's top face, PLATE_RIM_HALF tall (half
+# height), so the rim stands PLATE_RIM_Z + PLATE_RIM_HALF above the plate surface (the scripted policy's wall).
+PLATE_RIM_Z, PLATE_RIM_HALF = 0.004, 0.005
+PLATE_RIM_HEIGHT = PLATE_RIM_Z + PLATE_RIM_HALF
 PAD_FRICTION = (1.6, 0.02, 0.002)
 
 # finger pad boxes in each tip body's frame (computed from the SDK tip meshes at slide 0, see docstring)
@@ -153,6 +157,25 @@ class Scene:
     def place_top_z(self) -> float:
         c = self.container
         return self.top_z(c) if c is not None else self.table_top
+
+    # ---- names people read (failure notes, eval outcomes): the spec's labels, else the ids
+    def label(self, oid: str | None) -> str:
+        """``objects[].label`` / ``regions[].label`` ("the red cube"), else "the <id>" ("the cube")."""
+        if not oid:
+            return "the target"
+        src = self.objects.get(oid) or self.regions.get(oid) or {}
+        lab = str(src.get("label") or "").strip() if isinstance(src, dict) else ""
+        return lab or f"the {oid.replace('_', ' ')}"
+
+    @property
+    def relation(self) -> str:
+        """"on" for object_on (stacking), else "in"."""
+        return "on" if self.success.get("type") == "object_on" else "in"
+
+    def goal_phrases(self) -> dict[str, str]:
+        """{object, target, relation}: e.g. the cube / the bin / in, for notes like "the cube is not in the bin"."""
+        return {"object": self.label(self.target), "target": self.label(self.container or self.success.get("region")),
+                "relation": self.relation}
 
     def dynamic_objects(self) -> list[str]:
         return [oid for oid, o in self.objects.items() if o.get("dynamic")]
@@ -279,8 +302,8 @@ def _add_object(world: ET.Element, scene: Scene, oid: str) -> None:
         for k in range(n_rim):
             a = 2 * math.pi * k / n_rim
             ET.SubElement(body, "geom", {
-                "name": f"{oid}_rim{k}", "type": "box", "pos": _f((r * math.cos(a), r * math.sin(a), h + 0.004)),
-                "euler": _f((0, 0, a)), "size": _f((0.004, r * math.pi / n_rim + 0.002, 0.005)),
+                "name": f"{oid}_rim{k}", "type": "box", "pos": _f((r * math.cos(a), r * math.sin(a), h + PLATE_RIM_Z)),
+                "euler": _f((0, 0, a)), "size": _f((0.004, r * math.pi / n_rim + 0.002, PLATE_RIM_HALF)),
                 "rgba": rim, "contype": "1", "conaffinity": "1"})
 
 
@@ -368,6 +391,17 @@ def build_scene_xml(scene: Scene | dict[str, Any] | str | None = None) -> str:
                                       "pos": _f((cx + lx * (sx / 2 - 0.04), cy + ly * (sy / 2 - 0.04), top - 0.39)),
                                       "size": "0.025 0.025 0.35", "rgba": "0.3 0.3 0.32 1", "contype": "0",
                                       "conaffinity": "0"})
+    # visible regions (a goal zone "drawn on the table", e.g. a bin given as success.region): a paint-thin
+    # decal with no collision, so the cameras show where the object goes
+    for rn, r in s.regions.items():
+        if not (isinstance(r, dict) and r.get("visible") and len(r.get("x") or []) == 2 and len(r.get("y") or []) == 2):
+            continue
+        rgba = list(r.get("color") or (0.18, 0.44, 0.84, 1.0))[:4]
+        rgba = (rgba + [1.0])[:4]
+        ET.SubElement(world, "geom", {"name": f"region_{rn}", "type": "box",
+                                      "pos": _f(((r["x"][0] + r["x"][1]) / 2, (r["y"][0] + r["y"][1]) / 2, top + 0.0006)),
+                                      "size": _f(((r["x"][1] - r["x"][0]) / 2, (r["y"][1] - r["y"][0]) / 2, 0.0005)),
+                                      "rgba": _f(rgba), "contype": "0", "conaffinity": "0"})
     for oid in s.objects:
         _add_object(world, s, oid)
     for name, cam in s.cameras.items():
@@ -398,4 +432,5 @@ def build_scene_xml(scene: Scene | dict[str, Any] | str | None = None) -> str:
 
 
 __all__ = ["ARM_JOINTS", "ARM_XML", "ASSET_DIR", "DEFAULT_SCENE", "FINGER_JOINT", "FINGER_TRAVEL", "KD", "KP",
-           "PRIMITIVES", "SCENES_DIR", "SDK_REF", "Scene", "SceneError", "build_scene_xml", "load_scene"]
+           "PLATE_RIM_HEIGHT", "PRIMITIVES", "SCENES_DIR", "SDK_REF", "Scene", "SceneError", "build_scene_xml",
+           "load_scene"]

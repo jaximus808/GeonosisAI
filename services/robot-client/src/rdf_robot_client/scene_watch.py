@@ -13,7 +13,13 @@ reducer publish), and for the newest one naming this robot:
   * appends ``scene.loaded`` {robot_id, ticket_id, revision, scene_id, deploy_id, ok, error?, objects}.
 
 On start it applies the newest deploy for this robot too, so a restarted sim comes back in the ticket's scene
-(the "read the active scene on start" path). A deploy it already applied is not applied again. The real arm
+(the "read the active scene on start" path). A deploy it already applied is not applied again.
+
+An eval (``eval_trials``) calls ``settle()`` before trial 0: it waits (bounded) for the subscription's first
+snapshot and applies a pending deploy right there, from the job's own thread. Without it a ``run_eval`` queued
+before a restart could start trial 0 a second before the snapshot landed, and the scene swapped mid-trial. The
+apply loop and ``settle`` share one lock around "is a job running? then apply", so a deploy never lands inside
+a job that started after the check. The real arm
 never runs this watcher (``find_sim`` is None there), and the orchestrator refuses to deploy to a real robot.
 """
 from __future__ import annotations
@@ -48,6 +54,8 @@ class SceneWatcher:
         self.applied: str | None = None  # deploy_id
         self.current: dict[str, Any] | None = None  # the scene.loaded payload of the scene in the sim
         self._pending: dict[str, Any] | None = None
+        self._snapshot = threading.Event()  # the subscription's first snapshot arrived
+        self._apply_lock = threading.Lock()  # "no job is running -> apply" is atomic against settle()
         self._cv = threading.Condition()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -86,6 +94,7 @@ class SceneWatcher:
         mine = [p for p in (self._mine(dict(r)) for r in snapshot.get("event_log", [])) if p]
         if mine:
             self._offer(max(mine, key=lambda p: p["_event_id"]))
+        self._snapshot.set()
 
     def _on_insert(self, table: str, row: dict[str, Any], meta: dict[str, Any]) -> None:
         p = self._mine(dict(row)) if table == "event_log" else None
@@ -113,16 +122,34 @@ class SceneWatcher:
                 p = self._pending
             if p is None:
                 continue
-            busy = self._busy()
-            if busy:
-                _log("scene deploy waiting for the current job", job=busy, scene_id=p.get("scene_id"))
-                self._stop.wait(self.poll_s)
-                continue
+            with self._apply_lock:
+                busy = self._busy()
+                if not busy:
+                    with self._cv:
+                        if self._pending is not p:
+                            continue  # a newer deploy arrived meanwhile (or settle() applied it)
+                        self._pending = None
+                    self.apply(p)
+                    continue
+            _log("scene deploy waiting for the current job", job=busy, scene_id=p.get("scene_id"))
+            self._stop.wait(self.poll_s)
+
+    def settle(self, timeout_s: float = 15.0) -> dict[str, Any] | None:
+        """Called by a job (an eval) before it starts: wait up to ``timeout_s`` for the first subscription
+        snapshot, then apply the newest pending deploy for this robot NOW (the caller is the running job, so
+        the apply loop would defer it until the job ends). Returns the ``scene.loaded`` payload it wrote, or
+        None when nothing was pending."""
+        if not self._snapshot.wait(max(0.0, timeout_s)):
+            _log("scene settle: no scene.deployed snapshot yet; trials start on the current scene",
+                 waited_s=timeout_s, scene=getattr(getattr(self.sim, "scene", None), "name", None))
+        with self._apply_lock:
             with self._cv:
-                if self._pending is not p:
-                    continue  # a newer deploy arrived meanwhile
-                self._pending = None
-            self.apply(p)
+                p, self._pending = self._pending, None
+            if p is None or p.get("deploy_id") == self.applied:
+                return None
+            _log("scene settle: loading the pending deploy before the trials", scene_id=p.get("scene_id"),
+                 deploy_id=p.get("deploy_id"))
+            return self.apply(p)
 
     def apply(self, p: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {k: p.get(k) for k in ("ticket_id", "revision", "scene_id", "deploy_id")}

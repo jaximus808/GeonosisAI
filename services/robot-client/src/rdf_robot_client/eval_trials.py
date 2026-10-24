@@ -32,10 +32,13 @@ Outcomes are confirmed by the operator. Nothing is marked a success without a hu
     rollout ran out of time.
 
 [SIM] MuJoCo sim arm only (``adapters/mujoco_sim.py``; never on the real arm, the TDM-49 SimArm or the fake):
-  * every trial starts with a scene reset (random cube pose) after homing (``sim.scene_reset`` event);
-  * the eval outcome is auto-reported from sim state (cube resting in the empty plate = success; a
-    missed grasp / drop = failure, which also ends the rollout early) as verdict source ``sim_auto``
-    with a note starting ``[SIM] auto outcome``; ``RDF_SIM_AUTO_OUTCOME=0`` turns it off (operator
+  * before trial 0 the robot loads any scene deploy (TDM-104 ``scene.deployed``) still pending for it
+    (``SceneWatcher.settle``), so no trial runs on the previous ticket's scene;
+  * every trial starts with a scene reset (random object pose) after homing (``sim.scene_reset`` event);
+  * the eval outcome is auto-reported from sim state (the scene spec's success predicate, e.g. the cube
+    resting in the bin = success; a missed grasp / drop = failure, which also ends the rollout early) as
+    verdict source ``sim_auto`` with a note starting ``[SIM] auto outcome`` that names the spec's object
+    and target ("the red cube is not in the bin"); ``RDF_SIM_AUTO_OUTCOME=0`` turns it off (operator
     verdicts again). Real-arm outcomes stay operator-confirmed;
   * collection rollouts use the same sim success / failure signals as the TDM-69 detector input.
 
@@ -365,6 +368,7 @@ class EvalTrialRunner:
         self.max_pause_s = _env_float("RDF_INTERVENTION_MAX_PAUSE_S", DEFAULT_MAX_PAUSE_S)
         # [SIM] MuJoCo scene: reset per trial + auto outcome (see module doc); None on hardware
         self.sim_scene = _sim_scene(ctx)
+        self._sim_failure: str | None = None  # [SIM] the failure that ended the current trial's rollout
         self.sim_auto = self.sim_scene is not None and os.environ.get("RDF_SIM_AUTO_OUTCOME", "1").strip().lower() \
             not in ("0", "false", "off", "no")
         post = (self.iv_cfg or {}).get("post_handback_s")
@@ -423,14 +427,16 @@ class EvalTrialRunner:
         if self.sim_scene is None:
             return
         info = self.sim_scene.reset_scene()
+        what = self.sim_scene.scene.goal_phrases()["object"]
         self.ctx.event("sim.scene_reset", index=index, eval_run_id=self.eval_run_id, sim=True,
-                       note="[SIM] the simulator put the cube at a new random pose", **info)
+                       note=f"[SIM] the simulator put {what} at a new random pose", **info)
 
     def _sim_done(self, step: int, st: Any) -> bool:
         """success_check for the rollout: True ends it as a success; a sim-detected failure (missed
         grasp, drop) ends it via finish_requested (the arm holds) so the trial isn't run to timeout."""
         s = self.sim_scene.task_status()
         if s["failure"]:
+            self._sim_failure = s["failure"]  # the reason this rollout ended (it can clear once the gripper re-opens)
             self.ctx.finish_requested.set()
         return bool(s["success"])
 
@@ -439,11 +445,15 @@ class EvalTrialRunner:
         if not self.sim_auto or self.inbox.verdict is not None:
             return
         s = self.sim_scene.task_status()
+        names = self.sim_scene.scene.goal_phrases()  # the scene spec's names: "the red cube", "the bin"
+        obj, rel, tgt = s.get("object_label") or names["object"], s.get("relation") or names["relation"], \
+            s.get("target_label") or names["target"]
         if s["success"]:
-            note = "[SIM] auto outcome from sim state: the cube is resting in the empty plate"
+            note = f"[SIM] auto outcome from sim state: {obj} is resting {rel} {tgt}"
         else:
-            why = s["failure"] or ("the rollout hit its time limit with the cube not in the plate"
-                                   if res.ended in ("max_seconds", "max_steps") else "the cube is not in the plate")
+            why = s["failure"] or getattr(self, "_sim_failure", None) or (
+                f"the rollout hit its time limit with {obj} not {rel} {tgt}" if res.ended in ("max_seconds", "max_steps")
+                else f"{obj} is not {rel} {tgt}")
             note = f"[SIM] auto outcome from sim state: {why}"
         try:
             self.inbox.submit(bool(s["success"]), note, "sim_auto", eval_run_id=self.eval_run_id or None, index=index)
@@ -472,6 +482,7 @@ class EvalTrialRunner:
             ctx.event("eval.trial_started", eval_run_id=self.eval_run_id, index=index, trials=self.trials,
                       checkpoint_uri=self.checkpoint_uri, kind=self.run_kind, episode_key=ep_key, sim=self.sim)
             # 3. the policy episode
+            self._sim_failure = None
             t_start = time.time()
             check = self._sim_done if self.sim_auto else self.success_check
             res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=check,
@@ -798,9 +809,35 @@ class EvalTrialRunner:
                     pass
 
     # ---- the job
+    def _settle_scene(self) -> dict[str, Any] | None:
+        """[SIM] Load any TDM-104 scene deploy still pending for this robot BEFORE trial 0.
+
+        The scene watcher defers a deploy while a job runs (a scene never changes under a rollout), and on a
+        restart its subscription snapshot can land a second after a ``run_eval`` that was already queued: trial
+        0 then ran on the old scene. ``settle`` waits for that snapshot (bounded) and applies the newest deploy
+        here, before the first reset. A deploy that arrives later waits for the end of the eval as before."""
+        if self.sim_scene is None:
+            return None
+        w = self.ctx.client.services.get("scene_watch") if isinstance(getattr(self.ctx.client, "services", None), dict) else None
+        out: dict[str, Any] = {"scene": self.sim_scene.scene.name}
+        if w is not None and callable(getattr(w, "settle", None)):
+            try:
+                applied = w.settle(timeout_s=_env_float("RDF_EVAL_SCENE_SETTLE_S", 15.0))
+            except Exception as e:  # noqa: BLE001 - never block an eval on the watcher; say so
+                applied = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            if applied:
+                out["loaded"] = {k: applied.get(k) for k in ("ticket_id", "scene_id", "deploy_id", "ok", "error")}
+            out["scene"] = self.sim_scene.scene.name
+        tid = int(getattr(self.ctx.command, "ticket_id", 0) or 0)
+        meta = (self.sim_scene.scene.spec.get("meta") or {}) if isinstance(self.sim_scene.scene.spec, dict) else {}
+        if tid and meta.get("ticket_id") and int(meta["ticket_id"]) != tid:
+            out["warning"] = f"[SIM] the sim holds ticket {meta['ticket_id']}'s scene, this eval is for ticket {tid}"
+        return out
+
     def run(self) -> dict[str, Any]:
         ctx = self.ctx
         prompt = policy_prompt(ctx)
+        scene = self._settle_scene()  # [SIM] the ticket's deployed scene is loaded before any trial
         activate = self._activate()
         if self.collect:
             return self._run_collect(prompt, activate)
@@ -809,6 +846,8 @@ class EvalTrialRunner:
         base = {"eval_run_id": self.eval_run_id, "kind": self.run_kind, "checkpoint_uri": self.checkpoint_uri,
                 "trials": self.trials, "prompt": prompt, "sim": self.sim, "outcome_timeout_s": self.outcome_timeout_s,
                 "already_recorded": sorted(done), "activate": activate}
+        if scene is not None:
+            base["sim_scene"] = scene
         if self.interventions_requested:  # TDM-69: the detector runs in collection rollouts only
             base["interventions_note"] = ("payload asked for interventions; eval/baseline runs never run the failure "
                                           "detector (eval numbers stay clean); an operator pause_for_takeover still "

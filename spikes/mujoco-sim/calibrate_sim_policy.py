@@ -1,6 +1,7 @@
 """Offline calibration of the [SIM] scripted policy's noise profiles (no real time, no server).
 
-    cd services/robot-client && uv run --extra sim python ../../spikes/mujoco-sim/calibrate_sim_policy.py --episodes 40
+    cd services/robot-client && uv run --extra sim python ../../spikes/mujoco-sim/calibrate_sim_policy.py --episodes 40 \\
+        --scene cube_plate --scene tests/fixtures/scenes/cube_bin.json --scene tests/fixtures/scenes/cube_bin_region.json
 
 Runs N episodes per profile on the same N random scenes (MuJoCo physics, 30 Hz control, 10-step
 re-query like the TDM-50 executor) and prints the success rate per profile.
@@ -47,10 +48,20 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--scene", action="append", default=None,
+                    help="scene spec: a name under sim_assets/scenes or a JSON path (repeatable; default cube_plate)")
+    ap.add_argument("--profile", action="append", default=None, help="only these profiles (default: all)")
     a = ap.parse_args()
+    for scene in a.scene or ["cube_plate"]:
+        calibrate(scene, a)
+
+
+def calibrate(scene: str, a: argparse.Namespace) -> dict:
     out = {}
     for name, prof in PROFILES.items():
-        sim = MujocoSimArm(seed=a.seed, realtime=False)
+        if a.profile and name not in a.profile:
+            continue
+        sim = MujocoSimArm(scene=scene, seed=a.seed, realtime=False)
         pol = ScriptedPickPlace()
         res = []
         t0 = time.time()
@@ -69,7 +80,8 @@ def main() -> None:
         ts = [r["t"] for r in res if r["success"]]
         out[name] = {"success": ok, "of": a.episodes, "rate": round(ok / a.episodes, 3), "failures": fails,
                      "mean_success_s": round(float(np.mean(ts)), 2) if ts else None, "wall_s": round(time.time() - t0, 1)}
-        print(name, json.dumps(out[name]), flush=True)
+        print(sim.scene.name, name, json.dumps(out[name]), flush=True)
+    return out
 
 
 if __name__ == "__main__":

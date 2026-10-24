@@ -87,3 +87,21 @@ Each call that changes state appends one `event_log` row; `actor` is the caller'
 | `set_ticket_status(ticket_id, status, note)` | orchestrator; mcp/web may only set `cancelled` | Allowed: `created→onboarding\|baseline`, `onboarding→baseline`, `baseline→diagnose`, `diagnose→plan_data`, `plan_data→dispatch`, `dispatch→review`, `review→train\|dispatch`, `train→eval`, `eval→shipped\|diagnose\|plan_data\|dispatch`, and any non-terminal status → `failed\|cancelled`. `shipped`, `failed` and `cancelled` are terminal. Looping back from `eval` increments `ticket.iteration` and is refused once `iteration + 1 >= max_iterations`. Logs `ticket.status_changed` {from, to, note, iteration}. |
 
 Status names: the TDM-9 brief's names map onto the TDM-8 enum as diagnosing=`diagnose`, planning=`plan_data`, collecting=`dispatch`, reviewing=`review`, training=`train`, evaluating=`eval`. Two edges go beyond the brief: `created→baseline` lets a robot that is already onboarded skip onboarding, and `review→dispatch` reopens collection when rejections leave the set short. To make the chain strict again, edit `TDM9_TICKET_TRANSITIONS`.
+
+## Dataset-offer and QA reducers (TDM-14, `src/reducers/dataset_offer.ts`)
+
+The rule: a seller is paid only for `target_episodes − (episodes already uploaded or accepted for the ticket)`, and only for purchased episodes that both QA layers accepted. The cap is enforced in the reducers. Reducers are serializable transactions, and open offers **reserve** their unfilled slots, so concurrent offers can never promise more than the target.
+
+- **live episode:** a `clean_teleop`, `recovery_takeover` or `purchased` episode that is not rejected. An episode is rejected if `review_status = rejected`, if any of its latest `qa_result` checks failed, or if its latest `review` is not accepted.
+- **committed(ticket)** = max(live episodes, `dataset.accepted_count`) + Σ over open offers (`proposed|accepted|ingesting|qa`) of (`needed_count` − that offer's live episodes).
+
+| Reducer | Caller | Does |
+|---|---|---|
+| `create_dataset_offer(ticket_id, seller_id, price_per_episode_cents, source_uri?)` | orchestrator, mcp, web | `needed_count = max(0, target_episodes − committed)`. Rejects when 0, when the seller isn't `dataset_seller`, or when the ticket is closed. Status `proposed`. |
+| `accept_dataset_offer(offer_id)` | orchestrator, mcp, web, or the seller's own identity | `proposed → accepted`. |
+| `ingest_purchased_episode(offer_id, storage_uri, actions_uri, cameras_json, frame_count, duration_ms, success?)` | orchestrator, factory, web, or the seller | Inserts `episode(kind=purchased, review_status=pending)` and bumps `ingested_count` and `dataset.total_count`. Rejected when the offer already has `needed_count` live episodes ("is full: 3/3"), or when the ticket is already at target (other uploads landed). A rejected delivery frees its slot for a replacement, so `ingested_count` counts every delivery. Status becomes `ingesting`, then `qa` when full. |
+| `record_qa_result(episode_id, check_name, passed, detail_json)` | reviewer, orchestrator | One QA check row. The latest row per `check_name` wins. Query per episode with `SELECT * FROM qa_result WHERE episode_id = N`. |
+| `finalize_offer(offer_id)` | orchestrator, reviewer, payments | Refused while any delivered episode still lacks a verdict. `accepted_count = min(needed_count, episodes with ≥1 QA check, all latest checks passed AND an accepted review)`. Status `done` (the "settled" state). Logs `payout_cents`. Then call `reserve_dataset_payment(offer_id, batch_ref)` (TDM-11). |
+| `cancel_dataset_offer(offer_id, reason)` | orchestrator, mcp, web | Open offer → `cancelled`, which releases its reserved slots. |
+
+Local test (44 checks, including target 5 with 2 accepted → `needed_count` 3, and the 4th ingest rejected): `spikes/tdm-14-dataset-offer/local_test.sh`.

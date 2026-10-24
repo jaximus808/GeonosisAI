@@ -154,7 +154,8 @@ async def stream_token(body: StreamTokenRequest, stdb: Tdm55Stdb = Depends(get_s
     try:
         token, claims = mint(secret, robot_id=int(robot["id"]), robot_name=str(robot["name"]),
                              task_id=int(task["id"]), sub=f"contributor:{int(task['assignee_id'])}",
-                             ttl_s=DEFAULT_TTL_S, not_after=lease_us / 1e6 + LEASE_GRACE_S)
+                             ttl_s=DEFAULT_TTL_S, not_after=lease_us / 1e6 + LEASE_GRACE_S,
+                             claimed_at_us=int(task.get("claimed_at") or 0))  # TDM-57: lease generation
     except StreamTokenError:
         raise HTTPException(403, "The claim lease has expired; claim the task again.") from None
     log.info("stream.token_minted", extra={"task_id": int(task["id"]), "robot_id": int(robot["id"]),
@@ -162,4 +163,5 @@ async def stream_token(body: StreamTokenRequest, stdb: Tdm55Stdb = Depends(get_s
                                            "ttl_s": round(claims.exp - claims.iat, 1)})
     return {"token": token, "exp": claims.exp, "stream_url": url, "http_url": info.get("http"),
             "transport": info.get("transport", "jpeg-ws/1"), "cams": info.get("cams") or [],
-            "robot_id": int(robot["id"]), "task_id": int(task["id"])}
+            "robot_id": int(robot["id"]), "task_id": int(task["id"]), "claimed_at_us": claims.claimed_at_us,
+            "lease_expires_at_us": int(lease_us)}

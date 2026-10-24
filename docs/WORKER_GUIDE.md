@@ -72,3 +72,12 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - TDM-12 training/eval: `queue_training_run`, `set_training_status`, `start_eval_run`, `record_eval_trial`, `finalize_eval_run` (matches `stats.EvalRunFinalizer`), `record_failure_cluster`, `record_data_plan` (insert-only).
 - TDM-13 agents/robot: `upsert_agent_session`, `agent_wait_for(session_id, predicate_json, resume_payload_json)`, `agent_resume` (only one caller can win it), `agent_step`, `issue_robot_command(robot_id, type, payload_json, ticket_id)` plus ack/complete/fail. `soft_estop` is always accepted.
 - TDM-10 marketplace: `create_task(ticket_id, type, price_cents, payload_json)`, `claim_task(task_id, contributor_id)` (atomic), `heartbeat_claim`, `release_task`, `complete_task(task_id, result_json)`, `cancel_task(task_id, reason)`, `expire_task_leases()`. Arm-control leases are 60 s (heartbeat every 30 s) and reset leases 10 min. One live control lease per robot. `(task_id, claimed_at)` is the lease token.
+- TDM-11 episodes/payments: `create_episode(...)`, `submit_review(episode_id, accepted, reason, metrics_json)` (an accept reserves the payout), `reserve_payment(episode_id)`, `reserve_task_payment(task_id)` (resets), `reserve_dataset_payment(offer_id, batch_ref)` (call after TDM-14's `finalize_offer`), `mark_payment_paid/failed/awaiting_onboarding/reversed`, `approve_spend(ticket_id, data_plan_id, approved_cents, approved_by)`. Payments over budget are stored as `blocked_budget`.
+- Arg encoding over HTTP: optional args are `{"some":x}` / `{"none":[]}`, and timestamps are `{"__timestamp_micros_since_unix_epoch__":n}`. The shared `rdf_common.spacetime_client` handles this for you.
+
+## Shared clients (TDM-16), so use these and don't roll your own
+- Python: `rdf_common.spacetime_client` provides `SpacetimeClient`/`AsyncSpacetimeClient` (`call_reducer`, `sql`, `from_settings`) and `subscribe(...)`. Typed dataclasses and reducer wrappers are in `rdf_common.spacetime_tables`.
+- TS: `@rdf/spacetime-bindings`. Regenerate everything with `pnpm gen:bindings` from the repo root, after publishing.
+
+## Committing in the shared checkout (IMPORTANT)
+- **Always commit with an explicit pathspec: `git commit -m "..." -- <your paths>`.** A plain `git commit` takes whatever *anyone* has staged, and that has already put one ticket's files under another ticket's message. Don't leave files staged between steps.

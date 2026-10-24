@@ -31,8 +31,10 @@ Frame extraction and media fetch reuse the TDM-25 reviewer (``reviewer.fetch_loc
 
 Outages are not rejections. A storage error on our side, a Claude API error, a refusal or invalid
 output raises ``LlmQaError`` (a ``reviewer.ReviewError``), and NOTHING is written except a
-``qa.error`` event. The episode stays pending and is retried on the next boot (or with
-``run_after_deterministic``).
+``qa.error`` event. The episode stays pending; the handler retries with backoff, bounded and counted
+from those ``qa.error`` rows (``llm_retry.py``; a refusal is retried with a context preface). After the
+last attempt it logs ``qa.failed`` and still writes no review: the episode waits for a human, and
+``append_event qa.retry_requested {episode_id}`` starts a fresh round.
 
 Cost: one call per episode, with all frames in that call. ``call_cap`` limits calls per offer to
 max(4, 2 x needed_count), retries included. Once an offer reaches the cap, its episodes stay pending
@@ -60,6 +62,8 @@ log = get_logger("llm_qa")
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "llm_qa.yaml"
 ACTOR = "orchestrator.llm_qa"
 EVENT_ERROR = "qa.error"
+EVENT_FAILED = "qa.failed"  # retries exhausted: the episode stays pending for a human (llm_retry.py)
+EVENT_RETRY_REQUESTED = "qa.retry_requested"  # {episode_id}: a human restarts the retry count
 EVENT_CAPPED = "qa.llm_capped"
 EVENT_RATE = "qa.acceptance_rate"
 CHECK_RELEVANCE = "llm_relevance"
@@ -534,12 +538,19 @@ def log_event(stdb: Any, type_: str, payload: dict) -> None:
     stdb.call_reducer("append_event", ACTOR, type_, json.dumps(payload, default=str)[:60000])
 
 
-def log_error(stdb: Any, episode: Any, error: str) -> None:
-    """An outage: a qa.error event, never a rejection."""
+def log_error(stdb: Any, episode: Any, error: str, **extra: Any) -> None:
+    """An outage: a qa.error event, never a rejection (``extra``: attempt, kind, ... from llm_retry)."""
     log_event(stdb, EVENT_ERROR, {"stage": "llm_qa", "episode_id": _g(episode, "id"),
                                   "ticket_id": _g(episode, "ticket_id"),
-                                  "dataset_offer_id": _g(episode, "dataset_offer_id"), "error": error[:2000],
+                                  "dataset_offer_id": _g(episode, "dataset_offer_id"), **extra, "error": error[:2000],
                                   "effect": "no review written; episode stays pending and is retried"})
+
+
+def log_failed(stdb: Any, episode: Any, **fields: Any) -> None:
+    """Terminal: retries exhausted. Still no review (an outage is never a rejection)."""
+    log_event(stdb, EVENT_FAILED, {"stage": "llm_qa", "episode_id": _g(episode, "id"),
+                                   "ticket_id": _g(episode, "ticket_id"),
+                                   "dataset_offer_id": _g(episode, "dataset_offer_id"), **fields})
 
 
 def offer_stats(stdb: Any, offer_id: int) -> dict:
@@ -570,11 +581,12 @@ def acceptance_guard(stdb: Any, offer_id: int, ticket_id: Any, cfg: LlmQaConfig)
 
 def run_after_deterministic(stdb: Any, episode: Any, ticket: Any, *, cfg: LlmQaConfig | None = None,
                             judge: Judge | None = None, offer: Any = None, prompt: str | None = None,
-                            extra_calls: int = 0, **fetch_kw) -> LlmQaDecision | None:
+                            extra_calls: int = 0, log_errors: bool = True, **fetch_kw) -> LlmQaDecision | None:
     """The whole step for one episode, re-reading the gate from SQL. Returns None when it did not run
     (gate closed, cap reached, or an outage, which is logged as qa.error and then re-raised).
 
-    TDM-92 can call this in-process after writing ``deterministic_qa``; the bus handler calls it too."""
+    TDM-92 can call this in-process after writing ``deterministic_qa``; the bus handler calls it too
+    (with ``log_errors=False``: it logs the qa.error itself, with the retry fields)."""
     cfg = cfg or load_config()
     eid = int(_g(episode, "id"))
     ep = stdb.sql(f"SELECT * FROM episode WHERE id = {eid}")
@@ -606,7 +618,8 @@ def run_after_deterministic(stdb: Any, episode: Any, ticket: Any, *, cfg: LlmQaC
     try:
         d = judge_episode(episode, ticket, cfg=cfg, judge=judge, prompt=prompt, **fetch_kw)
     except rv.ReviewError as e:
-        log_error(stdb, episode, f"{type(e).__name__}: {e}")
+        if log_errors:
+            log_error(stdb, episode, f"{type(e).__name__}: {e}")
         raise
     d.metrics["cost"] = {"llm_calls_before": used, "cap": cap}
     record(stdb, d)

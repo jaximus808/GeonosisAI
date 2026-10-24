@@ -430,8 +430,26 @@ def _usage(resp: Any) -> dict:
     return {k: getattr(u, k, None) for k in ("input_tokens", "output_tokens")} if u else {}
 
 
-def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | None = None) -> PlanOutcome:
-    """Decide the plan for one ticket iteration. Raises PlannerError if Claude can't produce one."""
+def reduce_inputs(inp: PlannerInputs) -> PlannerInputs:
+    """The retry after a refusal: drop the free text (operator/robot failure notes, the clustering
+    model's prose). Clusters, eval numbers and budget stay, so the rules and checks are unchanged."""
+    from dataclasses import replace
+
+    def strip(trials: list[dict]) -> list[dict]:
+        return [{k: v for k, v in t.items() if k != "failure_note"} for t in trials]
+
+    return replace(inp, failed_trials=strip(inp.failed_trials), diagnosis_note=None,
+                   clusters=[replace(c, example_trials=strip(c.example_trials)) for c in inp.clusters])
+
+
+def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | None = None,
+         reduced: bool = False) -> PlanOutcome:
+    """Decide the plan for one ticket iteration. Raises PlannerError if Claude can't produce one.
+
+    ``reduced`` (the retry after a refusal, ``handlers/planner.py``): ``reduce_inputs`` plus a context
+    preface on the first message; the evidence says ``"prompt": "reduced"``."""
+    if reduced:
+        inp = reduce_inputs(inp)
     b = budget(inp)
     g = guardrail(inp)
     base_evidence = {
@@ -453,6 +471,10 @@ def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | 
             f"({b.per_episode_cents[g.required_type]}c incl. reset)"), evidence=base_evidence)
 
     messages: list[dict] = [{"role": "user", "content": user_message(inp, b)}]
+    if reduced:
+        from .llm_retry import with_preface
+
+        messages = with_preface(messages)
     attempts: list[dict] = []
     d, resp = _call(client, messages)
     problems = violations(d, inp, g, b)
@@ -516,6 +538,7 @@ def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | 
                   "attempts": attempts},
         "guardrail_forced": forced,
         "guardrail_agreed_first_try": not attempts[0]["violations"],
+        "prompt": "reduced" if reduced else "full",
     }
     return PlanOutcome(inp.ticket_id, None, data_type, amount, reasoning, unit, ids, evidence)
 

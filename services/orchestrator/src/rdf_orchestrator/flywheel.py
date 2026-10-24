@@ -89,6 +89,8 @@ DATASET_KINDS = ("clean_teleop", "recovery_takeover", "purchased")
 PLAN_LIVE = ("approved", "executing", "done")
 PI05_BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base/params"  # = TDM12_PI05_BASE_CHECKPOINT
 MAX_STEP_FAILURES = 2  # failed training runs / eval runs per stage before the ticket is failed
+# Terminal "retries exhausted" events from the Claude-backed steps (llm_retry.py): the ticket is failed.
+STEP_FAILED_EVENTS = ("diagnose.failed", "planner.failed")
 
 WATCHED_TABLES = ("ticket", "run_settings", "robot", "dataset", "failure_cluster", "data_plan", "episode",
                   "training_run", "eval_run", "eval_trial", "event_log")
@@ -119,6 +121,7 @@ class TicketView:
     episodes: list = field(default_factory=list)
     training_runs: list = field(default_factory=list)
     eval_runs: list = field(default_factory=list)
+    step_failed: list = field(default_factory=list)  # STEP_FAILED_EVENTS payloads (+ "type"), id order
 
     @classmethod
     def from_bus(cls, bus, ticket_id: int) -> "TicketView | None":
@@ -131,9 +134,13 @@ class TicketView:
 
         robot = bus.get("robot", t.get("robot_id"))
         ds = of("dataset")
-        return cls(ticket=t, settings=bus.get("run_settings", ticket_id), robot=robot, dataset=ds[0] if ds else None,
+        failed = [{**_payload(r), "type": r.get("type"), "event_id": r.get("id")} for r in sorted(
+            (r for r in bus.rows("event_log") if r.get("type") in STEP_FAILED_EVENTS), key=lambda r: r.get("id") or 0)]
+        v = cls(ticket=t, settings=bus.get("run_settings", ticket_id), robot=robot, dataset=ds[0] if ds else None,
                    clusters=of("failure_cluster"), plans=of("data_plan"), episodes=of("episode"),
                    training_runs=of("training_run"), eval_runs=of("eval_run"))
+        v.step_failed = [p for p in failed if p.get("ticket_id") == ticket_id]
+        return v
 
     # ---- ticket + settings
     @property
@@ -255,6 +262,11 @@ class TicketView:
                 "amount": int(self.plan["amount"]) if self.plan else 0,
                 "dataset_accepted_count": int((self.dataset or {}).get("accepted_count") or 0)}
 
+    def gave_up(self, type_: str, **match: Any) -> dict | None:
+        """The newest ``type_`` (STEP_FAILED_EVENTS) payload of this ticket matching ``match``."""
+        return next((p for p in reversed(self.step_failed)
+                     if p.get("type") == type_ and all(p.get(k) == want for k, want in match.items())), None)
+
     @property
     def accepted_episode_ids(self) -> list[int]:
         """The per-ticket training set: every accepted dataset episode, all iterations."""
@@ -275,6 +287,10 @@ class Decision:
 def _eval_ev(r) -> dict:
     return {"eval_run_id": r["id"], "kind": r.get("kind"), "successes": r.get("successes"), "trials": r.get("trials"),
             "ci_low": r.get("ci_low"), "ci_high": r.get("ci_high"), "checkpoint_uri": r.get("checkpoint_uri")}
+
+
+def _gave_up_ev(p: dict) -> dict:
+    return {k: p.get(k) for k in ("type", "event_id", "eval_run_id", "iteration", "attempts", "kinds", "last_error")}
 
 
 def _budget_stop(v: TicketView, where: str) -> Decision | None:
@@ -329,11 +345,19 @@ def decide(v: TicketView) -> Decision:
         src = v.last_done_eval
         if src and int(src.get("successes") or 0) >= int(src.get("trials") or 0) > 0:
             return Decision("plan_data", f"eval {src['id']} had no failures to cluster", _eval_ev(src))
+        gave_up = v.gave_up("diagnose.failed", eval_run_id=src["id"]) if src else None
+        if gave_up:
+            return Decision("failed", f"diagnose failed {gave_up.get('attempts')} times on eval {src['id']}: "
+                                      f"{gave_up.get('last_error')}", {"stop": "step_failures", **_gave_up_ev(gave_up)})
         return Decision(None, f"waiting for failure clusters for iteration {it}")
 
     if s == "plan_data":
         p = v.plan
         if p is None:
+            gave_up = v.gave_up("planner.failed", iteration=it)
+            if gave_up:
+                return Decision("failed", f"planner failed {gave_up.get('attempts')} times in iteration {it}: "
+                                          f"{gave_up.get('last_error')}", {"stop": "step_failures", **_gave_up_ev(gave_up)})
             return Decision(None, f"waiting for the planner's data plan for iteration {it}")
         ev = {"data_plan_id": p["id"], "data_type": p.get("data_type"), "amount": p.get("amount"),
               "est_cost_cents": p.get("est_cost_cents"), "approved_cents": p.get("approved_cents"), **v.money()}

@@ -46,6 +46,12 @@ so the full diagnosis goes in one ``event_log`` row, type ``diagnose.clusters``:
     }
 
 With 0 failures no clusters are recorded and a ``diagnose.no_failures`` event is logged instead.
+
+Failures (refusal, API error, bad output) are retried with backoff by the handler, counted from
+``diagnose.error`` rows (``llm_retry.py``); a refusal is retried text-only (no frames) with a context
+preface (``reduced=True``, ``"prompt": "reduced"`` in the payload). After the last attempt one
+``diagnose.failed`` {ticket_id, eval_run_id, iteration, attempts, kinds, last_error} is logged and the
+flywheel fails the ticket with that reason.
 """
 from __future__ import annotations
 
@@ -79,6 +85,7 @@ PHASES = ("start", "approach", "grasp", "lift", "transport", "place", "release",
 EVENT_CLUSTERS = "diagnose.clusters"
 EVENT_NO_FAILURES = "diagnose.no_failures"
 EVENT_ERROR = "diagnose.error"
+EVENT_FAILED = "diagnose.failed"  # terminal: retries exhausted; the flywheel fails the ticket (llm_retry.py)
 # Camera names to prefer for the frames, in order (the scene/exo view shows the failure best).
 CAMERA_PREFERENCE = ("exo", "scene", "front", "top", "overhead", "third", "main", "cam0")
 
@@ -456,6 +463,7 @@ class Diagnosis:
     episodes_without_frames: list[int] = field(default_factory=list)
     usage: dict | None = None
     repairs: list[str] = field(default_factory=list)
+    prompt: str = "full"  # "reduced" after a refusal: text only, with a context preface
 
     def payload(self) -> dict:
         er, t = self.inputs.eval_run, self.inputs.ticket
@@ -471,7 +479,7 @@ class Diagnosis:
             "reasoning": self.reasoning,
             "media": {"frames_sent": self.frames_sent, "episodes_with_frames": with_frames,
                       "episodes_without_frames": self.episodes_without_frames},
-            "repairs": self.repairs, "usage": self.usage,
+            "repairs": self.repairs, "usage": self.usage, "prompt": self.prompt,
         }
 
     def _episodes_with_frames(self) -> Iterable[int]:
@@ -526,15 +534,26 @@ def reconcile(inputs: DiagnoseInputs, md: ModelDiagnosis) -> tuple[list[Cluster]
     return out, repairs
 
 
-def diagnose_eval_run(inputs: DiagnoseInputs, *, claude: Clusterer, frames: FrameSource | None = None) -> Diagnosis:
-    """Cluster the failed trials of one finished eval run. 0 failures -> no Claude call, no clusters."""
+def diagnose_eval_run(inputs: DiagnoseInputs, *, claude: Clusterer, frames: FrameSource | None = None,
+                      reduced: bool = False) -> Diagnosis:
+    """Cluster the failed trials of one finished eval run. 0 failures -> no Claude call, no clusters.
+
+    ``reduced`` (the retry after a refusal): no frames, and a context preface before the facts."""
     if not inputs.failed:
         return Diagnosis(inputs, [], "No failed trials; nothing to cluster.", None)
-    fr, missing = collect_frames(inputs, frames)
-    md = claude.cluster(build_messages(inputs, fr))
+    if reduced:
+        from .llm_retry import with_preface
+
+        fr: list[Frame] = []
+        missing = [int(_g(t, "episode_id") or 0) for t in inputs.failed if int(_g(t, "episode_id") or 0)]
+        messages = with_preface(build_messages(inputs, fr))
+    else:
+        fr, missing = collect_frames(inputs, frames)
+        messages = build_messages(inputs, fr)
+    md = claude.cluster(messages)
     clusters, repairs = reconcile(inputs, md)
     return Diagnosis(inputs, clusters, md.reasoning, getattr(claude, "model", None), len(fr), missing,
-                     getattr(claude, "last_usage", None), repairs)
+                     getattr(claude, "last_usage", None), repairs, "reduced" if reduced else "full")
 
 
 # --------------------------------------------------------------------------- planner-side reader
@@ -611,6 +630,13 @@ def record_diagnosis(diag: Diagnosis, stdb: Any) -> dict:
     return payload
 
 
-def log_error(stdb: Any, ticket_id: Any, eval_run_id: Any, error: str) -> None:
-    stdb.call_reducer("append_event", ACTOR, EVENT_ERROR,
-                      json.dumps({"ticket_id": ticket_id, "eval_run_id": eval_run_id, "error": error[:2000]}))
+def log_error(stdb: Any, ticket_id: Any, eval_run_id: Any, error: str, **extra: Any) -> None:
+    """One failed attempt (``extra``: attempt, kind, max_attempts, retry_in_s from ``llm_retry``)."""
+    stdb.call_reducer("append_event", ACTOR, EVENT_ERROR, json.dumps(
+        {"ticket_id": ticket_id, "eval_run_id": eval_run_id, **extra, "error": error[:2000]}, default=str))
+
+
+def log_failed(stdb: Any, ticket_id: Any, eval_run_id: Any, **fields: Any) -> None:
+    """Terminal: retries exhausted for this eval run. The flywheel fails the ticket on it."""
+    stdb.call_reducer("append_event", ACTOR, EVENT_FAILED, json.dumps(
+        {"ticket_id": ticket_id, "eval_run_id": eval_run_id, **fields}, default=str))

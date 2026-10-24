@@ -22,7 +22,10 @@ Order, and why:
 
 Infrastructure failures (download error on our side, Claude API error, refusal) raise
 ``ReviewError`` and NOTHING is written: reviews are final, so an outage must not turn into a
-rejection the contributor cannot appeal. The handler logs ``review.error`` and retries on next boot.
+rejection the contributor cannot appeal. The handler logs ``review.error`` and retries with backoff,
+bounded (``llm_retry.py``; a refusal is retried with a context preface). After the last attempt it
+logs ``review.failed`` and writes nothing else: the episode stays pending for a human, and an
+``append_event review.retry_requested {episode_id}`` starts a fresh round of attempts.
 
 ``metrics_json`` (on the review row, and in the ``review.accepted|rejected`` event)::
 
@@ -61,6 +64,8 @@ REVIEW_KINDS = ("clean_teleop", "recovery_takeover", "purchased")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 ACTOR = "orchestrator.reviewer"
 EVENT_ERROR = "review.error"
+EVENT_FAILED = "review.failed"  # retries exhausted: the episode stays pending for a human (llm_retry.py)
+EVENT_RETRY_REQUESTED = "review.retry_requested"  # {episode_id}: a human restarts the retry count
 CAMERA_PREFERENCE = ("exo", "scene", "front", "top", "overhead", "third", "main", "cam0", "wrist")
 MAX_TEXT = 1500  # per free-text field kept in metrics_json (the reducer caps the whole JSON at 16 KB)
 
@@ -482,6 +487,14 @@ def record_review(stdb: Any, decision: ReviewDecision) -> None:
     stdb.call_reducer("submit_review", decision.episode_id, decision.accepted, decision.reason, decision.metrics_json())
 
 
-def log_error(stdb: Any, episode: Any, error: str) -> None:
+def log_error(stdb: Any, episode: Any, error: str, **extra: Any) -> None:
+    """One failed attempt (``extra``: attempt, kind, max_attempts, retry_in_s from ``llm_retry``)."""
     stdb.call_reducer("append_event", ACTOR, EVENT_ERROR, json.dumps({
-        "episode_id": _g(episode, "id"), "ticket_id": _g(episode, "ticket_id"), "error": error[:2000]}))
+        "episode_id": _g(episode, "id"), "ticket_id": _g(episode, "ticket_id"), **extra, "error": error[:2000]},
+        default=str))
+
+
+def log_failed(stdb: Any, episode: Any, **fields: Any) -> None:
+    """Terminal: retries exhausted. Still no review (an outage is never a rejection)."""
+    stdb.call_reducer("append_event", ACTOR, EVENT_FAILED, json.dumps({
+        "episode_id": _g(episode, "id"), "ticket_id": _g(episode, "ticket_id"), **fields}, default=str))

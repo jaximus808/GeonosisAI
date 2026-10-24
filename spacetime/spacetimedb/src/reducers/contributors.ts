@@ -24,6 +24,7 @@ import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { contributorPresenceSweep, type RdfCtx } from '../schema';
 import { serviceRole } from '../auth';
 import { CONTRIBUTOR_KINDS, oneOf } from '../enums';
+import { logEvent } from '../event_log'; // TDM-15: the only event_log write path
 
 const PRESENCE_STALE_MICROS = 75n * 1_000_000n; // 2.5 missed 30 s heartbeats
 const SWEEP_INTERVAL_MICROS = 30n * 1_000_000n;
@@ -40,12 +41,8 @@ type ContributorRow = NonNullable<ReturnType<RdfCtx['db']['contributor']['id']['
 // Not exported (index.ts re-exports this file with `export *`); tdm60 prefix
 // keeps helper names unique in the shared module.
 
-function tdm60Json(obj: Record<string, unknown>): string {
-  return JSON.stringify(obj, (_k, v) => (typeof v === 'bigint' ? Number(v) : v));
-}
-
 function tdm60Log(ctx: RdfCtx, actor: string, type: string, payload: Record<string, unknown>) {
-  ctx.db.eventLog.insert({ id: 0n, ts: ctx.timestamp, actor, type, payload_json: tdm60Json(payload) });
+  logEvent(ctx, actor, type, payload);
 }
 
 /** The contributor bound to ctx.sender, if any. */

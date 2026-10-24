@@ -42,6 +42,7 @@ import {
   type RobotViewMode,
 } from '@/lib/robotview/sources';
 import type { RobotLive } from '@/lib/robotview/types';
+import type { TwinCamera } from './RobotTwin3D';
 import { useRobotLive, type RobotLiveResult, type UseRobotLiveOptions } from '@/lib/robotview/useRobotLive';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
@@ -56,8 +57,15 @@ export interface RobotViewProps {
   defaultMode?: RobotViewMode;
   /** Smaller chrome; the camera becomes a picture-in-picture over the twin. */
   compact?: boolean;
-  /** HUD slot (TDM-99 <RobotHud/>), rendered under the panes inside the view's frame. */
-  hud?: ReactNode;
+  /**
+   * HUD slot (TDM-99 <RobotHud/>), rendered under the panes inside the view's frame. A function gets
+   * the same context as simCameras (TDM-100), so the HUD reads this view's state feed and follows the
+   * robot the view is showing: hud={({ live, robotId }) => <RobotHud robotId={robotId} state={live.state} stale={live.stale} />}.
+   * The function form renders only while a robot is selected.
+   */
+  hud?: ReactNode | ((ctx: SimCamerasContext) => ReactNode);
+  /** Camera feed health of the streamed pane (null when no feed is shown), for pages with a health readout (TDM-100). */
+  onFeedHealth?: (h: FeedHealth | null) => void;
   /**
    * Sim camera slot (TDM-105 <SimCameras/>): shown in sim mode in place of the streamed camera feed,
    * only while a sim robot is online. A function gets this view's state feed, so the panes need no
@@ -72,7 +80,7 @@ export interface SimCamerasContext {
   compact: boolean;
 }
 
-type Preset = 'front' | 'top' | 'wrist';
+type Preset = TwinCamera;
 
 // ---------------------------------------------------------------------------------------------
 // Hooks (exported so the pages that mount RobotView can share the registry)
@@ -338,7 +346,7 @@ function PanelNote({ title, children, tone = 'neutral', action }: { title: strin
 function PresetSwitch({ preset, onChange }: { preset: Preset; onChange: (p: Preset) => void }) {
   return (
     <div className="flex overflow-hidden rounded-md bg-black/50 text-xs text-white backdrop-blur" role="group" aria-label="3D camera">
-      {(['front', 'top', 'wrist'] as const).map((p) => (
+      {(['top', 'side', 'front', 'wrist'] as const).map((p) => (
         <button
           key={p}
           type="button"
@@ -443,12 +451,13 @@ function CameraPane({
 
 // ---------------------------------------------------------------------------------------------
 
-export function RobotView({ robotId, defaultMode, compact = false, hud, simCameras }: RobotViewProps) {
+export function RobotView({ robotId, defaultMode, compact = false, hud, simCameras, onFeedHealth }: RobotViewProps) {
   const { registry, ready, now } = useRobotSources();
   const { mode, source, setMode, pickRobot } = useRobotViewMode(registry, { robotId, defaultMode });
   const { camera: access, live: liveOpts } = useRobotAccess(source, now);
   const live = useRobotLive(source?.id ?? null, liveOpts);
-  const [preset, setPreset] = useState<Preset>('front');
+  // TDM-97: 'top' matches the sim's top camera and is the twin's default; 'front' is a true front view.
+  const [preset, setPreset] = useState<Preset>('top');
   const [feed, setFeed] = useState<FeedHealth | null>(null);
   const onHealth = useCallback((h: FeedHealth | null) => setFeed(h), []);
 
@@ -485,6 +494,11 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
   const simSlot =
     sim && simCameras && source && !block ? (typeof simCameras === 'function' ? simCameras({ live, robotId: source.id, compact }) : simCameras) : null;
   const showCams = !block && !simSlot && access.kind !== 'none';
+  const hudNode = typeof hud === 'function' ? (source ? hud({ live, robotId: source.id, compact }) : null) : hud;
+  const reported = showCams ? feed : null;
+  useEffect(() => {
+    onFeedHealth?.(reported);
+  }, [onFeedHealth, reported]);
   const camNote = !block && !simSlot && access.kind === 'none' ? access : null;
   const sideColumn = showCams || (!!simSlot && !compact);
 
@@ -515,7 +529,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
         <>
           <Tdm78Boundary label="3D view">
             <div className={`h-full w-full transition-opacity ${live.stale ? 'opacity-60' : ''}`}>
-              <RobotTwin3D state={twinState} preset={preset} sim={sim} ghost={twinState?.chunk_preview} className="h-full w-full" />
+              <RobotTwin3D state={twinState} camera={preset} sim={sim} ghost={twinState?.chunk_preview} className="h-full w-full" />
             </div>
           </Tdm78Boundary>
           {!live.state && (
@@ -580,7 +594,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
             Twin only. {camNote.why} {!compact && camNote.hint ? <span className="text-zinc-500">{camNote.hint}</span> : null}
           </p>
         )}
-        {hud && <div className="mt-2">{hud}</div>}
+        {hudNode && <div className="mt-2">{hudNode}</div>}
       </div>
     </section>
   );

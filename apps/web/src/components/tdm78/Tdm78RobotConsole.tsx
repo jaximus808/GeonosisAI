@@ -5,6 +5,7 @@
 
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
+import { Tdm100RobotPanel } from '@/components/robotview/Tdm100RobotPanel';
 import type { FeedHealth } from '@/components/teleop/CameraFeed';
 import { ControlHolderPanel } from '@/components/teleop/ControlLease';
 import { operatorLoginHref, useOperator } from '@/lib/operator/useOperator';
@@ -20,7 +21,7 @@ import {
   type CommandRow,
 } from '@/lib/tdm78/useRobotConsole';
 import { Tdm78Boundary } from './Tdm78Boundary';
-import { Tdm78CameraHealth, Tdm78LiveFeed } from './Tdm78Cameras';
+import { Tdm78CameraHealth } from './Tdm78Cameras';
 import { Tdm78CommandPanel } from './Tdm78CommandPanel';
 import { Tdm78TrialPanel } from './Tdm78TrialPanel';
 
@@ -127,6 +128,11 @@ export function Tdm78RobotConsole({ id }: { id: string }) {
         </div>
       )}
 
+      {/* TDM-100: twin + cameras + HUD (RobotView) replaces the bare camera feed. */}
+      <Panel title="Watch the robot">
+        <Tdm100RobotPanel robotId={BigInt(id)} robot={r} onFeedHealth={setFeedHealth} />
+      </Panel>
+
       <Tdm78Boundary label="Eval and collection">
         <Tdm78TrialPanel
           robotId={id}
@@ -172,10 +178,6 @@ export function Tdm78RobotConsole({ id }: { id: string }) {
           <Tdm78CameraHealth configJson={r.cameraConfigJson} health={feedHealth} />
         </Panel>
       </div>
-
-      <Panel title="Live camera feed">
-        <Tdm78LiveFeed configJson={r.cameraConfigJson} tasks={v.tasks} now={now} onHealth={setFeedHealth} />
-      </Panel>
 
       <div className="grid gap-4 lg:hidden">
         <Panel title="Commands">

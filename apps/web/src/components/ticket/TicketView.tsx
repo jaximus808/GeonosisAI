@@ -14,6 +14,7 @@ import { TicketHeader } from './TicketHeader';
 import { TimelineStrip } from './TimelineStrip';
 import { TrainingRuns } from './TrainingRuns';
 import { RunSettingsButton } from './RunSettingsDrawer';
+import { Tdm100WatchRobot } from './Tdm100WatchRobot';
 import { isFakeRobot, ticketEvents } from './util';
 
 /** TDM-75: the live ticket page. Every section is a SpacetimeDB subscription; nothing here is mocked. */
@@ -83,6 +84,9 @@ export function TicketView({ id }: { id: string }) {
       <div className="-mt-4 mb-8">
         <RunSettingsButton ticketId={id} loop={loop} liveUpdatedAtMicros={settings?.updatedAt.microsSinceUnixEpoch} />
       </div>
+
+      {/* TDM-100: twin + cameras + HUD, open during baseline / collection / eval. */}
+      <Tdm100WatchRobot status={ticket.status} robotId={robotId} robot={robot} ticketId={tid} />
 
       <Block title="Before and after" aside={<span className="text-sm text-zinc-500">task success per eval run, live as trials finish</span>}>
         <EvalCards runs={evalRuns} events={events} settings={settings} robotFake={robotFake} iterationOf={iterationOf} />

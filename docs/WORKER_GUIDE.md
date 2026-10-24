@@ -162,3 +162,18 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - Commits that **delete a tracked file** or **roll a file back to an older version** are refused. Stale indexes have reverted other tickets' work three times tonight.
 - After a temp-`GIT_INDEX_FILE` commit, always run `git reset -q HEAD -- <your paths>`, so the shared index doesn't go stale for the next person.
 - If the refusal is wrong (you really are deleting or reverting on purpose), rerun with `RDF_ALLOW_REVERT=1` and say why in the commit message.
+
+## Factory client (TDM-30): `from rdf_factory import FactoryClient` (docs in `services/factory/README.md`)
+- **Calls:**
+  - `start_session(role, brief, env=None, repo_ref="", ticket_id=0, name="", write_roots=None, allow_commands=None)`
+  - `send(id, text)`
+  - `resume(id, text, reason="", claim=True)`
+  - `restart_with_payload(...)`
+  - `finish(id, "done"|"failed")`
+  - `stream_events(...)`
+  - `subscribe(...)`
+- **CLI:** `uv run rdf-factory ...`.
+- **Droid contract:** every turn ends with `DONE` or `WAITING_FOR <table>:<field><op><value>`, after writing `resume_payload.json`. A turn with neither leaves the session `paused`.
+- **Local mode** (the default tonight): file edits are limited to `services/factory/work/sessions/<id>/` unless `write_roots` widens it, and commands are off unless allow-listed in `allow_commands`.
+- **Events v1:** `{v, kind, agent_session_id, role, mode, factory_session_id, turn, seq, ts_us, text, tool, data}`. They go into `event_log` as `droid.<kind>` with actor `droid:<role>`. Live status and step are in `agent_session`.
+- **Credits:** ~1–8k per turn. Keep proofs to a few turns. The model and reasoning level come from `FACTORY_MODEL` / `FACTORY_REASONING`.

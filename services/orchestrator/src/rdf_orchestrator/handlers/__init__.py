@@ -13,3 +13,4 @@ from . import training  # noqa: F401  (TDM-21 Modal client: launch + poll traini
 from . import offers  # noqa: F401  (TDM-91 dataset offers: finalize_offer -> reserve_dataset_payment)
 from . import flywheel  # noqa: F401  (TDM-22 flywheel state machine; keep last)
 from . import evaluate  # noqa: F401  (TDM-67 eval orchestration; after flywheel: registers its steps)
+from . import resume_bridge  # noqa: F401  (TDM-27 SpacetimeDB predicate -> Factory session resume)

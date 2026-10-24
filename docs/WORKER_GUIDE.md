@@ -186,3 +186,17 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 ## Browser testing (shared Chrome)
 - Several workers drive the same Chrome at once. **Always create your own new tab** (`tabs_create_mcp`) and act only on that tab id. Never reuse an existing tab, and re-check the URL before you type. One worker's keystrokes have already landed on another worker's page.
 - Close your tab when you're done. Prefer headless checks (curl, Playwright scripts) when you don't need to see the page.
+
+## Teleop contract (TDM-52/56/57/58: build to this)
+- **Video:** TDM-55's JPEG-over-WebSocket through a cloudflared quick tunnel (`rdf_robot_client.stream`, `start_stream(rig, robot_id=, robot_name=)`).
+  - Auth: a 60 s HMAC stream token from `POST /stream/token` (via `/api/tdm55/stream-token`). It's issued only to the claimant of a live-leased task on that robot.
+  - Browser component: `<TaskCameraFeed taskId onHealth/>` in `apps/web/src/components/teleop/CameraFeed.tsx`. `onHealth` returns `{state, stale, worstLatencyMs}`.
+- **Control:** a sibling WebSocket path, `/control`, on the **same stream server and tunnel, with the same token**. It's bidirectional:
+  - **Browser → robot, ~30 Hz while the clutch is held:** `{t:"cmd", seq, ts_ms, clutch:bool, d_pos:[dx,dy,dz] m, d_rot:[rx,ry,rz] rad (axis-angle), gripper:0..1, speed_scale:0..1}`. These are EE deltas from the pose at clutch-down, in the base frame.
+  - **Also browser → robot:** `{t:"stop"}` (soft e-stop, always honored) and `{t:"handback"}` / `{t:"takeover"}` / `{t:"record_start"|"record_stop", success?}`.
+  - **Robot → browser:** `{t:"state", ...}` at ~10 Hz (pose, joints, gripper, clamps from the safety layer, `control_source`, recording state) and `{t:"ack", seq}`.
+- **Robot side:** every motion goes through the TDM-45 `SafetyLayer` (IK via the adapter's `command_ee`).
+  - The watchdog holds the arm if no cmd arrives for 200 ms while the clutch is down. Releasing the clutch holds the pose.
+  - Control is accepted only while the token's task is still claimed (re-check the lease every ≤5 s). If the feed goes stale, the browser must release the clutch.
+- **Exclusive control:** the TDM-10 `claim_task` lease, kept alive with `useTdm61ClaimHeartbeat(task)` from `apps/web/src/lib/marketplace/tdm61.ts`.
+- **Recording:** the TDM-48 `recorder_for(ctx)` provides `start` / `mark_takeover` / `mark_handback` / `stop(success)`.

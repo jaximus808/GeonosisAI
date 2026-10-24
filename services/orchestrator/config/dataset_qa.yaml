@@ -1,0 +1,59 @@
+# TDM-92 deterministic QA for PURCHASED episodes (rdf_orchestrator.dataset_qa). Runs before the
+# LLM relevance/success judgement (TDM-93). The per-episode checks (actions, duration, frame_drops,
+# jerk) are the reviewer's own: thresholds come from config/review.yaml, not from here. This file
+# holds only the dataset-level checks the per-episode reviewer does not have. Unknown keys are an error.
+version: 1
+
+embodiment:
+  # Our arm: one I2RT YAM, 6 revolute joints + a parallel gripper (observation.state = 7 floats).
+  arm_joints: 6
+  require_gripper: true
+  # Accepted `embodiment` / LeRobot `robot_type` values (lowercase). A bimanual YAM dataset is
+  # accepted only after the importer selected one arm (it then writes e.g. "bi_yam_follower:left").
+  # The robot row's own `embodiment` is always accepted too.
+  compatible: [i2rt_yam, yam, yam_follower, i2rt_yam_pro, bimanual_yam, bi_yam_follower, yam_pro]
+  # Same joint count but a different arm (SO-100 is 5+1, Trossen/Piper are 6+1) is still not YAM data.
+  require_compatible_type: true
+
+fps:
+  target: 30.0          # our recorder and the training recipe (LeRobot fps 30)
+  tolerance: 0.10       # +-10% on both the declared fps and the fps measured from timestamps
+
+cameras:
+  # The camera roles our training config needs (S-05a: observation.images.top = exo, .wrist = wrist).
+  # Used when robot.camera_config_json does not list camera names itself.
+  required: [exo, wrist]
+  # Name normalisation applied to both sides before comparing.
+  aliases: {top: exo, front: exo, scene: exo, overhead: exo, high: exo, cam_high: exo, env: exo,
+            camera_front: exo, base: exo, wrist_cam: wrist, hand: wrist, gripper: wrist}
+  allow_extra: true     # extra cameras (a second wrist cam, a side view) are fine
+
+action_range:
+  # YAM joint limits (rad) from i2rt robot_models/arm/yam/yam.urdf (joint1..joint6), plus a margin
+  # for calibration offsets. Out-of-range values usually mean degrees, another arm, or a glitch.
+  joint_lower: [-2.61799, 0.0, 0.0, -1.5708, -1.5708, -2.0944]
+  joint_upper: [3.13, 3.65, 3.13, 1.5708, 1.5708, 2.0944]
+  margin_rad: 0.05       # measured joint_pos: what the arm actually did
+  # Commanded joint_cmd may overshoot further (leader-arm teleop commands past the follower's stop;
+  # the safety layer clamps). Real allenai/24112025-yam-01 ep 1 commands joint 4 to -1.674 rad on 2%
+  # of ticks while the measured joint stays inside the limit.
+  command_margin_rad: 0.15
+  gripper_min: -0.05    # gripper_pos / gripper_cmd are normalised 0 closed .. 1 open
+  gripper_max: 1.05
+  max_joint_speed_rad_s: 10.0   # URDF velocity limit; faster tick-to-tick steps are teleports
+
+static:
+  # "Is anything happening?": the largest per-joint standard deviation over the episode, and the
+  # gripper's travel. Both below the floor = a recording of an arm that never moved.
+  min_joint_std_rad: 0.02
+  min_gripper_range: 0.05
+
+duplicate:
+  # Compared against every earlier episode of the same ticket (any kind/status, so a rejected
+  # episode cannot come back as a "replacement"), and within the purchased batch itself.
+  action_quantum_rad: 0.001     # exact duplicate: identical joint trajectory at 1 mrad resolution
+  near_max_rad: 0.01            # near duplicate: resampled trajectories within 10 mrad everywhere
+  signature_points: 48          # resampled points per joint stored in the fingerprint
+  length_ratio_max: 1.15        # trajectories more than 15% different in length are not compared
+  phash_max_hamming: 8          # 64-bit DCT perceptual hash, first/middle/last exo frame
+  phash_trajectory_max_rad: 0.08  # all three frames match AND trajectories this close = duplicate

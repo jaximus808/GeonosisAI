@@ -1,0 +1,19 @@
+{
+  "name": "@rdf/env",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fail-fast env loaders (zod) shared by the TS apps",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "bin": {
+    "rdf-env-check": "./check.ts"
+  },
+  "scripts": {
+    "test": "node --test index.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

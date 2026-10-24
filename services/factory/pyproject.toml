@@ -3,10 +3,13 @@ name = "rdf-factory"
 version = "0.0.0"
 description = "Factory Droid session management (onboarding, data, training Droids)"
 requires-python = ">=3.11,<3.12"
-dependencies = []
+dependencies = ["rdf-common"]
 
 [project.scripts]
 rdf-factory = "rdf_factory.__main__:main"
+
+[tool.uv.sources]
+rdf-common = { path = "../common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

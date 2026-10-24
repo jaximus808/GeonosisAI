@@ -4,6 +4,6 @@
   "private": true,
   "description": "Claude connector: remote MCP server (create_ticket, ticket_status, approve_spend, get_report)",
   "scripts": {
-    "dev": "node -e \"console.log('[mcp] placeholder: Claude connector: remote MCP server (create_ticket, ticket_status, approve_spend, get_report) (not implemented yet)')\""
+    "dev": "node ../../packages/env/check.ts mcp && node -e \"console.log('[mcp] placeholder: Claude connector: remote MCP server (create_ticket, ticket_status, approve_spend, get_report) (not implemented yet)')\""
   }
 }

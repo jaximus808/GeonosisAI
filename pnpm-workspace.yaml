@@ -2,3 +2,4 @@
 # package.json; add "spacetime/*" here once its owner is ready to join.
 packages:
   - "apps/*"
+  - "packages/*"

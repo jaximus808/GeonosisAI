@@ -3,10 +3,13 @@ name = "rdf-training"
 version = "0.0.0"
 description = "Episode conversion to LeRobot format, pi0.5 fine-tune, checkpoint export, policy serving"
 requires-python = ">=3.11,<3.12"
-dependencies = []
+dependencies = ["rdf-common"]
 
 [project.scripts]
 rdf-training = "rdf_training.__main__:main"
+
+[tool.uv.sources]
+rdf-common = { path = "../common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

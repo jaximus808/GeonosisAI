@@ -3,10 +3,13 @@ name = "rdf-orchestrator"
 version = "0.0.0"
 description = "Planner and reviewer loops, dispatcher; writes decisions to the event log"
 requires-python = ">=3.11,<3.12"
-dependencies = []
+dependencies = ["rdf-common"]
 
 [project.scripts]
 rdf-orchestrator = "rdf_orchestrator.__main__:main"
+
+[tool.uv.sources]
+rdf-common = { path = "../common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

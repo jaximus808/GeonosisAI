@@ -3,10 +3,13 @@ name = "rdf-robot-client"
 version = "0.0.0"
 description = "Robot PC bridge: YAM arm control, cameras, recording, takeover/teleop, rollouts and eval trials"
 requires-python = ">=3.11,<3.12"
-dependencies = []
+dependencies = ["rdf-common"]
 
 [project.scripts]
 rdf-robot-client = "rdf_robot_client.__main__:main"
+
+[tool.uv.sources]
+rdf-common = { path = "../common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -7,15 +7,15 @@
 //     mode once TDM-107 lands)
 //   * the TDM-99 HUD under the panes, fed by RobotView's own state feed (no second socket), and
 //     following whichever robot the view is showing
-//   * `simCameras` passes straight through. TODO(TDM-105): once SimCameras.tsx is committed, default
-//     it to `simCameras ?? simCamerasSlot` (import { simCamerasSlot } from './SimCameras') so the
-//     rendered top / side / wrist sim cams show in Sim on both pages (verified working on a local stack).
+//   * `simCameras` defaults to TDM-105's rendered top / side / wrist sim cams (simCamerasSlot), shown in
+//     Sim only, on RobotView's own state feed; pass one to override.
 
 import type { ReactNode } from 'react';
 import type { FeedHealth } from '@/components/teleop/CameraFeed';
 import { classifyRobot, type RobotRowLike, type RobotViewMode } from '@/lib/robotview/sources';
 import { RobotHud } from './Hud';
 import { RobotView, type SimCamerasContext } from './RobotView';
+import { simCamerasSlot } from './SimCameras';
 
 export interface Tdm100RobotPanelProps {
   robotId: number | bigint;
@@ -44,7 +44,7 @@ export function Tdm100RobotPanel({ robotId, robot, ticketId, defaultMode, compac
       robotId={pinned > 0 ? pinned : undefined}
       defaultMode={tdm100DefaultMode(robot, defaultMode)}
       compact={compact}
-      simCameras={simCameras}
+      simCameras={simCameras ?? simCamerasSlot}
       onFeedHealth={onFeedHealth}
       hud={({ live, robotId: shown }) => (
         // The ticket's eval runs belong to the ticket's robot; another robot picked in the view

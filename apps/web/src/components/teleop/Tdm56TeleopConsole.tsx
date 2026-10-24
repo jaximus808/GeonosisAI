@@ -19,6 +19,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CameraFeed, TaskCameraFeed, type FeedHealth } from '@/components/teleop/CameraFeed';
+import { TaskSimCameras } from '@/components/robotview/SimCameras';
 import { Tdm56Joystick, type Tdm56StickValue } from '@/components/teleop/Tdm56Joystick';
 import { useContributor } from '@/lib/contributor/hooks';
 import { staticStreamGrant, taskStreamGrant } from '@/lib/teleop/tdm55StreamGrant';
@@ -558,7 +559,8 @@ function ConsoleInner({
               {dev ? (
                 <CameraFeed getGrant={getGrant} onHealth={onHealth} />
               ) : (
-                <TaskCameraFeed taskId={taskId} onHealth={onHealth} />
+                // TDM-105: a sim robot has no video; its rendered top / side / wrist views stand in (health from its state feed)
+                <TaskSimCameras taskId={taskId} onHealth={onHealth} fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} />} />
               )}
             </div>
 

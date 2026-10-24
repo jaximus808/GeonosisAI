@@ -93,3 +93,4 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - The one real maincloud orchestrator gets started by the planner/orchestrator session for the real run.
 - Port 8000 on this laptop is taken by an unrelated project. Use another port.
 - Maincloud already holds test robot `test.tdm19-yam` (id 1) and ticket 1. Names starting `test.` are ignored by robot auto-selection.
+- **Committing only your hunks of a shared file** (with a temporary `GIT_INDEX_FILE`): build that index from the *current* HEAD immediately before you commit (`GIT_INDEX_FILE=$t git read-tree HEAD`), apply only your hunks, commit, and delete it. A stale private index already reverted another ticket's files once tonight. **After every commit, check `git show --stat HEAD`:** no deletions, and only your files. If anything else shows up, fix it immediately with a follow-up commit and say so in your result.

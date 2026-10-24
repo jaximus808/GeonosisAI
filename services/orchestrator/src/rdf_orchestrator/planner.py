@@ -19,6 +19,8 @@ the decision and a paragraph of reasoning. Code sits around the model as guardra
 
 Inputs also include TDM-23's ``diagnose.clusters`` event (per-cluster phase, recoverability,
 description), the eval's successes/trials + Wilson CI, previous plans and open dataset offers.
+When that event exists for the iteration its cluster list is the set the planner sees (the
+failure_cluster rows only fill in ids), so a plan never runs on a partly written diagnosis.
 ``data_type_override`` comes from the ``run_settings.data_type_override`` column (TDM-20, set by
 PATCH /tickets/{id}/settings) when it is non-empty; otherwise from
 ``run_settings.hyperparams_json["data_type_override"]`` or the latest ``append_event`` of type
@@ -518,9 +520,9 @@ def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | 
     price = int(d.get("offer_max_price_cents") or 0)
     if offer and not 0 < price < int(inp.prices["clean_teleop"]):
         offer = False
-    known = {c.id for c in inp.clusters}
+    known = {c.id for c in inp.clusters} - {0}  # 0: a diagnosed cluster whose row id never resolved
     ids = [int(i) for i in d.get("failure_cluster_ids") or [] if int(i) in known]
-    ids = list(dict.fromkeys(ids)) or [c.id for c in inp.clusters]
+    ids = list(dict.fromkeys(ids)) or [c.id for c in inp.clusters if c.id]
     unit = int(inp.prices[data_type])
 
     evidence = {
@@ -630,28 +632,46 @@ def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
     diags.sort(key=lambda x: x[0])
 
     all_clusters = mine("failure_cluster")
-    iters = sorted({int(_g(c, "iteration", 0)) for c in all_clusters if int(_g(c, "iteration", 0)) <= it})
-    citer = iters[-1] if iters else None
+    iters = {int(_g(c, "iteration", 0)) for c in all_clusters if int(_g(c, "iteration", 0)) <= it}
+    iters |= {int(p["iteration"]) for _, p in diags if isinstance(p.get("iteration"), int) and p["iteration"] <= it}
+    citer = max(iters) if iters else None
     diag = next((p for _, p in reversed(diags) if _same(p.get("iteration"), citer)), None)
-    by_id, by_label = {}, {}
-    for dc in (diag or {}).get("clusters") or []:
-        if isinstance(dc, dict):
-            if dc.get("failure_cluster_id"):
-                by_id[int(dc["failure_cluster_id"])] = dc
-            by_label[str(dc.get("label", "")).strip().lower()] = dc
-    clusters = []
-    for c in sorted((c for c in all_clusters if citer is not None and int(_g(c, "iteration", 0)) == citer),
-                    key=lambda c: (-int(_g(c, "count", 0)), int(_g(c, "id")))):
-        ex = [int(e) for e in _g(c, "example_episode_ids", []) or []]
-        label = str(_g(c, "label", ""))
-        dc = by_id.get(int(_g(c, "id"))) or by_label.get(label.strip().lower()) or {}
-        desc = str(_g(c, "description", "") or dc.get("description") or "")
+    rows_of_iter = sorted((c for c in all_clusters if citer is not None and int(_g(c, "iteration", 0)) == citer),
+                          key=lambda c: int(_g(c, "id")))
+
+    def cluster(cid, label, count, citer_, desc, ex, dc):
         phase = dc.get("phase") if isinstance(dc.get("phase"), str) else None
         rec = dc.get("recoverable_mid_episode") if isinstance(dc.get("recoverable_mid_episode"), bool) else None
-        clusters.append(Cluster(int(_g(c, "id")), label, int(_g(c, "count", 0)), int(_g(c, "iteration", 0)), desc, ex,
-                                [trial_view(trial_by_ep[e]) for e in ex if e in trial_by_ep],
-                                classify_stage(label, desc, phase), phase, rec,
-                                str(dc.get("recoverability_reason") or "")))
+        return Cluster(cid, label, count, citer_, desc, ex, [trial_view(trial_by_ep[e]) for e in ex if e in trial_by_ep],
+                       classify_stage(label, desc, phase), phase, rec, str(dc.get("recoverability_reason") or ""))
+
+    clusters = []
+    diag_clusters = [dc for dc in (diag or {}).get("clusters") or [] if isinstance(dc, dict)]
+    if diag_clusters:
+        # The diagnosis event is the complete set (TDM-23 writes the rows one by one, the event last), so
+        # it decides which clusters exist; the rows only supply ids the event could not resolve.
+        free = list(rows_of_iter)
+        by_row_id = {int(_g(c, "id")): c for c in free}
+        for dc in diag_clusters:
+            label = str(dc.get("label", ""))
+            row = by_row_id.get(int(dc.get("failure_cluster_id") or 0)) or next(
+                (c for c in free if str(_g(c, "label", "")).strip().lower() == label.strip().lower()), None)
+            if row is not None:
+                free.remove(row)
+            cid = int(dc.get("failure_cluster_id") or 0) or (int(_g(row, "id")) if row is not None else 0)
+            ex = [int(e) for e in dc.get("example_episode_ids") or (_g(row, "example_episode_ids", []) if row else [])
+                  or []]
+            desc = str(dc.get("description") or (_g(row, "description", "") if row is not None else "") or "")
+            count = dc.get("count") if isinstance(dc.get("count"), int) else (
+                int(_g(row, "count", 0)) if row is not None else 0)
+            clusters.append(cluster(cid, label, int(count), int(citer), desc, ex, dc))
+        clusters.sort(key=lambda c: (-c.count, c.id))
+    else:
+        for c in sorted(rows_of_iter, key=lambda c: (-int(_g(c, "count", 0)), int(_g(c, "id")))):
+            ex = [int(e) for e in _g(c, "example_episode_ids", []) or []]
+            label = str(_g(c, "label", ""))
+            clusters.append(cluster(int(_g(c, "id")), label, int(_g(c, "count", 0)), int(_g(c, "iteration", 0)),
+                                    str(_g(c, "description", "") or ""), ex, {}))
 
     plans = sorted(mine("data_plan"), key=lambda r: int(_g(r, "id")))
     prev = [{"id": int(_g(p, "id")), "iteration": int(_g(p, "iteration", 0)), "data_type": _g(p, "data_type"),

@@ -45,6 +45,8 @@ MODULE_SRC = REPO / "spacetime" / "spacetimedb"
 REVIEW_CONFIG = Path(__file__).resolve().parent / "review_fixtures.yaml"
 DEFAULT_PORT = int(os.environ.get("TDM28_PORT", "3028"))
 DEFAULT_DB = os.environ.get("TDM28_DB", "tdm28loop")
+# The harness orchestrator's HTTP port; set TDM28_ORCH_PORT when another stack holds :8028.
+ORCH_PORT = int(os.environ.get("TDM28_ORCH_PORT", "8028"))
 ROOT = Path(os.environ.get("TDM28_ROOT", Path(tempfile.gettempdir()) / "tdm-28"))
 
 
@@ -182,10 +184,12 @@ class LocalStack:
         _log(f"fake robot starting (log {self.logs / (name + '.log')})")
         return p
 
-    def spawn_orchestrator(self, port: int = 8028, extra_env: dict | None = None) -> subprocess.Popen:
+    def spawn_orchestrator(self, port: int = ORCH_PORT, extra_env: dict | None = None) -> subprocess.Popen:
         # TDM-25 reviewer: harness config (fixtures allowed, Claude judgement stubbed off).
         env = {**self.env("orchestrator"), "PORT": str(port), "RDF_REVIEW_CONFIG": str(REVIEW_CONFIG),
                **(extra_env or {})}
+        if _port_open(port):  # never health-check (and so drive against) someone else's orchestrator
+            raise RuntimeError(f"orchestrator port {port} is already in use; set TDM28_ORCH_PORT to a free port")
         p = self._spawn("orchestrator", ["uv", "run", "--quiet", "--project", str(REPO / "services" / "orchestrator"),
                                          "rdf-orchestrator", "--host", "127.0.0.1", "--port", str(port)], env=env)
         wait_for(lambda: json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1).read())

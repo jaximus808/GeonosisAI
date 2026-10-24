@@ -301,7 +301,11 @@ def test_candidate_eval_waits_for_ticket_diagnose(monkeypatch):
         await bus.stop()
 
     asyncio.run(go())
-    assert [c[0] for c in st.calls] == ["record_failure_cluster"] * 3 + ["append_event"]
+    # diagnose.started, the rows one by one, then the completion event (the flywheel waits for it)
+    assert [c[0] for c in st.calls] == ["append_event"] + ["record_failure_cluster"] * 3 + ["append_event"]
+    assert [e["type"] for e in st.events] == [dx.EVENT_STARTED, dx.EVENT_CLUSTERS]
+    started = json.loads(st.events[0]["payload_json"])
+    assert (started["eval_run_id"], started["iteration"], started["attempt"]) == (3, 1, 1)
     p = json.loads(st.events[-1]["payload_json"])
     assert p["iteration"] == 1 and p["eval_kind"] == "candidate"
 
@@ -340,7 +344,8 @@ def test_handler_on_eval_finalized(monkeypatch):
     asyncio.run(go())
     assert h.errors == 0, h.last_error
     names = [c[0] for c in st.calls]
-    assert names == ["record_failure_cluster"] * 3 + ["append_event"]
+    assert names == ["append_event"] + ["record_failure_cluster"] * 3 + ["append_event"]
+    assert [e["type"] for e in st.events[len(old_events):]] == [dx.EVENT_STARTED, dx.EVENT_CLUSTERS]
     p = json.loads(st.events[-1]["payload_json"])
     assert p["eval_run_id"] == 3 and [c["count"] for c in p["clusters"]] == [3, 3, 1]
 

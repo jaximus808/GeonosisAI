@@ -4,7 +4,9 @@
 ``eval_trial`` rows + their episodes from the bus mirror -> ``diagnose.diagnose_eval_run`` (Claude,
 vision, structured output) -> ``record_failure_cluster`` per cluster + one ``diagnose.clusters``
 event_log row with the full payload (shape in ``rdf_orchestrator/diagnose.py``). 0 failures ->
-no clusters, a ``diagnose.no_failures`` event.
+no clusters, a ``diagnose.no_failures`` event. Each attempt first logs ``diagnose.started``
+{ticket_id, eval_run_id, iteration, eval_kind, attempt, failures}: the flywheel stays in ``diagnose``
+until the completion event, so the planner never starts on a half-written set of cluster rows.
 
 Iteration: ``record_failure_cluster`` stamps ``ticket.iteration``, and leaving ``eval`` for
 ``diagnose`` is what bumps it. So a *baseline* run is diagnosed as soon as it is finalized, but a
@@ -163,6 +165,7 @@ def _diagnose(bus, run, source: str) -> None:
         log.info("diagnose.start", extra={"fields": {
             "eval_run_id": rid, "trials": len(inputs.trials), "failures": len(inputs.failed),
             "attempt": len(kinds) + 1, "reduced_prompt": reduced, "source": source}})
+        _log_started(stdb, inputs, rid, len(kinds) + 1)
         diag = dx.diagnose_eval_run(inputs, claude=make_clusterer(), frames=None if reduced else make_frames(),
                                     reduced=reduced)
         payload = dx.record_diagnosis(diag, stdb)
@@ -187,6 +190,16 @@ def _diagnose(bus, run, source: str) -> None:
         raise
     finally:
         _close(stdb)
+
+
+def _log_started(stdb, inputs: dx.DiagnoseInputs, rid: int, attempt: int) -> None:
+    """event_log ``diagnose.started``: the flywheel holds the ticket in diagnose until this run's
+    ``diagnose.clusters`` / ``diagnose.no_failures`` lands. Best effort: never blocks the diagnosis."""
+    try:
+        dx.log_started(stdb, inputs.ticket.get("id"), rid, iteration=inputs.ticket.get("iteration"),
+                       eval_kind=inputs.eval_run.get("kind"), attempt=attempt, failures=len(inputs.failed))
+    except Exception:  # noqa: BLE001
+        log.warning("diagnose.started_not_logged", exc_info=True, extra={"fields": {"eval_run_id": rid}})
 
 
 def _close(stdb) -> None:

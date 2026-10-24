@@ -46,6 +46,9 @@ so the full diagnosis goes in one ``event_log`` row, type ``diagnose.clusters``:
     }
 
 With 0 failures no clusters are recorded and a ``diagnose.no_failures`` event is logged instead.
+Before each attempt the handler logs ``diagnose.started`` {ticket_id, eval_run_id, iteration, ...}; the
+flywheel treats a started diagnosis as complete only once its ``diagnose.clusters`` /
+``diagnose.no_failures`` event lands (the cluster rows are written first, one by one).
 
 Failures (refusal, API error, bad output) are retried with backoff by the handler, counted from
 ``diagnose.error`` rows (``llm_retry.py``); a refusal is retried text-only (no frames) with a context
@@ -86,6 +89,10 @@ EVENT_CLUSTERS = "diagnose.clusters"
 EVENT_NO_FAILURES = "diagnose.no_failures"
 EVENT_ERROR = "diagnose.error"
 EVENT_FAILED = "diagnose.failed"  # terminal: retries exhausted; the flywheel fails the ticket (llm_retry.py)
+# Logged by the handler before each attempt's Claude call: a diagnosis is in flight for this eval run,
+# so the flywheel waits for EVENT_CLUSTERS / EVENT_NO_FAILURES instead of moving on at the first
+# failure_cluster row (record_diagnosis writes the rows one by one, the event last).
+EVENT_STARTED = "diagnose.started"
 # Camera names to prefer for the frames, in order (the scene/exo view shows the failure best).
 CAMERA_PREFERENCE = ("exo", "scene", "front", "top", "overhead", "third", "main", "cam0")
 
@@ -628,6 +635,12 @@ def record_diagnosis(diag: Diagnosis, stdb: Any) -> dict:
     payload = diag.payload()
     stdb.call_reducer("append_event", ACTOR, EVENT_CLUSTERS, json.dumps(payload))
     return payload
+
+
+def log_started(stdb: Any, ticket_id: Any, eval_run_id: Any, **extra: Any) -> None:
+    """One attempt is starting (``extra``: iteration, eval_kind, attempt, ...)."""
+    stdb.call_reducer("append_event", ACTOR, EVENT_STARTED, json.dumps(
+        {"ticket_id": ticket_id, "eval_run_id": eval_run_id, **extra}, default=str))
 
 
 def log_error(stdb: Any, ticket_id: Any, eval_run_id: Any, error: str, **extra: Any) -> None:

@@ -91,6 +91,15 @@ PI05_BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base/params"  # = TD
 MAX_STEP_FAILURES = 2  # failed training runs / eval runs per stage before the ticket is failed
 # Terminal "retries exhausted" events from the Claude-backed steps (llm_retry.py): the ticket is failed.
 STEP_FAILED_EVENTS = ("diagnose.failed", "planner.failed")
+# TDM-23 (diagnose.py): ``diagnose.started`` before each attempt, then the cluster rows one by one, then
+# one completion event with the full payload. The ticket leaves diagnose on the completion event, not
+# on the first failure_cluster row (the planner would otherwise plan on a partial set of clusters).
+DIAGNOSE_STARTED = "diagnose.started"
+DIAGNOSE_DONE_EVENTS = ("diagnose.clusters", "diagnose.no_failures")
+DIAGNOSE_EVENTS = (DIAGNOSE_STARTED, *DIAGNOSE_DONE_EVENTS)
+# Cluster rows with a started diagnosis but no completion event this long after the newest row: the
+# writer died between the rows and the event; move on with the rows (as before the gate existed).
+DIAGNOSE_SETTLE_S = float(os.environ.get("RDF_DIAGNOSE_SETTLE_S", "30"))
 
 WATCHED_TABLES = ("ticket", "run_settings", "robot", "dataset", "failure_cluster", "data_plan", "episode",
                   "training_run", "eval_run", "eval_trial", "event_log", "dataset_offer")
@@ -124,6 +133,8 @@ class TicketView:
     eval_runs: list = field(default_factory=list)
     offers: list = field(default_factory=list)  # dataset_offer rows (TDM-95)
     step_failed: list = field(default_factory=list)  # STEP_FAILED_EVENTS payloads (+ "type"), id order
+    diagnose_events: list = field(default_factory=list)  # DIAGNOSE_EVENTS payloads (+ "type"), id order
+    now_us: int | None = None  # wall clock for DIAGNOSE_SETTLE_S (None: rows only, no settle timeout)
 
     @classmethod
     def from_bus(cls, bus, ticket_id: int) -> "TicketView | None":
@@ -136,12 +147,16 @@ class TicketView:
 
         robot = bus.get("robot", t.get("robot_id"))
         ds = of("dataset")
-        failed = [{**_payload(r), "type": r.get("type"), "event_id": r.get("id")} for r in sorted(
-            (r for r in bus.rows("event_log") if r.get("type") in STEP_FAILED_EVENTS), key=lambda r: r.get("id") or 0)]
+        events = sorted((r for r in bus.rows("event_log") if r.get("type") in STEP_FAILED_EVENTS + DIAGNOSE_EVENTS),
+                        key=lambda r: r.get("id") or 0)
+        events = [{**_payload(r), "type": r.get("type"), "event_id": r.get("id")} for r in events]
+        failed = [p for p in events if p["type"] in STEP_FAILED_EVENTS]
         v = cls(ticket=t, settings=bus.get("run_settings", ticket_id), robot=robot, dataset=ds[0] if ds else None,
                    clusters=of("failure_cluster"), plans=of("data_plan"), episodes=of("episode"),
                    training_runs=of("training_run"), eval_runs=of("eval_run"), offers=of("dataset_offer"))
         v.step_failed = [p for p in failed if p.get("ticket_id") == ticket_id]
+        v.diagnose_events = [p for p in events if p["type"] in DIAGNOSE_EVENTS and p.get("ticket_id") == ticket_id]
+        v.now_us = time.time_ns() // 1000
         return v
 
     # ---- ticket + settings
@@ -291,6 +306,19 @@ class TicketView:
                             "delivered": len(eps), "accepted": sum(1 for e in eps if e.get("review_status") == "accepted")})
         return out
 
+    def _diagnose_event(self, types: tuple, src) -> dict | None:
+        """The newest ``types`` event of this iteration (or of eval run ``src``)."""
+        rid = src["id"] if src else None
+        return next((p for p in reversed(self.diagnose_events) if p.get("type") in types and (
+            _int(p.get("iteration")) == self.iteration or (rid is not None and _int(p.get("eval_run_id")) == rid))), None)
+
+    def diagnosis_done(self, src=None) -> dict | None:
+        """This iteration's ``diagnose.clusters`` / ``diagnose.no_failures`` payload, once logged."""
+        return self._diagnose_event(DIAGNOSE_DONE_EVENTS, src)
+
+    def diagnosis_started(self, src=None) -> dict | None:
+        return self._diagnose_event((DIAGNOSE_STARTED,), src)
+
     def gave_up(self, type_: str, **match: Any) -> dict | None:
         """The newest ``type_`` (STEP_FAILED_EVENTS) payload of this ticket matching ``match``."""
         return next((p for p in reversed(self.step_failed)
@@ -367,11 +395,35 @@ def decide(v: TicketView) -> Decision:
 
     if s == "diagnose":
         cl = v.iteration_clusters
-        if cl:
-            return Decision("plan_data", f"{len(cl)} failure cluster(s) for iteration {it}: "
-                                         + ", ".join(f"{c.get('label')} x{c.get('count')}" for c in cl),
-                            {"failure_cluster_ids": [c["id"] for c in cl], "iteration": it})
         src = v.last_done_eval
+        done = v.diagnosis_done(src)
+        if done is not None and done.get("type") == "diagnose.clusters" and done.get("clusters"):
+            dc = [c for c in done["clusters"] if isinstance(c, dict)]
+            return Decision("plan_data", f"diagnosis of eval {done.get('eval_run_id')} complete: {len(dc)} failure "
+                                         f"cluster(s) for iteration {it}: "
+                                         + ", ".join(f"{c.get('label')} x{c.get('count')}" for c in dc),
+                            {"failure_cluster_ids": [c.get("failure_cluster_id") for c in dc
+                                                     if c.get("failure_cluster_id")] or [c["id"] for c in cl],
+                             "iteration": it, "eval_run_id": done.get("eval_run_id"),
+                             "diagnose_event_id": done.get("event_id")})
+        if done is not None and done.get("type") == "diagnose.no_failures":
+            return Decision("plan_data", f"eval {done.get('eval_run_id')} had no failures to cluster",
+                            {"iteration": it, "eval_run_id": done.get("eval_run_id"),
+                             "diagnose_event_id": done.get("event_id")})
+        if cl:
+            ev = {"failure_cluster_ids": [c["id"] for c in cl], "iteration": it}
+            listing = ", ".join(f"{c.get('label')} x{c.get('count')}" for c in cl)
+            started = v.diagnosis_started(src)
+            if started is None:  # rows written without the TDM-23 handler (flywheel_sim, scripted drivers)
+                return Decision("plan_data", f"{len(cl)} failure cluster(s) for iteration {it}: {listing}", ev)
+            newest = max(int(c.get("created_at") or 0) for c in cl)
+            age_s = (v.now_us - newest) / 1e6 if v.now_us is not None and newest else None
+            if age_s is not None and age_s >= DIAGNOSE_SETTLE_S:
+                return Decision("plan_data", f"{len(cl)} failure cluster(s) for iteration {it}: {listing} (the "
+                                             f"diagnose.clusters event never landed; newest row {age_s:.0f}s old)",
+                                {**ev, "diagnose_incomplete": True})
+            return Decision(None, f"diagnosing eval {started.get('eval_run_id')}: {len(cl)} cluster row(s) so far, "
+                                  f"waiting for diagnose.clusters", ev)
         if src and int(src.get("successes") or 0) >= int(src.get("trials") or 0) > 0:
             return Decision("plan_data", f"eval {src['id']} had no failures to cluster", _eval_ev(src))
         gave_up = v.gave_up("diagnose.failed", eval_run_id=src["id"]) if src else None
@@ -739,6 +791,13 @@ class ShipStep:
             await ctx.event("flywheel.report_failed", {"error": f"{type(ex).__name__}: {ex}"[:500]})
             return
         ctx.log("ship.report_saved", uri=(saved or {}).get("uri"), json_uri=(saved or {}).get("json_uri"))
+
+
+def _int(v) -> int | None:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _payload(event_row) -> dict:

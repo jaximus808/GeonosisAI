@@ -1,0 +1,28 @@
+PASS  setup: ticket 2 target_episodes=5 with 2 accepted episodes
+PASS  POST /tickets/2/offers -> offer 3, needed_count 3 (5 - 2)
+PASS  offer starts proposed
+PASS  a 2nd offer is refused: 2 existing + 3 reserved = 5 (no episodes needed for ticket 2: target 5, already uploaded/accepted 2, reserved)
+PASS  ingest before accept -> 409
+PASS  seller accepted the offer
+PASS  sign: 3 signed, refused [('ep_d', 'not bought: dataset_offer 3 only buys 3 episode(s) (target_e')]
+PASS  keys under tickets/2/purchased/3/<ref>/
+PASS  a tampered signed URL is refused (403)
+PASS  ingested ['ep_a', 'ep_b', 'ep_c']
+PASS  4th refused by the reducer: not bought: the offer only buys 3 episode(s) (target_episodes minus those already uploaded). Server: dataset_offer 3 is full: 3/3 needed episodes alre
+PASS  re-posting ep_a is idempotent
+PASS  3 episode{kind=purchased, review_status=pending} rows
+PASS  offer status qa (accepted -> ingesting -> qa), ingested_count 3
+PASS  dataset.total_count 5
+PASS  cameras_json holds one uri per camera
+PASS  deterministic pass alone does not settle (waits for the LLM review)
+PASS  after QA: billable 2, rejected 1, open_slots 1; not settled yet (2/3 accepted; waiting for replacements or delivery_complete)
+PASS  handler finalized: status done, accepted_count 2
+PASS  payout reserved: [(800, 'pending', 'settle')] (2 x 400)
+PASS  event_log dataset_offer.settled payout_cents 800
+PASS  POST /offers/{id}/finalize afterwards is idempotent (same single payment)
+PASS  ticket.spent_cents 800
+PASS  after settling, a new offer needs 1 (5 - 2 existing - 2 bought)
+PASS  lerobot sign: 11 files signed (meta + 3 episodes), 3 refused (episode 3)
+PASS  lerobot ingest: ['lerobot-000000', 'lerobot-000001', 'lerobot-000002'], refused ['lerobot-000003']
+PASS  lerobot episodes: frame_count/duration from meta, actions_uri = the episode parquet
+---- 27 passed, 0 failed

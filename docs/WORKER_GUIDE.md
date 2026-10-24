@@ -148,6 +148,11 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Parquet metadata `rdf.episode`:** fps, joint names, per-camera frame counts and a `fixture` flag.
 - **Shared checks:** `rdf_common.review_checks` (`ReviewThresholds.from_yaml`, `run_checks`) holds the deterministic checks. The reviewer and dataset QA (TDM-92) both use it. Thresholds are in `services/orchestrator/config/review.yaml`, and the jerk threshold needs re-tuning on real YAM demos.
 
+## Dataset offers (TDM-91): `rdf_orchestrator/offers.py`, `offers_api.py`, `handlers/offers.py`
+- **Routes:** `POST /tickets/{id}/offers` {price_per_episode_cents | from_plan, seller_id?, accept?} (the reducer sets `needed_count` = N − existing), `GET /tickets/{id}/offers`, `GET /offers/{id}` (per-episode verdicts, QA rows, payments), `POST /offers/{id}/accept`, `POST /offers/{id}/uploads/sign` (signed PUTs for open slots only), `POST /offers/{id}/episodes` (manifest: `raw` per-cam mp4 + actions.parquet, or `lerobot`; extra episodes come back in `refused`), `/delivered`, `/finalize`, `/cancel`.
+- **Planner entry point (TDM-95):** `OffersService.offer_from_plan(ticket_id, consider_dataset_offer, offer_max_price_cents)`. It returns None if there's nothing to do.
+- **QA → payout:** after TDM-92/93 write `qa_result` and `submit_review`, the handler calls `finalize_offer` and then `reserve_dataset_payment(offer, "settle")`. Proof: `spikes/tdm-91-offers/prove_offers.py` (local DB only).
+
 ## Factory Droids (TDM-29 decision; full details in the "S-04 decision" note)
 - **Protocol A, native resume:** a droid ends its turn with `WAITING_FOR <table>:<predicate>` and the session goes idle. To resume, `POST https://api.factory.ai/api/v0/sessions/{id}/messages {text}`, then poll `GET /sessions/{id}` until `status=idle`.
   - The computer auto-pauses after ~5 min idle and wakes on a message (~4 s).

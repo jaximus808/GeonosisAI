@@ -224,6 +224,33 @@ def _training_view(r: dict | None) -> dict | None:
 
 # --------------------------------------------------------------------------- the assembler
 
+def _tdm95_offer_view(o: dict, mine: Tables, events: list, settings: dict | None) -> dict:
+    """TDM-95: one dataset offer for the report, listed apart from paid demos: the counts, the
+    refused deliveries (``dataset_offer.delivery``), its plan decision / timeout and the seller payout."""
+    from .plan_offers import EVENT_CREATED, EVENT_TIMEOUT, offer_line
+
+    oid = _i(o["id"])
+    eps = [e for e in mine["episode"] if _i(e.get("dataset_offer_id")) == oid and e.get("kind") == "purchased"]
+    reviews = {_i(r.get("episode_id")): r for r in mine["review"]}
+    mine_ev = [(e, p) for e, p in events if _i(p.get("offer_id")) == oid]
+    refused = [x for e, p in mine_ev if e.get("type") == "dataset_offer.delivery" for x in (p.get("refused") or [])]
+    created = next((p for e, p in mine_ev if e.get("type") == EVENT_CREATED), None)
+    timeout = next((p for e, p in mine_ev if e.get("type") == EVENT_TIMEOUT), None)
+    pays = [p for p in mine["payment"] if _i(p.get("dataset_offer_id")) == oid]
+    origin = (f"planner suggestion on data_plan {created.get('data_plan_id')}, after approve_spend" if created else "")
+    if timeout:
+        origin += ("; " if origin else "") + f"timed out after {timeout.get('waited_s')} s: {timeout.get('action')}"
+    target = _i((settings or {}).get("target_episodes")) or None
+    return {"dataset_offer_id": oid, "seller_id": _i(o.get("seller_id")), "status": o.get("status"),
+            "price_per_episode_cents": _i(o.get("price_per_episode_cents")), "needed_count": _i(o.get("needed_count")),
+            "ingested_count": _i(o.get("ingested_count")), "accepted_count": _i(o.get("accepted_count")),
+            "refused_at_ingest": refused, "line": offer_line(o, eps, reviews, refused, target),
+            "origin": origin or None, "data_plan_id": (created or {}).get("data_plan_id"),
+            "payout_cents": sum(_i(p.get("amount_cents")) for p in pays if p.get("status") in COMMITTED),
+            "payments": [{"payment_id": _i(p["id"]), "amount_cents": _i(p.get("amount_cents")),
+                          "status": p.get("status")} for p in pays]}
+
+
 def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dict:
     tid = int(ticket_id)
     tickets = [r for r in t.get("ticket", []) if _i(r.get("id")) == tid]
@@ -426,9 +453,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
         it_run_ids = {_i(r["id"]) for r in it_runs}
         cand = [r for r in mine["eval_run"] if _i(r.get("training_run_id")) in it_run_ids]
         cand_row = ([r for r in cand if r.get("status") == "done"] or cand or [None])[-1]
-        offers = [{"dataset_offer_id": _i(o["id"]), "seller_id": _i(o.get("seller_id")), "status": o.get("status"),
-                   "price_per_episode_cents": _i(o.get("price_per_episode_cents")), "needed_count": _i(o.get("needed_count")),
-                   "ingested_count": _i(o.get("ingested_count")), "accepted_count": _i(o.get("accepted_count"))}
+        offers = [_tdm95_offer_view(o, mine, events, settings)
                   for o in mine["dataset_offer"] if iteration_at(_i(o.get("created_at"))) == it]
 
         iter_blocks.append({
@@ -755,8 +780,10 @@ def render_markdown(r: dict) -> str:
         for rj in it["episodes_rejected"]:
             add(f"  - episode {rj['episode_id']} rejected: {_md_text(rj['reason']) or 'no reason recorded'}")
         for of in it["dataset_offers"]:
-            add(f"- Dataset offer {of['dataset_offer_id']} (seller {of['seller_id']}): {of['accepted_count']}/"
-                f"{of['needed_count']} accepted at {usd(of['price_per_episode_cents'])}, {of['status']}")
+            add(f"- Dataset offer {of['dataset_offer_id']} (seller {of['seller_id']}, {usd(of['price_per_episode_cents'])}"
+                f"/episode, {of['status']}): {_md_text(of.get('line') or '')}"
+                + (f"; payout {usd(of['payout_cents'])}" if of.get("payout_cents") else "")
+                + (f" ({_md_text(of['origin'])})" if of.get("origin") else ""))
         c = it["cost_cents"]
         add(f"- Cost: data {usd(c['data'])} (paid {usd(c['data_paid'])}), GPU {usd(c['gpu'])}, total {usd(c['total'])}")
         tr = it["training_run"]

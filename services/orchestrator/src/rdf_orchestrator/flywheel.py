@@ -93,7 +93,8 @@ MAX_STEP_FAILURES = 2  # failed training runs / eval runs per stage before the t
 STEP_FAILED_EVENTS = ("diagnose.failed", "planner.failed")
 
 WATCHED_TABLES = ("ticket", "run_settings", "robot", "dataset", "failure_cluster", "data_plan", "episode",
-                  "training_run", "eval_run", "eval_trial", "event_log")
+                  "training_run", "eval_run", "eval_trial", "event_log", "dataset_offer")
+OPEN_OFFER = ("proposed", "accepted", "ingesting", "qa")  # TDM-14 offer statuses that still hold slots
 
 
 def _allowed(frm: str, to: str) -> bool:
@@ -121,6 +122,7 @@ class TicketView:
     episodes: list = field(default_factory=list)
     training_runs: list = field(default_factory=list)
     eval_runs: list = field(default_factory=list)
+    offers: list = field(default_factory=list)  # dataset_offer rows (TDM-95)
     step_failed: list = field(default_factory=list)  # STEP_FAILED_EVENTS payloads (+ "type"), id order
 
     @classmethod
@@ -138,7 +140,7 @@ class TicketView:
             (r for r in bus.rows("event_log") if r.get("type") in STEP_FAILED_EVENTS), key=lambda r: r.get("id") or 0)]
         v = cls(ticket=t, settings=bus.get("run_settings", ticket_id), robot=robot, dataset=ds[0] if ds else None,
                    clusters=of("failure_cluster"), plans=of("data_plan"), episodes=of("episode"),
-                   training_runs=of("training_run"), eval_runs=of("eval_run"))
+                   training_runs=of("training_run"), eval_runs=of("eval_run"), offers=of("dataset_offer"))
         v.step_failed = [p for p in failed if p.get("ticket_id") == ticket_id]
         return v
 
@@ -262,6 +264,22 @@ class TicketView:
                 "amount": int(self.plan["amount"]) if self.plan else 0,
                 "dataset_accepted_count": int((self.dataset or {}).get("accepted_count") or 0)}
 
+    def open_offers(self) -> list[dict]:
+        """TDM-95: open dataset offers made since this iteration's plan, with their delivery count.
+        Purchased episodes count toward the plan like task episodes (``DATASET_KINDS``); an open
+        offer means the seller may still deliver (``handlers/plan_offers`` times it out)."""
+        p = self.plan
+        if p is None:
+            return []
+        since = p.get("created_at") or 0
+        out = []
+        for o in self.offers:
+            if o.get("status") in OPEN_OFFER and (o.get("created_at") or 0) >= since:
+                eps = [e for e in self.episodes if e.get("dataset_offer_id") == o["id"] and e.get("kind") == "purchased"]
+                out.append({"offer_id": o["id"], "status": o.get("status"), "needed_count": o.get("needed_count"),
+                            "delivered": len(eps), "accepted": sum(1 for e in eps if e.get("review_status") == "accepted")})
+        return out
+
     def gave_up(self, type_: str, **match: Any) -> dict | None:
         """The newest ``type_`` (STEP_FAILED_EVENTS) payload of this ticket matching ``match``."""
         return next((p for p in reversed(self.step_failed)
@@ -374,6 +392,13 @@ def decide(v: TicketView) -> Decision:
         if c["non_rejected"] >= c["amount"]:
             return Decision("review", f"{c['non_rejected']}/{c['amount']} episodes collected for plan {v.plan['id']}",
                             {"data_plan_id": v.plan["id"], **c})
+        offers = v.open_offers()
+        if offers:  # TDM-95: say what the wait is on (paid tasks only cover the slots no offer holds)
+            c = {**c, "open_offers": offers}
+            return Decision(None, f"collecting: {c['non_rejected']}/{c['amount']} episodes for plan {v.plan['id']}; "
+                                  "waiting on dataset offer " + ", ".join(
+                                      f"{o['offer_id']} ({o['status']}, {o['delivered']}/{o['needed_count']} delivered)"
+                                      for o in offers), c)
         return Decision(None, f"collecting: {c['non_rejected']}/{c['amount']} episodes for plan {v.plan['id']}", c)
 
     if s == "review":

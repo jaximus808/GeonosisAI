@@ -33,6 +33,12 @@ Rules (``approve_spend`` is the gate):
   * Stop at the target: once ``plan.amount`` episodes from the plan's tasks are accepted, the
     plan's still-open tasks are cancelled (``target_reached``). A rejected episode frees its slot,
     so the next reconcile tops the plan back up (still inside the approved cents).
+  * Dataset offers (TDM-95, ``plan_offers.reservation``): slots a dataset offer of the plan holds
+    (open: its needed_count; settled: its accepted_count) are not posted as paid tasks, and the
+    approved cents they can draw are not spent on tasks. While the planner's offer suggestion for an
+    approved plan is still being decided the plan waits (``awaiting_offer``). Open tasks beyond the
+    reduced target are cancelled (``offer_reserved``). A cancelled / settled offer frees its unfilled
+    slots and the next dispatch tops the plan up with paid demos (the timeout fallback).
   * Resets: one live reset task per robot. ``reset_request`` is issued only when no job command is
     open on the robot (TDM-13 job lock); during a ``run_eval`` the robot's own job waits for the
     reset, and the completed reset task releases it with ``resume_policy``.
@@ -97,9 +103,10 @@ class PlanStatus:
     plan_id: int
     ticket_id: int
     data_type: str
-    state: str  # awaiting_approval | collecting | target_reached | budget_exhausted | closed | not_marketplace
+    state: str  # awaiting_approval | awaiting_offer | collecting | target_reached | covered_by_offer |
+    #             budget_exhausted | closed | not_marketplace
     # budget_exhausted: ticket budget (budget - spent - committed) or the approved cents cannot pay for more
-    target: int = 0  # plan.amount: accepted episodes wanted
+    target: int = 0  # accepted task episodes wanted: plan.amount minus the slots dataset offers hold
     payable: int = 0  # approved_cents // unit_price: episodes the approval can pay for
     unit_price_cents: int = 0
     accepted: int = 0
@@ -109,6 +116,10 @@ class PlanStatus:
     cancelled_task_ids: list[int] = field(default_factory=list)  # by this call
     budget_remaining_cents: int = 0
     reason: str = ""
+    plan_amount: int = 0  # plan.amount (TDM-95: target = plan_amount - offer_reserved)
+    offer_reserved: int = 0  # plan slots held by dataset offers
+    offer_reserved_cents: int = 0  # approved cents those offers may draw
+    offer_ids: list[int] = field(default_factory=list)
 
     @property
     def done(self) -> bool:
@@ -281,9 +292,15 @@ class Dispatcher:
             return PlanStatus(plan_id, 0, "", "closed", reason="data_plan not in mirror")
         tid = _i(plan.get("ticket_id"))
         unit = self._unit(plan)
+        from . import plan_offers  # TDM-95
+
+        res = plan_offers.reservation(self.m, plan, now=self.clock())
+        amount = _i(plan.get("amount"))
         st = PlanStatus(plan_id=plan_id, ticket_id=tid, data_type=plan.get("data_type") or "",
-                        state="collecting", target=_i(plan.get("amount")), unit_price_cents=unit,
-                        payable=_i(plan.get("approved_cents")) // unit if unit else 0)
+                        state="collecting", target=max(0, amount - res.slots), unit_price_cents=unit,
+                        payable=max(0, _i(plan.get("approved_cents")) - res.cents) // unit if unit else 0,
+                        plan_amount=amount, offer_reserved=res.slots, offer_reserved_cents=res.cents,
+                        offer_ids=[o["offer_id"] for o in res.offers])
         eps, paid = self._episodes_by_task(tid), self._reset_paid_refs(tid)
         for t in self._tasks(tid):
             if _i(t.get("data_plan_id")) != plan_id:
@@ -308,6 +325,11 @@ class Dispatcher:
             st.reason = f"data_plan status {plan.get('status')}"
         elif st.done:
             st.state = "target_reached"
+        elif res.hold:
+            st.state, st.reason = "awaiting_offer", res.hold_reason
+        elif st.target == 0 and res.slots > 0:
+            st.state = "covered_by_offer"
+            st.reason = f"dataset offer(s) {st.offer_ids} hold all {amount} slots of the plan"
         return st
 
     def ticket_status(self, ticket_id: int) -> list[PlanStatus]:
@@ -360,6 +382,27 @@ class Dispatcher:
                 self.event("dispatch.target_reached", {**base, "accepted": st.accepted, "target": st.target,
                                                        "cancelled_task_ids": st.cancelled_task_ids},
                            dedup=("target", plan_id))
+                return st
+            if st.state in ("collecting", "covered_by_offer") and st.offer_reserved:
+                excess = st.accepted + st.in_flight - st.target
+                for task_id in sorted(st.open_task_ids, reverse=True)[:max(0, excess)]:
+                    try:
+                        self.w.call_reducer("cancel_task", task_id, "offer_reserved")
+                        st.cancelled_task_ids.append(task_id)
+                        st.in_flight -= 1
+                    except Exception as e:  # noqa: BLE001 - claimed in the meantime: let it finish
+                        log.info("dispatch.cancel_skipped", extra={"fields": {"task_id": task_id, "error": str(e)}})
+                if st.cancelled_task_ids:
+                    st.open_task_ids = [t for t in st.open_task_ids if t not in st.cancelled_task_ids]
+                    self.event("dispatch.offer_reserved", {
+                        **base, "offer_ids": st.offer_ids, "offer_reserved": st.offer_reserved,
+                        "plan_amount": st.plan_amount, "paid_target": st.target,
+                        "cancelled_task_ids": st.cancelled_task_ids})
+            if st.state == "covered_by_offer":
+                self.event("dispatch.covered_by_offer", {
+                    **base, "offer_ids": st.offer_ids, "offer_reserved": st.offer_reserved,
+                    "offer_reserved_cents": st.offer_reserved_cents, "plan_amount": st.plan_amount},
+                    dedup=("offer", plan_id))
                 return st
             if st.state != "collecting":
                 return st
@@ -415,15 +458,17 @@ class Dispatcher:
             self.event("dispatch.plan_dispatched", {
                 **base, "created": made, "created_task_ids": st.created_task_ids, "unit_price_cents": unit,
                 "target": st.target, "payable": st.payable, "accepted": st.accepted, "in_flight": st.in_flight,
-                "approved_cents": _i(plan.get("approved_cents")),
+                "approved_cents": _i(plan.get("approved_cents")), "plan_amount": st.plan_amount,
+                "offer_reserved": st.offer_reserved, "offer_reserved_cents": st.offer_reserved_cents,
+                "offer_ids": st.offer_ids,
                 "budget_remaining_cents": st.budget_remaining_cents - made * unit})
             if made:
                 self.page(tid, st.created_task_ids, st.data_type, unit)
             return st
 
     def dispatch_ticket(self, ticket_id: int) -> list[PlanStatus]:
-        return [self.dispatch_plan(s.plan_id) for s in self.ticket_status(ticket_id) if s.state == "collecting"
-                or s.state == "target_reached"]
+        return [self.dispatch_plan(s.plan_id) for s in self.ticket_status(ticket_id)
+                if s.state in ("collecting", "target_reached", "covered_by_offer")]
 
     def cancel_open_tasks(self, ticket_id: int, reason: str, data_plan_id: int | None = None) -> list[int]:
         out = []

@@ -61,11 +61,20 @@ class RawEpisode(BaseModel):
 
 class IngestRequest(BaseModel):
     format: Literal["raw", "lerobot"] = "raw"
-    episodes: list[dict[str, Any]] = Field(default_factory=list, max_length=1000,
-                                           description="raw: RawEpisode objects; lerobot: optional episodes.jsonl rows")
-    info: dict[str, Any] | None = Field(None, description="lerobot: meta/info.json (read from storage when omitted)")
+    episodes: list[dict[str, Any] | int] = Field(default_factory=list, max_length=1000, description=(
+        "raw: RawEpisode objects; lerobot: optional episode indexes to import (ints or episodes.jsonl rows)"))
+    info: dict[str, Any] | None = Field(None, description="lerobot: ignored since TDM-95 (meta/info.json is read "
+                                                          "by the importer)")
     final: bool = Field(False, description="This is the seller's last delivery for the offer.")
     verify: bool = Field(True, description="Check every file exists in storage before ingesting.")
+    # TDM-95: LeRobot deliveries are imported into our episode format (dataset_import) before ingest.
+    source: str | None = Field(None, description="lerobot: a public hf://<org>/<name> dataset instead of the "
+                                                 "uploaded lerobot/ folder")
+    arm: Literal["left", "right"] | None = Field(None, description="lerobot: the arm of a bimanual dataset")
+    camera_map: dict[str, str] | None = Field(None, description="lerobot: video key -> camera role ('' drops it)")
+    assume_success: bool | None = Field(None, description="lerobot: the seller's success claim when the data has "
+                                                          "no next.success (QA judges it anyway)")
+    note: str | None = Field(None, max_length=500, description="free text for the dataset_offer.delivery event")
 
 
 class CancelRequest(BaseModel):
@@ -139,7 +148,7 @@ async def ingest_episodes(offer_id: int, body: IngestRequest, svc: OffersService
         if not body.episodes:
             raise HTTPException(422, {"code": "no_episodes", "message": "raw format needs episodes."})
         try:
-            manifest["episodes"] = [RawEpisode(**e).model_dump() for e in body.episodes]
+            manifest["episodes"] = [RawEpisode(**e).model_dump() for e in body.episodes]  # type: ignore[arg-type]
         except Exception as e:  # pydantic ValidationError -> 422 with its text
             raise HTTPException(422, {"code": "bad_episode", "message": str(e)}) from None
     elif not body.episodes:

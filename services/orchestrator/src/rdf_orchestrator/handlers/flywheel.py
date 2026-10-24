@@ -26,7 +26,8 @@ from ..log import get_logger
 
 log = get_logger("flywheel")
 
-_ROW_TABLES = ("eval_run", "failure_cluster", "data_plan", "episode", "training_run", "dataset", "run_settings")
+_ROW_TABLES = ("eval_run", "failure_cluster", "data_plan", "episode", "training_run", "dataset", "run_settings",
+               "dataset_offer")
 
 
 def register_flywheel(reg: Registry, fw: Flywheel) -> Flywheel:

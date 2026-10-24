@@ -45,7 +45,9 @@ HUMAN_ACTOR_KINDS = ("human", "web", "mcp", "contributor", "seller")
 OWNER_TOKEN_ACTOR_KINDS = ("owner",)
 # Event types written by the machine chain itself (never counted as a human action).
 CHAIN_TYPES = ("eval.finalized", "diagnose.clusters", "diagnose.no_failures", "planner.failure_cluster",
-               "planner.data_plan", "planner.blocked", "planner.error", "task.created")
+               "planner.data_plan", "planner.blocked", "planner.error", "task.created",
+               # TDM-95: the planner's dataset-offer suggestion acted on after approve_spend
+               "plan_offer.created", "plan_offer.skipped", "plan_offer.timeout", "plan_offer.fallback")
 TICKET_TABLES = ("run_settings", "eval_run", "failure_cluster", "data_plan", "task", "episode", "training_run",
                  "review")
 
@@ -53,6 +55,25 @@ Tables = dict[str, list[dict]]
 
 
 # --------------------------------------------------------------------------- small helpers
+
+def _tdm95_offer_decision(all_of: Callable[..., list], plan_id: int) -> dict | None:
+    """TDM-95: what became of the plan's ``dataset_offer`` suggestion (offer created / skipped and why,
+    then its timeout or paid-demo fallback), as event refs. None when the plan made no suggestion."""
+    made = all_of("plan_offer.created", data_plan_id=plan_id)
+    skipped = all_of("plan_offer.skipped", data_plan_id=plan_id)
+    if not made and not skipped:
+        return None
+    e, p = (made or skipped)[0]
+    out = {"outcome": "created" if made else "skipped", "event": _ref(e), "reason": p.get("reason"),
+           "offer_id": p.get("offer_id"), "needed_count": p.get("needed_count"),
+           "price_per_episode_cents": p.get("price_per_episode_cents"), "max_cost_cents": p.get("max_cost_cents"),
+           "spend_check": p.get("spend_check")}
+    out["timeouts"] = [{"event": _ref(te), "action": tp.get("action"), "waited_s": tp.get("waited_s")}
+                       for te, tp in all_of("plan_offer.timeout", data_plan_id=plan_id)]
+    out["fallbacks"] = [{"event": _ref(fe), "created_task_ids": fp.get("created_task_ids")}
+                        for fe, fp in all_of("plan_offer.fallback", data_plan_id=plan_id)]
+    return out
+
 
 def _i(v: Any, default: int = 0) -> int:
     try:
@@ -361,6 +382,7 @@ def _decision(it, tid, mine, events, first, all_of, evals_by_id, eval_views, tri
             "guardrail_agreed_first_try": evid.get("guardrail_agreed_first_try"),
             "labels_cited": evid.get("labels_cited"), "budget_math": budget_math or None,
             "dataset_offer": evid.get("dataset_offer"),
+            "dataset_offer_decision": _tdm95_offer_decision(all_of, pid),
             "model": {"requested": model.get("requested"), "served": model.get("served"), "effort": model.get("effort"),
                       "attempts": model.get("attempts")} if model else None,
             "data_type_override": (evid.get("inputs") or {}).get("data_type_override"),

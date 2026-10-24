@@ -14,10 +14,13 @@ overbuy, even with two orchestrators. This module is the glue around them:
               ``tickets/{ticket}/purchased/{offer}/{ref}/{file}`` (raw format: one mp4 per camera +
               ``actions.parquet``), or ``.../purchased/{offer}/lerobot/<path>`` for a LeRobot v2.1
               folder. Only as many episodes as there are open slots get URLs.
-  4. ingest   ``ingest``: one ``ingest_purchased_episode`` per episode (a LeRobot folder is unpacked
-              per episode from ``meta/info.json`` + ``meta/episodes.jsonl``). Each becomes
-              ``episode{kind=purchased, review_status=pending}``. The reducer refuses deliveries past
-              ``needed_count``; those come back in ``refused`` with its message.
+  4. ingest   ``ingest``: one ``ingest_purchased_episode`` per episode. A LeRobot delivery (the uploaded
+              folder, or ``source: hf://...`` for a public dataset) is first IMPORTED into our episode
+              format (TDM-95, ``dataset_import``: ``actions.parquet`` + ``<role>.mp4`` per episode under
+              ``.../purchased/{offer}/lerobot-<idx>/``), so QA and the TDM-39 converter read the same
+              files. Each becomes ``episode{kind=purchased, review_status=pending}``. The reducer refuses
+              deliveries past ``needed_count``; those come back in ``refused`` with its message, and
+              every ingest call logs ``dataset_offer.delivery`` (ingested, refused + reasons, import).
   5. QA       nothing to call: the episode entering ``pending`` fires the dataset QA handlers.
               TDM-92 (``dataset_qa``) writes its deterministic ``qa_result`` rows and the summary row
               ``deterministic_qa`` last (rejecting via ``submit_review`` on a failure); TDM-93
@@ -41,6 +44,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .log import get_logger
@@ -50,6 +54,7 @@ log = get_logger("offers")
 ACTOR = "orchestrator"
 SETTLE_BATCH_REF = "settle"
 EVENT_DELIVERY_COMPLETE = "dataset_offer.delivery_complete"
+EVENT_DELIVERY = "dataset_offer.delivery"  # TDM-95: per ingest call: ingested + refused (with reasons) + import record
 OPEN_STATUSES = ("proposed", "accepted", "ingesting", "qa")
 INGESTABLE = ("accepted", "ingesting", "qa")
 CAP_ERRORS = ("is full", "already has its", "cannot take more")
@@ -525,18 +530,81 @@ class OffersService:
                 out.append({"ref": ref, "reason": str(e)})
         return out
 
-    def _lerobot_deliveries(self, ticket_id: int, offer_id: int, manifest: dict) -> list[EpisodeDelivery]:
+    def _download_lerobot(self, ticket_id: int, offer_id: int, dest: Path) -> Path:
+        """Copy the seller's uploaded ``.../purchased/{offer}/lerobot/`` folder to ``dest``."""
         from .storage import make_uri
 
-        root = make_uri(self.store.scheme, self.store.bucket, f"{purchased_prefix(ticket_id, offer_id)}{LEROBOT_DIR}")
-        info = manifest.get("info")
-        if info is None:
-            info = json.loads(self.fetch(f"{root}/meta/info.json"))
+        prefix = f"{purchased_prefix(ticket_id, offer_id)}{LEROBOT_DIR}/"
+        objs = [o for o in self.store.list(prefix, limit=10000) if o.key.startswith(prefix)]
+        if not any(o.key == f"{prefix}meta/info.json" for o in objs):
+            raise OfferError(422, "not_uploaded", f"no LeRobot folder uploaded: {prefix}meta/info.json is missing")
+        for o in objs:
+            p = dest / o.key[len(prefix):]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(self.fetch(make_uri(self.store.scheme, self.store.bucket, o.key)))
+        return dest
+
+    def _lerobot_deliveries(self, ticket_id: int, offer_id: int, manifest: dict, done_refs: set[str],
+                            slots: int, needed: int) -> tuple[list[EpisodeDelivery | dict], dict]:
+        """TDM-95: a LeRobot delivery (the uploaded folder, or ``source: hf://org/name`` for a public
+        dataset) is IMPORTED into our episode format with ``dataset_import`` (TDM-92): one
+        ``actions.parquet`` + ``<role>.mp4`` per camera, stored under ``.../purchased/{offer}/lerobot-<idx>/``.
+        QA and the TDM-39 converter then read the same files (it never sees a raw LeRobot parquet).
+        Only as many new episodes as there are open slots are imported; the rest are refused
+        (``offer_full``) without the work. Returns (deliveries | refused dicts, import record)."""
+        import tempfile
+
+        from .dataset_import import Source, describe, episode_refs, import_lerobot
+
+        source = manifest.get("source")
+        if source is not None and not str(source).startswith("hf://"):
+            raise OfferError(422, "bad_source", "source must be a public hf://<org>/<name> dataset "
+                             "(or omit it to import the uploaded lerobot/ folder).")
         eps = manifest.get("episodes")
-        if eps is None:
-            eps = [json.loads(line) for line in self.fetch(f"{root}/meta/episodes.jsonl").decode().splitlines()
-                   if line.strip()]
-        return unpack_lerobot(root, info, eps)
+        asked = None if eps is None else [int(e["episode_index"]) if isinstance(e, dict) else int(e) for e in eps]
+        with tempfile.TemporaryDirectory(prefix=f"tdm95-offer{offer_id}-") as tmp:
+            t = Path(tmp)
+            spec = str(source) if source else str(self._download_lerobot(ticket_id, offer_id, t / "src"))
+            try:
+                src = Source(spec, t / ".cache")
+                indexes = [r.index for r in episode_refs(src, describe(src.info()))]
+            except Exception as e:  # noqa: BLE001 - a broken delivery is the seller's problem
+                raise OfferError(422, "bad_lerobot", f"could not read the LeRobot dataset: {type(e).__name__}: {e}") from e
+            if asked is not None:
+                indexes = [i for i in asked if i in set(indexes)] + [i for i in asked if i not in set(indexes)]
+            out: list[EpisodeDelivery | dict] = []
+            todo: list[int] = []
+            for idx in indexes:
+                ref = f"lerobot-{idx:06d}"
+                if ref in done_refs:  # already ingested: a placeholder that hits the dedup branch
+                    out.append(EpisodeDelivery(ref, {}, "", 0, 0, storage_uri=self._folder_uri(ticket_id, offer_id, ref)))
+                elif len(todo) < max(0, slots):
+                    todo.append(idx)
+                else:
+                    out.append({"ref": ref, "code": "offer_full", "reason": (
+                        f"not bought: the offer only buys {needed} episode(s) (target_episodes minus those "
+                        "already uploaded) and no slot is open")})
+            try:
+                imported = import_lerobot(spec, t / "out", episodes=todo, arm=manifest.get("arm"),
+                                          camera_map=manifest.get("camera_map"),
+                                          assume_success=manifest.get("assume_success")) if todo else []
+            except Exception as e:  # noqa: BLE001
+                raise OfferError(422, "import_failed", f"dataset_import failed: {type(e).__name__}: {e}") from e
+            for ie in sorted(imported, key=lambda x: todo.index(x.source_index)):
+                ref = f"lerobot-{ie.source_index:06d}"
+                actions_uri = self.store.put(purchased_key(ticket_id, offer_id, ref, "actions.parquet"),
+                                             ie.actions_path.read_bytes(), "application/vnd.apache.parquet")
+                cams = {role: self.store.put(purchased_key(ticket_id, offer_id, ref, f"{role}.mp4"), p.read_bytes(),
+                                             "video/mp4") for role, p in sorted(ie.cameras.items())}
+                out.append(EpisodeDelivery(ref, cams, actions_uri, ie.frame_count, ie.duration_ms, ie.success,
+                                           self._folder_uri(ticket_id, offer_id, ref)))
+            record = {"source": spec if source else f"{purchased_prefix(ticket_id, offer_id)}{LEROBOT_DIR}/",
+                      "public_dataset": bool(source), "importer": "rdf_orchestrator.dataset_import",
+                      "arm": manifest.get("arm"), "imported": [
+                          {"ref": f"lerobot-{ie.source_index:06d}", "source_episode_index": ie.source_index,
+                           "frames": ie.frame_count, "cameras": sorted(ie.cameras), "notes": ie.notes[:5]}
+                          for ie in imported]}
+            return out, record
 
     def _missing_objects(self, ticket_id: int, offer_id: int, deliveries: list[EpisodeDelivery]) -> dict[str, list[str]]:
         have = {o.key for o in self.store.list(purchased_prefix(ticket_id, offer_id), limit=10000)}
@@ -565,25 +633,28 @@ class OffersService:
                                 else "it no longer takes deliveries."))
         tid = int(offer["ticket_id"])
         fmt = manifest.get("format", "raw")
-        if fmt == "lerobot":
-            items: list[EpisodeDelivery | dict] = list(
-                await asyncio.to_thread(self._lerobot_deliveries, tid, offer_id, manifest))
-        elif fmt == "raw":
-            items = self._raw_deliveries(tid, offer_id, list(manifest.get("episodes") or []))
-        else:
-            raise OfferError(422, "bad_format", "format must be raw or lerobot.")
-
-        deliveries = [d for d in items if isinstance(d, EpisodeDelivery)]
-        missing = (await asyncio.to_thread(self._missing_objects, tid, offer_id, deliveries)
-                   if manifest.get("verify", True) else {})
         slots = (await self._state(offer)).open_slots  # advisory; the reducer is the authority
         existing = {e["storage_uri"]: int(e["id"]) for e in await self._rows("episode", "ticket_id", tid)
                     if int(e.get("dataset_offer_id") or 0) == offer_id}
+        imported: dict | None = None
+        if fmt == "lerobot":
+            done_refs = {u.rstrip("/").rsplit("/", 1)[-1] for u in existing}
+            items, imported = await asyncio.to_thread(self._lerobot_deliveries, tid, offer_id, manifest, done_refs,
+                                                      slots, int(offer["needed_count"]))
+            missing: dict[str, list[str]] = {}  # just imported and stored by us
+        elif fmt == "raw":
+            items = self._raw_deliveries(tid, offer_id, list(manifest.get("episodes") or []))
+            deliveries = [d for d in items if isinstance(d, EpisodeDelivery)]
+            missing = (await asyncio.to_thread(self._missing_objects, tid, offer_id, deliveries)
+                       if manifest.get("verify", True) else {})
+        else:
+            raise OfferError(422, "bad_format", "format must be raw or lerobot.")
+
         ingested, already, refused = [], [], []
         full_msg: str | None = None
         for d in items:
             if not isinstance(d, EpisodeDelivery):
-                refused.append({**d, "code": "invalid"})
+                refused.append({"code": "invalid", **d})
                 continue
             if d.storage_uri in existing:
                 already.append({"ref": d.ref, "episode_id": existing[d.storage_uri]})
@@ -613,6 +684,17 @@ class OffersService:
             ep_id = await self._episode_id(tid, offer_id, d.storage_uri)
             existing[d.storage_uri] = ep_id
             ingested.append({"ref": d.ref, "episode_id": ep_id, "storage_uri": d.storage_uri})
+        if ingested or refused:  # TDM-95: the evidence trail / report see every delivery and every refusal
+            note = str(manifest.get("note") or "")[:500]
+            try:
+                await self._call("append_event", ACTOR, EVENT_DELIVERY, json.dumps({
+                    "offer_id": offer_id, "ticket_id": tid, "format": fmt, "needed_count": int(offer["needed_count"]),
+                    "ingested": [{"ref": x["ref"], "episode_id": x["episode_id"]} for x in ingested],
+                    "refused": [{"ref": x.get("ref"), "code": x.get("code"), "reason": str(x.get("reason", ""))[:300]}
+                                for x in refused],
+                    "import": imported, "note": note or None}, default=str))
+            except OfferError as e:  # the ingest itself happened; the log line below still records it
+                log.warning("offers.delivery_event_failed", extra={"fields": {"offer_id": offer_id, "error": e.message}})
         if manifest.get("final"):
             await self.mark_delivery_complete(offer_id, tid)
         log.info("offers.ingest", extra={"fields": {"offer_id": offer_id, "ticket_id": tid, "ingested": len(ingested),

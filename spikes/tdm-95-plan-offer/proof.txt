@@ -1,0 +1,45 @@
+# TDM-95 proof run (2026-10-24T08:33:42Z): services/orchestrator/scripts/tdm95_prove_plan_offer.py on a throwaway local SpacetimeDB (127.0.0.1:3095, db tdm95offer)
+# REAL Claude calls: TDM-24 planner x2 (tickets A, B). STUB: TDM-93 LLM QA judge ([STUB LLM QA]), Modal fine-tune (fake:// checkpoint). REAL: TDM-92 deterministic QA, TDM-39 convert (local CPU), all reducers/handlers. [FAKE] seller delivering PUBLIC hf://allenai/24112025-yam-01 episodes (not bought).
+..... importing 2 [FIXTURE] pre-existing demos from hf://allenai/24112025-yam-01 episodes 4, 5 (left arm)
+PASS  setup: ticket A 1 at plan_data, target_episodes 5, 2 accepted demos ([FIXTURE] baseline 0/10)
+..... planner (REAL Claude call) deciding ticket A ...
+PASS  planner recorded a data_plan for ticket A
+..... planner: clean_teleop x 3 (est 3000c), served by claude-opus-5-5; dataset_offer {'consider': True, 'max_price_per_episode_cents': 800, 'max_episodes': 3}
+..... reasoning: The baseline eval of pi05_base scored 0 successes out of 10 trials (95% interval 0.0 to 0.278), and every failure happened before any interaction with the cloth: "never reaches the cloth" (6 of 10 failures), where the arm hovers above the table, and "freezes at start" (4 of 10 failures), where the arm stays at its home pose. Since the success rate is 0 and no-approach failures make up all of the failures, the policy lacks the basic reach-and-fold behavior and needs full start-to-finish demonstrations. Recovery takeovers are the worse buy here because the diagnosis found no near-success state t
+PASS  planner suggests a dataset offer: max 800c/episode for up to 3 episodes
+PASS  spend gate: no offer while the plan is only proposed (approve_spend not called)
+..... approve_spend(ticket 1, plan 1, est) as human:tdm95-proof
+PASS  plan_offer.created after approval: {"ticket_id": 1, "data_plan_id": 1, "iteration": 0, "data_type": "clean_teleop", "plan_amount": 3, "planner_hint": {"consider": true, "max_price_per_episode_cents": 800, "max_episodes": 3}, "approved_by": "human:tdm95-proof", "trigger": "plan:live", "offer_id": 1, "seller": {"id": 1, "name": "[FAKE] tdm95 seller (public HF data, nothing bought)", "kind": "dataset_seller", "payouts_enabled": false}
+PASS  offer 1: 3 x 800c = 2400c within approved 3000c and remaining budget 10000c
+PASS  dispatcher posted 0 paid tasks: offer 1 holds all 3 slots (dispatch.covered_by_offer)
+PASS  flywheel waits in dispatch: collecting: 0/3 episodes for plan 1; waiting on dataset offer 1 (proposed, 0/3 delivered)
+..... seller accepted; delivering 4 episodes (hf://allenai/24112025-yam-01 ep 0-3, left arm) ...
+..... ingest took 214s: {"ingested": [{"ref": "lerobot-000000", "episode_id": 3, "storage_uri": "modal-vol://tdm95-proof/tickets/1/purchased/1/lerobot-000000"}, {"ref": "lerobot-000001", "episode_id": 4, "storage_uri": "modal-vol://tdm95-proof/tickets/1/purchased/1/lerobot-000001"}, {"ref": "lerobot-000002", "episode_id": 5, "storage_uri": "modal-vol://tdm95-proof/tickets/1/purchased/1/lerobot-000002"}], "refused": [{"code": "offer_full", "ref": "lerobot-000003", "reason": "not bought: the offer only buys 3 episode(s) (target_episodes minus those already uploaded) and no slot is open"}]}
+PASS  3 of 4 ingested: ['lerobot-000000', 'lerobot-000001', 'lerobot-000002']
+PASS  the 4th is refused at ingest: [{'code': 'offer_full', 'ref': 'lerobot-000003', 'reason': 'not bought: the offer only buys 3 episode(s) (target_episodes minus those already uploaded) and no slot is open'}]
+PASS  imported at ingest into OUR episode format (read_actions ok, 2479 ticks; cameras exo+wrist): modal-vol://tdm95-proof/tickets/1/purchased/1/lerobot-000000/actions.parquet
+PASS  event_log dataset_offer.delivery: ingested + refused + import record, labelled public data
+..... episode 4 lerobot-000001: accepted; 13 qa rows, failed []; review: Accepted by LLM QA (quality 4/5): [STUB LLM QA] accepted without a Claude call (harness stub)
+..... episode 3 lerobot-000000: accepted; 13 qa rows, failed []; review: Accepted by LLM QA (quality 4/5): [STUB LLM QA] accepted without a Claude call (harness stub)
+..... episode 5 lerobot-000002: accepted; 13 qa rows, failed []; review: Accepted by LLM QA (quality 4/5): [STUB LLM QA] accepted without a Claude call (harness stub)
+PASS  QA accepted 3 purchased episodes (0 rejected)
+PASS  finalize_offer: accepted_count 3
+PASS  seller payout reserved only after QA: [(2400, 'awaiting_onboarding', 'settle')] (3 x 800c; TDM-63: seller has no Stripe account -> awaiting_onboarding)
+PASS  training run 1 on [1, 2, 3, 4, 5] (2 demos + 3 purchased); checkpoint fake://tdm28/checkpoints/run-1 [STUB]
+PASS  ticket A moved dispatch -> review -> train -> eval
+..... TDM-39 convert (REAL, local CPU) on 5 episodes ...
+..... convert: over": 0, "cut_after_handback": 0, "fixture": false, "takeover_ts": null, "handback_ts": null}, {"episode_index": 4, "episode_id": "5", "kind": "purchased", "source": "ticket", "src_frames": 1919, "src_fps": 30.0, "frames": 1919, "cut_before_takeover": 0, "cut_after_handback": 0, "fixture": false, "takeover_ts": null, "handback_ts": null}], "frames": null, "total_frames": 10881, "seconds": 157.71}
+PASS  TDM-39 converted the training set to LeRobot v2.1: 5 episodes, 10881 frames (/Users/jaxon/coding-project/robot-deploy-fact/spikes/tdm-95-plan-offer/tmp/run-1792830375/datasets/lerobot/rdf/ticket-1-run-1)
+..... report: - Dataset offer 1 (seller 1, $8.00/episode, done): bought 3 of 3 needed (target 5); 1 refused at ingest (offer_full); payout $24.00 (planner suggestion on data_plan 1, after approve_spend)
+PASS  report lists the purchase separately: 'bought 3 of 3 needed (target 5); 1 refused at ingest (offer_full)'
+PASS  evidence trail: data_plan 1 -> dataset_offer_decision created offer 1 (event 48)
+..... ticket B 2: target 3, nothing collected; planner (REAL Claude call) ...
+PASS  planner recorded a data_plan for ticket B
+..... planner B: clean_teleop x 3; dataset_offer {'consider': True, 'max_price_per_episode_cents': 800, 'max_episodes': 3}
+PASS  ticket B: offer created after approval ({"ticket_id": 2, "data_plan_id": 2, "iteration": 0, "data_type": "clean_teleop", "plan_amount": 3, "planner_hint": {"consider": true, "max_price_per_episode_cents": 800, "max_episodes": 3}, "approved_)
+PASS  ticket B: no paid tasks while offer 2 is open
+..... the seller never accepts offer B; waiting for RDF_OFFER_TIMEOUT_S=10 ...
+PASS  timeout: offer 2 cancelled after 10.8s ([TDM-95 timeout] the seller never accepted within 10s; falling back to paid demos)
+PASS  fallback: 3 paid clean_teleop tasks posted for the freed slots (plan_offer.fallback [1, 2, 3])
+..... event_log: {"dataset_offer.accepted": 1, "dataset_offer.cancelled": 1, "dataset_offer.created": 2, "dataset_offer.delivery": 1, "dataset_offer.delivery_complete": 1, "dataset_offer.episode_ingested": 3, "dataset_offer.settled": 1, "dispatch.covered_by_offer": 2, "payment.awaiting_onboarding": 1, "payment.reserved": 1, "plan_offer.created": 2, "plan_offer.fallback": 1, "plan_offer.timeout": 1, "qa.acceptance_rate": 3, "qa.dataset_checked": 3, "qa.result_recorded": 39, "review.accepted": 5, "spend.approved": 2}
+---- 25 passed, 0 failed

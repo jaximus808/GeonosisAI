@@ -1,0 +1,3 @@
+# TDM-3: the dev images only COPY docker/; keep secrets, node_modules and venvs out of the build context.
+*
+!docker/

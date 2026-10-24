@@ -4,12 +4,26 @@
 
 PY_SERVICES := orchestrator factory training robot-client
 
-.PHONY: help install dev dev-ts dev-py dev-spacetime seed deploy env-check \
+.PHONY: help install dev dev-host dev-local dev-minio dev-down dev-ts dev-py \
+        dev-spacetime spacetime-publish seed deploy env-check \
         $(addprefix dev-,$(PY_SERVICES))
+
+# Local SpacetimeDB (docker compose profile local-spacetime). Same DB name as
+# Maincloud so apps need no config change beyond the host.
+# Host port 3300, not 3000: 3000 is the usual Node dev port and often taken.
+SPACETIME_LOCAL_PORT ?= 3300
+export SPACETIME_LOCAL_PORT
+SPACETIME_LOCAL_DB ?= robo-factory-a706j
+COMPOSE ?= docker compose
 
 help:
 	@echo "make install    pnpm install + uv sync in each Python service"
-	@echo "make dev        start every app and service (placeholders for now)"
+	@echo "make dev        docker compose up: orchestrator, web, mcp against Maincloud SpacetimeDB"
+	@echo "make dev-local  same, plus a local SpacetimeDB container (offline dev)"
+	@echo "make dev-minio  same as dev, plus MinIO + episodes bucket"
+	@echo "make dev-down   stop every compose service (all profiles)"
+	@echo "make dev-host   run every app and service directly on the host (no Docker)"
+	@echo "make spacetime-publish  publish spacetime/ to the local SpacetimeDB container"
 	@echo "make seed       seed SpacetimeDB with demo data (stub)"
 	@echo "make deploy     deploy the backend (stub)"
 	@echo "make env-check  report which .env keys are set (never prints values)"
@@ -18,8 +32,32 @@ install:
 	pnpm install
 	@for s in $(PY_SERVICES); do echo "uv sync: services/$$s"; (cd services/$$s && uv sync) || exit 1; done
 
-# Each target runs in parallel under -j so long-running servers can coexist later.
+# Docker dev stack (TDM-3, docker-compose.yml). Containers run the per-app
+# targets below, so these stay the single definition of "how an app runs".
 dev:
+	$(COMPOSE) up --build
+
+dev-local:
+	SPACETIME_HOST=http://spacetimedb:3000 \
+	SPACETIME_PUBLIC_HOST=http://localhost:$(SPACETIME_LOCAL_PORT) \
+	SPACETIME_DB_NAME=$(SPACETIME_LOCAL_DB) SPACETIME_TOKEN= \
+	$(COMPOSE) --profile local-spacetime up --build
+
+dev-minio:
+	$(COMPOSE) --profile minio up --build
+
+dev-down:
+	$(COMPOSE) --profile local-spacetime --profile minio down
+
+# Publish the module to the local container (start it first: make dev-local,
+# or `docker compose --profile local-spacetime up -d spacetimedb`).
+# Maincloud publishing stays manual; see spacetime/README.md.
+spacetime-publish:
+	cd spacetime && spacetime publish --server http://localhost:$(SPACETIME_LOCAL_PORT) \
+	  $(SPACETIME_LOCAL_DB) --delete-data=never --yes=migrate
+
+# Host-only dev (no Docker). Each target runs in parallel under -j.
+dev-host:
 	@$(MAKE) --no-print-directory -j dev-spacetime dev-ts dev-py
 
 dev-ts:

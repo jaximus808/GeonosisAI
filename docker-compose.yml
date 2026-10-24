@@ -1,0 +1,182 @@
+# Local dev stack (TDM-3). Run from the repo root:
+#
+#   make dev            # = docker compose up: orchestrator + web + mcp, talking to Maincloud
+#   make dev-local      # + local SpacetimeDB container (offline dev); see README.md
+#   make dev-minio      # + MinIO (S3-compatible episode storage) and its bucket-create init
+#
+# SpacetimeDB defaults to Maincloud through SPACETIME_HOST in .env. The local
+# `spacetimedb` and `minio` services sit behind profiles, so a plain
+# `docker compose up` never starts them.
+#
+# Every workspace package's node_modules is a named volume (see node-deps), so
+# the containers never write Linux installs into the host's macOS tree. A new
+# apps/* or packages/* entry needs a line there too.
+#
+# Each app container runs that app's own dev command (`make dev-<svc>` for
+# Python, `pnpm --filter @rdf/<app> run dev` for TS), so the stack fills in as
+# the apps get built. Placeholders that exit 0 are kept idle by
+# docker/dev-keepalive.sh.
+
+name: rdf
+
+x-spacetime-env: &spacetime-env
+  # Shell env beats .env in compose interpolation, which is how `make dev-local`
+  # repoints the containers at the local instance without editing .env.
+  SPACETIME_HOST: ${SPACETIME_HOST:-https://maincloud.spacetimedb.com}
+  SPACETIME_DB_NAME: ${SPACETIME_DB_NAME:-robo-factory-a706j}
+  SPACETIME_TOKEN: ${SPACETIME_TOKEN:-}
+
+services:
+  # ---------- apps (default profile) ----------
+  orchestrator:
+    build: { context: ., dockerfile: docker/dev-python.Dockerfile }
+    image: rdf-dev-python
+    init: true
+    depends_on:
+      spacetimedb: { condition: service_healthy, required: false }
+    command: ["make", "--no-print-directory", "dev-orchestrator"]
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *spacetime-env
+      UV_PROJECT_ENVIRONMENT: /venvs/orchestrator
+      UV_CACHE_DIR: /uv-cache
+      WATCHFILES_FORCE_POLLING: "true"
+      HOST: 0.0.0.0
+      PORT: "8000"
+    ports: ["${ORCHESTRATOR_PORT:-8000}:8000"]
+    # Any HTTP answer counts (no -f): the server is up even if / is a 404.
+    healthcheck: &http-up
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:$$PORT/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - .:/app
+      - venv-orchestrator:/venvs/orchestrator
+      - uv-cache:/uv-cache
+
+  # One-shot `pnpm install` into the container-side node_modules volumes, so
+  # web and mcp don't race each other installing into the same volume.
+  node-deps:
+    build: { context: ., dockerfile: docker/dev-node.Dockerfile }
+    image: rdf-dev-node
+    entrypoint: []
+    command: ["pnpm", "install", "--frozen-lockfile"]
+    environment:
+      CI: "true"
+    volumes: &node-volumes
+      - .:/app
+      - node-modules-root:/app/node_modules
+      - node-modules-web:/app/apps/web/node_modules
+      - node-modules-mcp:/app/apps/mcp/node_modules
+      - node-modules-mobile:/app/apps/mobile/node_modules
+      - node-modules-pkg-env:/app/packages/env/node_modules
+      - node-modules-pkg-stdb:/app/packages/spacetime-bindings/node_modules
+      - pnpm-store:/pnpm/store
+
+  web:
+    build: { context: ., dockerfile: docker/dev-node.Dockerfile }
+    image: rdf-dev-node
+    init: true
+    depends_on:
+      node-deps: { condition: service_completed_successfully }
+      spacetimedb: { condition: service_healthy, required: false }
+    command: ["pnpm", "--filter", "@rdf/web", "run", "dev"]
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *spacetime-env
+      # The browser can't resolve in-network hostnames like `spacetimedb`, so
+      # client-side code gets a host-reachable URL of its own.
+      NEXT_PUBLIC_SPACETIME_HOST: ${SPACETIME_PUBLIC_HOST:-${SPACETIME_HOST:-https://maincloud.spacetimedb.com}}
+      NEXT_PUBLIC_SPACETIME_DB_NAME: ${SPACETIME_DB_NAME:-robo-factory-a706j}
+      # Must match the port apps/web's dev script pins (`next dev --port 3737`).
+      PORT: "3737"
+    ports: ["${WEB_PORT:-3737}:3737"]
+    healthcheck: *http-up
+    volumes: *node-volumes
+
+  mcp:
+    build: { context: ., dockerfile: docker/dev-node.Dockerfile }
+    image: rdf-dev-node
+    init: true
+    depends_on:
+      node-deps: { condition: service_completed_successfully }
+      spacetimedb: { condition: service_healthy, required: false }
+    command: ["pnpm", "--filter", "@rdf/mcp", "run", "dev"]
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *spacetime-env
+      HOST: 0.0.0.0
+      PORT: "3002"
+    ports: ["${MCP_PORT:-3002}:3002"]
+    # No healthcheck yet: the placeholder doesn't listen. Add `healthcheck: *http-up`
+    # once apps/mcp serves on $PORT.
+    volumes: *node-volumes
+
+  # ---------- optional: local SpacetimeDB (profile local-spacetime) ----------
+  spacetimedb:
+    profiles: [local-spacetime]
+    image: clockworklabs/spacetime:v2.13.0
+    # Root so it can write the fresh named volume (the image's uid 1000 can't).
+    user: "0:0"
+    command: ["start", "--listen-addr", "0.0.0.0:3000", "--data-dir", "/stdb", "--non-interactive"]
+    ports: ["${SPACETIME_LOCAL_PORT:-3300}:3000"]
+    volumes:
+      - spacetime-data:/stdb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/v1/ping >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # ---------- optional: MinIO episode storage (profile minio) ----------
+  # minio/minio is gone from Docker Hub (MinIO stopped publishing community
+  # images), so this uses the pgsty community-fork build, which also ships mc.
+  minio:
+    profiles: [minio]
+    image: &minio-image pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rdf-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rdf-minio-dev-only}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    profiles: [minio]
+    image: *minio-image
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rdf-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rdf-minio-dev-only}
+      EPISODES_BUCKET: ${EPISODES_BUCKET:-episodes}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$EPISODES_BUCKET" &&
+        echo "[minio-init] bucket $$EPISODES_BUCKET ready"
+
+volumes:
+  venv-orchestrator:
+  uv-cache:
+  node-modules-root:
+  node-modules-web:
+  node-modules-mcp:
+  node-modules-mobile:
+  node-modules-pkg-env:
+  node-modules-pkg-stdb:
+  pnpm-store:
+  spacetime-data:
+  minio-data:

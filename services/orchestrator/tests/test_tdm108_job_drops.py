@@ -727,3 +727,13 @@ def test_default_drop_dir_is_per_database():
     b = jd.default_drop_dir("http://127.0.0.1:3112", "rdfdemo")
     assert a != b and a.parent == b.parent == jd.DEFAULT_DIR
     assert jd.default_drop_dir("", "").name == "_unknown-db"
+
+
+def test_sim_robot_reset_is_never_dropped():
+    rows = tdm108_rows([{"id": 30, "ticket_id": 4, "robot_id": 2, "type": "reset", "status": "open",
+                         "price_cents": 200, "instructions": ""}])
+    robot_rows = [r for r in rows("robot")]
+    assert robot_rows, "fixture has a robot row"
+    sim_rows = lambda t: [dict(r, camera_config_json=json.dumps({"sim": True})) for r in rows(t)] if t == "robot" else rows(t)
+    facts, skipped = jd.facts_from_rows([30], sim_rows, {"reset", "recovery_takeover", "clean_teleop"})
+    assert facts is None and skipped == {30: "sim_reset"}

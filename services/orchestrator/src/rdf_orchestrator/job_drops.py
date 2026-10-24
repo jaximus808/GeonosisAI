@@ -287,10 +287,13 @@ def facts_from_rows(task_ids: Iterable[int], rows: Callable[[str], list], types:
     """Read the tasks, their ticket and robot (and the ticket's scene spec) from the bus mirror."""
     ids = [int(t) for t in task_ids]
     by_id = {_i(r.get("id")): dict(r) for r in rows("task")}
+    robots = {_i(r.get("id")): dict(r) for r in rows("robot")}
     ok, skipped = [], {}
     for t in ids:
         row = by_id.get(t)
         why = "unknown_task" if row is None else restricted(row, types)
+        if not why and row.get("type") == "reset" and _is_sim(robots.get(_i(row.get("robot_id")))):
+            why = "sim_reset"  # a sim robot resets its own scene (EVAL_SIM_AUTO_RESET): nothing for a person to do
         if why:
             skipped[t] = why
         else:

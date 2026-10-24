@@ -158,8 +158,10 @@ def content_preview(content: Any) -> str:
 
 # ----------------------------------------------------------------------------- WAITING_FOR / DONE
 
-WAITING_RE = re.compile(r"^\s*WAITING_FOR\s+(.+?)\s*$", re.MULTILINE)
-DONE_RE = re.compile(r"^\s*DONE\s*\.?\s*$", re.MULTILINE)
+# Assistant messages are joined without newlines, so a marker can trail a sentence on the same
+# line ("...I'll stop.WAITING_FOR x"); accept it after line start or sentence punctuation.
+WAITING_RE = re.compile(r"(?:^|(?<=[.!?;:`]))\s*WAITING_FOR\s+(.+?)\s*$", re.MULTILINE)
+DONE_RE = re.compile(r"(?:^|(?<=[.!?;:`]))\s*DONE\s*\.?\s*$", re.MULTILINE)
 # dataset:accepted_count>=5   episode:accepted_count >= 5   dataset.accepted_count==3
 _PRED_RE = re.compile(r"^(?P<table>[a-z_][a-z0-9_]*)[:.](?P<field>[a-z_][a-z0-9_]*)\s*"
                       r"(?P<op>==|!=|>=|<=|>|<|=)\s*(?P<value>\S+)")

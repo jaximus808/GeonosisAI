@@ -1,4 +1,5 @@
 import { DropsConsole } from '@/components/tdm108/DropsConsole';
+import { TextOffersPanel } from '@/components/tdm113/TextOffersPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,8 @@ export default function OpsDropsPage() {
         </p>
       </div>
       <DropsConsole />
+      {/* TDM-113: text offers (dry-run outbox, opt-in counts) */}
+      <TextOffersPanel />
     </div>
   );
 }

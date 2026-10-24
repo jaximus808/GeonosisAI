@@ -19,6 +19,7 @@ dependencies = [
     "rdf-training",  # TDM-42 checkpoint registry + Modal cost (rdf_training.registry / cost)
     "pillow>=10.3",  # TDM-108 job-drop share cards
     "qrcode>=7.4",  # TDM-108 QR code on the card
+    "inkbox==0.7.19",  # TDM-113 text job offers (iMessage/SMS, webhook tunnel); same pin as the JS SDK
 ]
 
 [project.scripts]

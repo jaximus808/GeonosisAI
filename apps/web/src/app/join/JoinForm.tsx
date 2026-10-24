@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useContributor, useContributorPresence, type ContributorKind } from '@/lib/contributor/hooks';
 import { PushOptIn } from '@/components/tdm65/PushOptIn';
+import { TextOptIn } from '@/components/tdm113/TextOptIn';
 
 const DEVICES: { id: string; label: string }[] = [
   { id: 'phone', label: 'Phone' },
@@ -93,6 +94,8 @@ export function JoinForm({ ticket }: { ticket?: string }) {
         </div>
         {/* TDM-65: paid-task push alerts. */}
         <PushOptIn />
+        {/* TDM-113: paid jobs by text (iMessage), reply YES to claim. */}
+        <TextOptIn />
         <div className="flex flex-wrap gap-3">
           <Link href="/marketplace" className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
             See paid tasks

@@ -109,5 +109,6 @@ export function tdm108TaskScopeAllows(scope: Tdm108Scope, method: string, path: 
   if ((m = path.match(/^\/api\/tdm104\/robots\/(\d{1,19})\/scene$/))) return Number(m[1]) === scope.robot;
   if ((m = path.match(/^\/api\/tdm108\/share\/(\d{1,19})\.png$/))) return ids.has(Number(m[1]));
   if (path === '/api/tdm108/claim-src' || path === '/api/tdm59/ping' || path.startsWith('/api/tdm65/')) return true;
+  if (method === 'POST' && /^\/api\/tdm113\/(optin|state|resend|optout)$/.test(path)) return true; // TDM-113 job texts
   return false;
 }

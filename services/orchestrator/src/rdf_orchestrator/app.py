@@ -44,9 +44,16 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
 
             call_events = start_call_events()
         await bus.start()
+        text_started = client is None  # TDM-113: live mode connects the Inkbox tunnel for inbound job texts
+        if text_started:
+            from . import text_offers
+
+            text_offers.start(lambda t: [dict(r) for r in bus.rows(t)])
         try:
             yield
         finally:
+            if text_started:
+                text_offers.stop()
             await bus.stop()
             if call_events is not None:
                 from rdf_common.llm import remove_call_sink
@@ -97,6 +104,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(paging_router)
     from .job_drops_api import job_drops_router  # TDM-108: /drops (ops), /drops/share/{task}.png, /drops/claim-src
     app.include_router(job_drops_router)
+    from .text_offers_api import text_offers_router  # TDM-113: /texts/optin, /texts/state, /texts/webhook (job texts)
+    app.include_router(text_offers_router)
     from .robot_commands_api import robot_commands_router  # TDM-78: POST /robots/{id}/commands (operator key; soft_estop open)
     app.include_router(robot_commands_router)
     from .reset_api import reset_router  # TDM-62: GET /resets/{id}, POST /resets/{id}/photo (reset task page)

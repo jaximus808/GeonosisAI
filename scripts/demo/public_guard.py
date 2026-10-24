@@ -290,6 +290,8 @@ def task_scope_allows(scope: dict, method: str, path: str, query: str) -> bool:
         m = re.fullmatch(pat, path)
         if m:
             return int(m.group(1)) in ids if field_ == "ids" else int(m.group(1)) == scope["robot"]
+    if method == "POST" and re.fullmatch(r"/api/tdm113/(optin|state|resend|optout)", path):  # TDM-113 job texts
+        return True
     return path in ("/api/tdm108/claim-src", "/api/tdm59/ping") or path.startswith("/api/tdm65/")
 
 

@@ -21,6 +21,7 @@ import {
 } from '@/lib/tdm108/invite';
 import { tdm78Env, tdm78SpacetimeTarget } from '@/lib/tdm78/server';
 import { tdm110SqlRows } from '@/lib/tdm110/edge';
+import { tdm113WorkTarget } from '@/lib/tdm113/texts';
 
 type Ctx = { params: Promise<{ task: string; src: string }> };
 
@@ -98,5 +99,7 @@ export async function GET(req: Request, ctx: Ctx) {
     'SameSite=Lax',
     ...(https ? ['Secure'] : []),
   ].join('; ');
-  return redirect(target, cookie);
+  // TDM-113: a text claimant's task is already theirs (claimed on their YES): straight to its work page
+  const work = src === 'text' ? tdm113WorkTarget(task, t.type, t.status) : null;
+  return redirect(work ?? target, cookie);
 }

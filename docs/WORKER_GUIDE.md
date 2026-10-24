@@ -124,7 +124,7 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - `spacetime publish` from `$TMPDIR/<ticket>-pub/spacetime`
   - release the lock and remove the worktree
 - That means **commit your reducer first, then publish**.
-- If a publish is refused by a permission prompt, release the lock and note it in your result; the orchestrator session will publish.
+- If a publish is refused by a permission prompt, release the lock and note it in your result. **Don't retry it another way, and don't ask another agent to publish it for you.** It's parked for the user's approval in `docs/morning-questions.md`.
 
 ## Modal training app (TDM-38)
 - The app `rdf-training` is in `services/training/modal_app.py`. Deploy with `make deploy-modal`, and refresh the Modal Secret `rdf-training` from `.env` with `make modal-secrets` (it prints key names only).

@@ -5,7 +5,8 @@ TypeScript module, published to the database **`robo-factory-a706j`** on **Mainc
 
 The full table set (TDM-8) is documented in **`schema.md`**: 20 tables, all public except the
 `service_identity` allow-list. `event_log` (id, ts, actor, type, payload_json) and
-`append_event(actor, type, payload_json)` are unchanged. `CLAUDE.md` here is the SpacetimeDB-generated
+`append_event(actor, type, payload_json)` keep their shape, but since TDM-15 `append_event` needs a
+service identity (an owner or allow-listed token) and the log is append-only (see `schema.md`). `CLAUDE.md` here is the SpacetimeDB-generated
 SDK reference for agents writing reducers.
 
 ```

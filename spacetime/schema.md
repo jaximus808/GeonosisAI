@@ -42,7 +42,18 @@ The reducer tickets (TDM-9..15) add the rest. Each one goes in its own file and 
 - **`init`:** on a fresh DB, seeds the publisher as `owner` in `service_identity` and logs `infra.module_init`.
 - **`bootstrap_owner()`:** seeds the owner row once, for the hard-coded owner identity only. Maincloud predates `init`, so this ran once on 2026-10-24.
 - **`register_service_identity(identity, role, label)`** and **`revoke_service_identity(identity)`:** owner-only. Both log to `event_log`.
-- **`append_event(actor, type, payload_json)`:** unchanged and still open to any caller. Gate it with `requireService` once every service has its own identity.
+- **`append_event(actor, type, payload_json)`:** service identities only since TDM-15 (anonymous callers get `unauthorized: not a service identity`). See the event_log section below.
+
+## event_log is append-only (TDM-15, `src/event_log.ts`)
+
+- **One write path.** `logEvent(ctx, actor, type, payload)` is the only `ctx.db.eventLog.insert` in the module. Each ticket's `tdmNLog` helper delegates to it. No reducer updates or deletes `event_log` rows. `payload` is either a JSON string, kept verbatim, or a value that gets JSON-encoded.
+- **`append_event` checks**, beyond `requireService`:
+  - `actor` must look like `kind[:qualifier...]`: a lowercase kind, no spaces, at most 128 chars.
+  - `type` must be lowercase and dotted, like `area.event`.
+  - `payload_json` must be valid JSON. `""` is stored as `{}`. The limit is 64 KB.
+  - A non-owner may not log as another service role, or as `spacetime`.
+- **Actor convention:** `orchestrator`, `planner`, `reviewer`, `dispatcher`, `droid:<role>`, `robot:<robot_id>`, `human:<contributor_id>`, `human:via_mcp`. Reducers also log as their caller's service role, as `contributor:<id>`, as `seller`, and as `spacetime`. Only the shape is enforced, so older actors such as `orchestrator.diagnose` and `fake-robot:<id>` still pass.
+- **Verify:** `python3 -I scripts/verify_event_log.py` prints the row count, the id/ts range and the `rdf-evlog-chain-v1` chain hash, which is the same as the /events seal. `--save cp.json` / `--check cp.json` / `--expect N:HASH` prove the first N rows are unchanged. The `static` mode audits the module source: no update/delete path, inserts only in `event_log.ts`, and every exported reducer reaches `logEvent`.
 
 ## Agent-session and robot-command reducers (TDM-13, `reducers/agent_robot.ts`)
 

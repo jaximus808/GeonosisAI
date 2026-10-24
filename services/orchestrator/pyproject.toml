@@ -3,17 +3,34 @@ name = "rdf-orchestrator"
 version = "0.0.0"
 description = "Planner and reviewer loops, dispatcher; writes decisions to the event log"
 requires-python = ">=3.11,<3.12"
-dependencies = ["rdf-common", "anthropic>=2.3.0"]  # anthropic: TDM-23 failure clustering
+dependencies = [
+    "rdf-common",
+    # TDM-4 episode media store: signed-URL API + backends
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "boto3>=1.35",
+    "websockets>=13",
+    "anthropic>=2.3.0",
+    "rdf-payments",  # TDM-63 Stripe test-mode payouts
+]
 
 [project.scripts]
 rdf-orchestrator = "rdf_orchestrator.__main__:main"
 
 [tool.uv.sources]
 rdf-common = { path = "../common", editable = true }
+rdf-payments = { path = "../payments", editable = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rdf_orchestrator"]

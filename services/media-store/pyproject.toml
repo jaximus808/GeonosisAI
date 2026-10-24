@@ -1,0 +1,12 @@
+[project]
+name = "rdf-media-store"
+version = "0.0.0"
+description = "Modal-hosted episode media store: a Modal Volume behind a small signed-URL upload/download endpoint"
+requires-python = ">=3.11,<3.12"
+dependencies = ["modal>=1.6.0", "fastapi>=0.115", "python-multipart>=0.0.9"]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.1.1",
+]

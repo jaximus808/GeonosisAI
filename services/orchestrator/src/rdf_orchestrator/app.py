@@ -55,6 +55,9 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
         its own, so a SpacetimeDB outage should not get the machine restarted. Read ``status``."""
         return request.app.state.bus.health()
 
+    from .media_api import media_router  # TDM-4: /uploads/sign, /media/sign, /media/list, /media/healthz
+    app.include_router(media_router)
+
     return app
 
 

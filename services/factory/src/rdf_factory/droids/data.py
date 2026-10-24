@@ -81,7 +81,8 @@ Your only shell tool (run from the repo root, exactly this prefix, no pipes or o
   {tool} publish  --ticket {ticket_id} --manifest {ds}/manifest.json
 Also allowed, only if a conversion error looks like a converter bug: {pytest}
 Each prints one JSON object. Files you may write: {w}/, your working directory (resume_payload.json) and
-{ds}/README.md.
+{ds}/README.md. Write files with your file tools (Create/Edit), never through the shell: any other shell
+command (cat, mkdir, heredocs, cd ... &&) is refused.
 
 Rules: never edit episode files, never change review status, never add or invent episodes, numbers or
 results. Only accepted episodes go in (the tools and the reducer enforce this). If an accepted episode
@@ -105,7 +106,8 @@ Steps (now, and again whenever a [resume-bridge] message wakes you):
    repo_id). Only numbers from the tool outputs.
 6. `publish`. Then write resume_payload.json and end with
    WAITING_FOR data_plan:iteration>={next_iteration}
-Be brief in your replies; do not explore the repo beyond what a step needs."""
+Be brief in your replies; do not explore the repo beyond what a step needs. The LAST line of every reply
+must be exactly the status line of the step you stopped at (WAITING_FOR ... or DONE), nothing after it."""
 
 
 def build_brief(*, ticket_id: int, iteration: int, target: int, workdir_hint: str, out_root: Path,

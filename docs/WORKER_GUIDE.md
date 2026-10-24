@@ -133,3 +133,8 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - The `Policy` class has `health()` and `infer(obs)`, and is a stub until TDM-41.
 - **Volumes:** `rdf-checkpoints` at `/checkpoints` (pi05_base is cached in `openpi-cache/`; outputs go to `runs/` and `metrics/`), `rdf-datasets` at `/datasets`, and `rdf-media` mounted read-only at `/media`.
 - **Calling from Python (Modal 1.6):** `modal.Function.from_name("rdf-training","finetune").spawn(...)`, then poll `modal.FunctionCall.from_id(id).get(timeout=0)`, which raises `TimeoutError` while the job is still running. `Function.lookup` doesn't exist.
+
+## Event log rules (TDM-15, enforced)
+- **New reducers must log through `logEvent(ctx, actor, type, payload)` from `../event_log`.** Never call `ctx.db.eventLog.insert` directly. `python scripts/verify_event_log.py static` audits this.
+- `append_event` needs a service identity now. Actors are lowercase `kind[:id]` and types are `area.event`, with no spaces. Payloads must be valid JSON under 64 KB.
+- `python scripts/verify_event_log.py` prints the count, range, gaps and the `rdf-evlog-chain-v1` hash, which matches the /events seal. `--expect N:HASH` proves the first N rows are unchanged.

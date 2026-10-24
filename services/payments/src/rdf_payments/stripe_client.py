@@ -13,7 +13,8 @@ from pathlib import Path
 
 import stripe
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# services/payments/src/rdf_payments/stripe_client.py -> repo root is parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # Pin the API version explicitly so behaviour doesn't drift with the account default.
 STRIPE_API_VERSION = "2026-09-30.endive"

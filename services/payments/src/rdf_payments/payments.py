@@ -231,6 +231,22 @@ def top_up_test_balance(amount_cents: int, *, idempotency_key: str | None = None
 # --------------------------------------------------------------------------- payouts
 
 
+def find_transfer(destination: str, ref: str, *, ticket_id: str | None = None) -> stripe.Transfer | None:
+    """An earlier transfer to ``destination`` tagged ``metadata.rdf_ref == ref``, if any.
+
+    Durable dedupe for retries after Stripe's 24h idempotency-key window: every transfer this
+    module creates carries its idempotency key as ``metadata.rdf_ref``.
+    """
+    params: dict[str, Any] = {"destination": destination, "limit": 100}
+    if ticket_id:
+        params["transfer_group"] = f"ticket_{ticket_id}"
+    for tr in get_client().v1.transfers.list(params).auto_paging_iter():
+        meta = tr.metadata.to_dict() if tr.metadata else {}  # StripeObject is not a dict in stripe>=13
+        if meta.get("rdf_ref") == ref:
+            return tr
+    return None
+
+
 def _transfer(
     *,
     destination: str,
@@ -241,6 +257,13 @@ def _transfer(
     metadata: dict[str, str],
 ) -> stripe.Transfer:
     client = get_client()
+    existing = find_transfer(destination, idempotency_key, ticket_id=ticket_id)
+    if existing is not None:
+        if existing.amount != amount_cents:
+            raise PaymentError(
+                f"transfer {existing.id} for {idempotency_key} has amount {existing.amount}c, expected {amount_cents}c"
+            )
+        return existing
     status = transfers_status(destination)
     if status != TRANSFERS_ACTIVE:
         raise AccountNotReady(destination, status)
@@ -249,7 +272,7 @@ def _transfer(
         "currency": CURRENCY,
         "destination": destination,
         "description": description,
-        "metadata": metadata,
+        "metadata": {**metadata, "rdf_ref": idempotency_key},
     }
     if ticket_id:
         params["transfer_group"] = f"ticket_{ticket_id}"
@@ -297,6 +320,35 @@ def pay_for_episode(
         },
     )
     return _result(transfer, contributor_id or contributor_account, episode_id, amount_cents)
+
+
+def pay_reserved(
+    destination: str,
+    ref: str,
+    amount_cents: int,
+    *,
+    payee_id: str = "",
+    ticket_id: str | None = None,
+    description: str,
+    metadata: dict[str, str] | None = None,
+) -> PayoutResult:
+    """Transfer an amount SpacetimeDB already reserved (a ``payment`` row), keyed on ``ref``.
+
+    The orchestrator's payout handler uses this for every row kind: ``rdf-episode-<episode_id>``,
+    ``rdf-task-<task_id>`` (reset tasks) and ``rdf-dataset-<offer_id>-<batch_ref>``. The reducer
+    has already checked review acceptance and the budget; this only moves the money, once.
+    """
+    if amount_cents <= 0:
+        raise PaymentError(f"amount must be positive, got {amount_cents}")
+    transfer = _transfer(
+        destination=destination,
+        amount_cents=amount_cents,
+        idempotency_key=ref,
+        ticket_id=ticket_id,
+        description=description,
+        metadata=metadata or {},
+    )
+    return _result(transfer, payee_id or destination, ref, amount_cents)
 
 
 def dataset_billable_episodes(n_requested: int, n_already_uploaded: int, n_accepted: int) -> int:

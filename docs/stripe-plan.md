@@ -29,15 +29,15 @@ The plan follows the Stripe `connect-recommend` and `stripe-best-practices` skil
 - **PaymentIntent** (test top-up) and **Checkout Session** (budget funding).
 - **Balance**: checked before paying out.
 
-## Code (`services/payments/`)
+## Code (`services/payments/`, uv project `rdf-payments`, package `rdf_payments`)
 
 | File | Contents |
 |---|---|
-| `stripe_client.py` | Shared `StripeClient`, pinned to API version `2026-09-30.endive`. It **refuses any key that isn't `sk_test_`/`rk_test_`** and never logs keys. |
-| `payments.py` | Payout functions (listed below the table). |
-| `webhooks.py` | Signature-verified event parsing and dispatch. |
-| `smoke_test.py` | End-to-end test-mode check. |
-| `requirements.txt` | `stripe==16.0.0`, `python-dotenv`. |
+| `src/rdf_payments/stripe_client.py` | Shared `StripeClient`, pinned to API version `2026-09-30.endive`. It **refuses any key that isn't `sk_test_`/`rk_test_`** and never logs keys. |
+| `src/rdf_payments/payments.py` | Payout functions (listed below the table). |
+| `src/rdf_payments/webhooks.py` | Signature-verified event parsing and dispatch. |
+| `src/rdf_payments/smoke_test.py` | End-to-end test-mode check (`uv run rdf-payments-smoke`; `services/payments/smoke_test.py` is a shim for the old command). |
+| `pyproject.toml` | `rdf-common`, `stripe==16.0.0`, `python-dotenv`. The orchestrator depends on it by path. |
 
 Functions in `payments.py`:
 
@@ -48,6 +48,8 @@ Functions in `payments.py`:
 - `get_balance()`
 - `top_up_test_balance(cents)`
 - `pay_for_episode(account, episode_id, amount_cents, review_accepted=..., budget_cents=..., spent_cents=...)`
+- `pay_reserved(account, ref, amount_cents, ...)`: transfer an amount a `payment` row already reserved (used by the orchestrator for every row kind).
+- `find_transfer(account, ref)`: durable dedupe. Every transfer carries its idempotency key as `metadata.rdf_ref`, and `_transfer` returns an existing match instead of paying again, so retries stay safe after Stripe's 24h key window.
 - `pay_for_dataset(...)`
 - `dataset_billable_episodes(...)`
 - `reverse_payment(transfer_id)`
@@ -57,11 +59,38 @@ Functions in `payments.py`:
 Setup:
 
 ```bash
-uv venv services/payments/.venv
-uv pip install --python services/payments/.venv/bin/python -r services/payments/requirements.txt
-services/payments/.venv/bin/python services/payments/smoke_test.py            # reads ../../.env
-services/payments/.venv/bin/python services/payments/smoke_test.py --account acct_... --wait
+cd services/payments && uv sync
+uv run rdf-payments-smoke                          # reads ../../.env
+uv run rdf-payments-smoke --account acct_... --wait
 ```
+
+## Orchestrator payout handler (TDM-63)
+
+`services/orchestrator/src/rdf_orchestrator/handlers/payments.py` runs on the bus: `on_enter('payment', status=='pending')`.
+
+- **No `stripe_account_id`, or `payouts_enabled=false`:** calls `mark_payment_awaiting_onboarding`. The payment is **not** failed and the budget stays reserved.
+- **Otherwise:** makes one Transfer through `pay_reserved`, keyed `rdf-episode-<episode_id>`, `rdf-task-<task_id>` or `rdf-dataset-<offer>-<batch_ref>`, then calls `mark_payment_paid(id, 'stripe_test', 'tr_...')`.
+- **Errors:**
+  - account not transfer-capable: `awaiting_onboarding`;
+  - low platform test balance: one `pm_card_bypassPending` top-up, then retry;
+  - network, 5xx or rate limit: retried with backoff, then failed;
+  - any other Stripe refusal: `mark_payment_failed`.
+- **When a contributor becomes payable** (`on_enter('contributor', stripe_account_id and payouts_enabled)`): their `awaiting_onboarding` rows are paid.
+- **Account setup:** `set_contributor_payout_account(contributor_id, stripe_account_id, payouts_enabled)` (reducer, `spacetime/spacetimedb/src/reducers/payouts.ts`, payments or orchestrator role) sets the account fields.
+
+HTTP routes (`rdf_orchestrator/payments_api.py`):
+
+| Route | What it does |
+|---|---|
+| `POST /payments/contributors/{id}/onboarding` | Creates the account if needed and returns a fresh onboarding URL. Returns 409 until loss liability is accepted. |
+| `POST /payments/contributors/{id}/refresh` | Re-checks `stripe_transfers` and sets `payouts_enabled`. |
+| `POST /stripe/webhook` | Handles `transfer.created`, `transfer.reversed` and `account.updated`. |
+| `GET /payments/mode` | Returns the TEST MODE badge text. |
+
+Tests:
+
+- `services/orchestrator/tests/test_tdm63_payments.py` uses a **mocked** Stripe.
+- `spacetime/tests/test_tdm63_payout_flow.py` runs the real reducers on a local server with a **mocked** Stripe.
 
 ## Mapping to the SpacetimeDB `payment` table
 
@@ -87,7 +116,7 @@ services/payments/.venv/bin/python services/payments/smoke_test.py --account acc
 
    Doing this in one reducer is the real budget guard, because parallel reviewers can't overspend.
 3. The orchestrator calls `pay_for_episode(...)`, passing `budget_cents`/`spent_cents` again. `check_budget` is a second guard that runs before any API call.
-4. `record_payment_result(payment_id, status, provider_ref)` sets the row to `paid` and updates `contributor.total_paid_cents`. On failure it sets `failed` and releases the reserved spend.
+4. `mark_payment_paid(payment_id, provider, provider_ref)` sets the row to `paid` and updates `contributor.total_paid_cents`. `mark_payment_failed` sets `failed` and releases the reserved spend; `mark_payment_awaiting_onboarding` keeps it reserved until the contributor can be paid (TDM-11 reducers).
 5. If the call fails, retry with the same `episode_id`. Stripe's idempotency key returns the same transfer for 24h, and after that the `payment` row is the dedupe.
 
 ## Budget guard and spend approval
@@ -122,7 +151,7 @@ The transfer path itself is synchronous: `transfers.create` either returns a tra
 
 1. **Connect is enabled** on the sandbox. This was done with `stripe tools enable_connect`, test only.
 2. **MANUAL, blocking:** in the Stripe Dashboard *for this sandbox*, open **Settings → Connect → Platform profile** (`https://dashboard.stripe.com/acct_1UTycMPt66MyJKMN/settings/connect/platform-profile`) and complete the **loss-liability acknowledgement** and any verification it asks for. Until then, Stripe rejects every recipient account with "platform as the losses collector" (`account_creation_liability_unacknowledged`), for both v2 and v1.
-3. Re-run `smoke_test.py`. It creates a test account and prints an onboarding link. Open the link and fill it with test data:
+3. Re-run the smoke test (`cd services/payments && uv run rdf-payments-smoke`). It creates a test account and prints an onboarding link. Open the link and fill it with test data:
    - phone `000 000 0000`, SMS code `000000`;
    - SSN `000-00-0000`, DOB `01/01/1901`, address line `address_full_match`;
    - test bank routing `110000000`, account `000123456789`.

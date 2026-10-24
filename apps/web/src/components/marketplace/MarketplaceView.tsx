@@ -38,6 +38,7 @@ import {
   type TaskType,
 } from '@/lib/marketplace/tdm61';
 import { Tdm59ClaimGate } from '@/components/teleop/Tdm59ClaimGate'; // TDM-59 practice unlocks arm-control claims
+import { resetHref } from '@/lib/tdm62/reset'; // TDM-62 reset task page
 
 type Ticket = RowOf<'ticket'>;
 type Robot = RowOf<'robot'>;
@@ -424,6 +425,11 @@ function TaskTicket({
               </div>
             </dl>
             <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">{text || info.blurb}</p>
+            {task.type === 'reset' && (
+              <Link href={resetHref(task.id)} className={`mt-1.5 inline-block text-[13px] font-semibold underline underline-offset-2 ${s.text}`}>
+                Steps and start photo
+              </Link>
+            )}
           </div>
           {action && <div className="px-3 pb-3 pl-5">{action}</div>}
         </div>
@@ -514,6 +520,11 @@ function HeldClaim({
               ? 'You control the arm while this page or the teleop page stays open. The hold renews every 20 s and lapses 60 s after the last renewal.'
               : 'Your hold renews while this page is open. Mark it done when the scene is back at its start.'}
         </p>
+        {task.type === 'reset' && (
+          <Link href={resetHref(task.id)} className="mt-2 inline-block text-sm font-semibold text-[#5fd8bd] underline underline-offset-2">
+            Open the reset page: steps, start photo, robot camera
+          </Link>
+        )}
       </div>
 
       <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-white/10 bg-black/15 p-3">

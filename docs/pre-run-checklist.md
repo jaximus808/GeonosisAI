@@ -23,6 +23,7 @@ Collected overnight from worker reports. Tick these off before starting the real
 - [ ] Stripe Connect loss-liability acknowledgement done (morning Q8), and one real test-mode transfer proven.
 
 ## Web wiring still open
+- [ ] Set `RDF_OPERATOR_PASSCODE` before exposing the site (the tunnel for judges' phones). A generated one is in `.env`; the web server must see it, or every operator route answers 503. Give it only to operators; log in at `/ops/login`.
 - [x] Mount `<JoinQr ticketId={id}/>` and `<DecisionTrail ticketId={id} refreshKey={events.length}/>` in `components/ticket/TicketView`. The TDM-75 `DecisionCard` reads a field the planner never writes, so prefer `DecisionTrail`. (TDM-79: done, plus `<TicketSpendPanel>`; DecisionTrail replaces DecisionCard.)
 - [ ] Mount `<ContributorPresence page="teleop"/>` on the teleop page.
 - [x] Wire `loadEnv(webEnv, "web")` from `@rdf/env` in `apps/web`. (TDM-79: `src/instrumentation.ts`, maps the NEXT_PUBLIC_* names onto webEnv.)
@@ -34,3 +35,7 @@ Collected overnight from worker reports. Tick these off before starting the real
 ## Factory
 - [ ] Repo pushed to GitHub and added to the Factory Environment, if cloud droids are wanted; otherwise droids run locally.
 - [ ] Delete the overnight test computer `2bfdc311-…` after the morning resume check (Q10).
+
+## Network path Jetson ↔ orchestrator (decide in the morning)
+- [ ] The Jetson must reach the orchestrator for episode uploads (`JETSON_ORCHESTRATOR_URL`). If the arm is at the office and the laptop at the venue, use the Fly deploy (TDM-5) or a cloudflared tunnel to the laptop's orchestrator; a LAN address only works if both are on the same network. SpacetimeDB (maincloud), Modal and the media store are already public.
+- [ ] Robot-client service mode defaults to `off`. After the SDK bring-up, run `make jetson-deploy JETSON_SERVICE_MODE=yam`. `jetson.sh mint-identity --yes` creates the robot_client SpacetimeDB identity; it writes to maincloud, so it's left for you.

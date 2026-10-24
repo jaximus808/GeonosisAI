@@ -77,7 +77,7 @@ secret = modal.Secret.from_name(SECRET_NAME)
 
 # The S-05a image, step for step (so its expensive layers come from Modal's image cache),
 # with production Volume paths and our own source added at the end.
-image = (
+openpi_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "git-lfs", "ffmpeg", "build-essential", "clang")
     .pip_install("uv==0.8.13")
@@ -99,9 +99,17 @@ image = (
             "PYTHONPATH": "/openpi:/root",
         }
     )
-    .add_local_dir(HERE / "src" / "rdf_training", "/root/rdf_training", ignore=["**/__pycache__"])
-    .add_local_dir(HERE.parent / "common" / "src" / "rdf_common", "/root/rdf_common", ignore=["**/__pycache__"])
 )
+
+
+def _with_src(img: modal.Image) -> modal.Image:
+    """Our source goes last: Modal rejects build steps after add_local_* (TDM-41 split, same layers)."""
+    return img.add_local_dir(HERE / "src" / "rdf_training", "/root/rdf_training", ignore=["**/__pycache__"]).add_local_dir(
+        HERE.parent / "common" / "src" / "rdf_common", "/root/rdf_common", ignore=["**/__pycache__"]
+    )
+
+
+image = _with_src(openpi_image)
 
 
 def vol_uri(volume: str, path: str) -> str:
@@ -194,35 +202,116 @@ def finetune(ticket_id: str, dataset_uri: str = "", hyperparams=None) -> dict:
 # ---------------------------------------------------------------- policy server (TDM-41)
 
 
-# TDM-41: real resources come from S-05b (TDM-37); S-05a measured L40S at 0.12 s per chunk.
-@app.cls(
-    image=image,
-    volumes={CHECKPOINTS_ROOT: checkpoints_volume},
-    secrets=[secret],
-    cpu=1.0,
-    memory=2048,
-    scaledown_window=120,
-    timeout=1800,
-)
-class Policy:
-    checkpoint_uri: str = modal.parameter(default="")
+# TDM-41: base pi0.5 + fine-tuned checkpoints, hot-swapped by URI. Logic and API docs are in
+# src/rdf_training/policy_server.py; this class is only the Modal glue. Resources follow S-05b
+# (TDM-37): H100 first (41 ms GPU per chunk), us-west GPU + ingress, scale to zero.
+# Warm/cool without redeploying: `make policy-up` / `make policy-down` (scripts/policy_ctl.py).
+# NOTE: `modal deploy` of this app restarts a warm Policy container (~1 min); it comes back on
+# the last activated checkpoint (persisted in the Dict rdf-policy-state).
+POLICY_GPU = ["H100", "A100-40GB", "L40S"]  # fallback list; L40S alone never scheduled in us-west
+POLICY_MOUNTS = {CHECKPOINTS_VOLUME: CHECKPOINTS_ROOT, "rdf-s05a-checkpoints": "/s05a"}  # volume -> mount
+policy_image = _with_src(openpi_image.pip_install("fastapi[standard]==0.115.12"))  # web server deps
+s05a_volume = modal.Volume.from_name("rdf-s05a-checkpoints").read_only()  # S-05a smoke checkpoint
+policy_state = modal.Dict.from_name("rdf-policy-state", create_if_missing=True)  # active/previous URI
 
+
+@app.cls(
+    image=policy_image,
+    gpu=POLICY_GPU,
+    region="us-west",
+    routing_region="us-west",  # web ingress; the default (us-east) adds ~70 ms RTT from the Bay Area
+    volumes={CHECKPOINTS_ROOT: checkpoints_volume, "/s05a": s05a_volume},
+    secrets=[secret],  # POLICY_SERVER_TOKEN (bearer auth for /infer, /ws, /policy/activate)
+    cpu=4,
+    memory=32768,
+    min_containers=0,  # scale to zero; `make policy-up` sets min_containers=1 for robot sessions
+    max_containers=1,  # the active checkpoint is container state: exactly one server per app
+    scaledown_window=300,
+    timeout=3600,  # also the longest a single websocket session can stay open
+    startup_timeout=1200,
+)
+@modal.concurrent(max_inputs=8)  # activate() loads next to live inference
+class Policy:
     @modal.enter()
     def load(self) -> None:
-        self.loaded_at = time.time()  # TDM-41: create_trained_policy(config, ckpt_dir) here
+        import os
+        import threading
+
+        import jax
+
+        from rdf_training import policy_server as ps
+
+        jax.config.update("jax_compilation_cache_dir", f"{CHECKPOINTS_ROOT}/jax-cache")
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
+
+        def base_dir() -> str:
+            from openpi.shared import download
+
+            base = pathlib.Path(CHECKPOINTS_ROOT) / "openpi-cache/openpi-assets/checkpoints/pi05_base"
+            if not (base / "assets" / "droid" / "norm_stats.json").exists():  # seed_base_weights copied params only
+                download.maybe_download(f"{ps.BASE_URI}/assets/droid", token="anon")
+                checkpoints_volume.commit()
+            return str(base)
+
+        def before_load(r) -> None:
+            if r.path.startswith(CHECKPOINTS_ROOT):
+                try:
+                    checkpoints_volume.reload()  # see runs committed after this container started
+                except Exception as e:  # noqa: BLE001 - open files block a reload; the path may exist already
+                    print(f"[rdf-policy] volume reload skipped: {e}", flush=True)
+
+        def commit_cache() -> None:
+            checkpoints_volume.commit()  # persist the JAX compile cache for the next cold start
+
+        self.server = ps.PolicyServer(
+            POLICY_MOUNTS,
+            ps.openpi_loader(base_dir),
+            capacity=int(os.environ.get("POLICY_CACHE_SIZE", "2")),
+            persist=lambda st: policy_state.put("state", st),
+            before_load=before_load,
+            on_loaded=commit_cache,
+            info={"gpu": jax.devices()[0].device_kind, "app": APP_NAME},
+        )
+        try:
+            st = policy_state.get("state") or {}
+        except Exception:  # noqa: BLE001
+            st = {}
+        t0 = time.monotonic()
+        try:
+            self.server.activate(st.get("active") or ps.BASE_URI)
+        except Exception as e:  # noqa: BLE001 - a deleted/broken last checkpoint must not brick the server
+            print(f"[rdf-policy] could not restore {st.get('active')!r} ({e}); falling back to base", flush=True)
+            self.server.activate(ps.BASE_URI)
+        self.server.info["startup_s"] = round(time.monotonic() - t0, 1)
+        prev = st.get("previous")
+        if prev and prev != self.server.active.key:  # refill the A/B cache in the background
+            threading.Thread(target=self._preload, args=(prev,), daemon=True).start()
+
+    def _preload(self, uri: str) -> None:
+        try:
+            self.server.activate(uri, preload_only=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[rdf-policy] preload of {uri} failed: {e}", flush=True)
 
     @modal.method()
     def health(self) -> dict:
-        return {"ok": True, "stub": True, "checkpoint_uri": self.checkpoint_uri, "loaded_at": self.loaded_at}
+        return self.server.health()
+
+    @modal.method()
+    def activate(self, checkpoint_uri: str, preload_only: bool = False) -> dict:
+        """Hot-swap to checkpoint_uri (Modal-SDK path; the HTTP path is POST /policy/activate)."""
+        return self.server.activate(checkpoint_uri, preload_only)
 
     @modal.method()
     def infer(self, obs: dict) -> dict:
-        """obs: observation/image, observation/wrist_image, observation/state, prompt (S-05a keys).
+        """S-05b payload ({images, state, prompt}) -> {actions [50, action_dim], ...}. See policy_server.py."""
+        return self.server.infer(obs)
 
-        STUB: returns a hold-still chunk (the current state repeated) of shape [50, len(state)].
-        """
-        state = [float(x) for x in (obs.get("observation/state") or [0.0] * 7)]
-        return {"actions": [list(state) for _ in range(50)], "stub": True, "checkpoint_uri": self.checkpoint_uri}
+    @modal.asgi_app()
+    def web(self):
+        from rdf_training import policy_server as ps
+
+        return ps.build_app(self.server)
 
 
 # ---------------------------------------------------------------- one-time setup

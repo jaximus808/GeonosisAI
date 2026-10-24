@@ -29,6 +29,7 @@ help:
 	@echo "make env-check  report which .env keys are set (never prints values)"
 	@echo "make deploy-modal  modal deploy services/training/modal_app.py (app rdf-training, TDM-38)"
 	@echo "make modal-secrets create/refresh Modal secret rdf-training from .env (names only printed)"
+	@echo "make policy-up / policy-down / policy-status  warm, cool, inspect the policy server (TDM-41)"
 	@echo "make test-loop  full-loop integration tests: local SpacetimeDB + fake robot, no arm (TDM-28)"
 	@echo "make fake-stack boot local SpacetimeDB + fake robot and keep them running (TDM-28)"
 
@@ -115,3 +116,13 @@ deploy-modal:
 
 modal-secrets:
 	cd services/training && uv run --quiet --with 'modal>=1.6.0' python scripts/sync_modal_secret.py
+
+# TDM-41: policy server (rdf-training Policy) warm-up / warm-down. `up` bills one GPU until `down`.
+.PHONY: policy-up policy-down policy-status
+POLICY_CTL = cd services/training && uv run --quiet --with 'modal>=1.6.0' --with httpx python scripts/policy_ctl.py
+policy-up:
+	$(POLICY_CTL) up $(ARGS)
+policy-down:
+	$(POLICY_CTL) down
+policy-status:
+	$(POLICY_CTL) status

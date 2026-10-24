@@ -1,0 +1,351 @@
+{
+  "url": "https://jaxonp808--rdf-training-policy-web-dev.us-west.modal.run",
+  "at": "2026-10-24T01:17:33-0700",
+  "health_wait_s": 0.2,
+  "health_initial": {
+    "active_checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "startup_s": 34.4,
+    "cached": [
+      {
+        "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+        "requested_uri": "gs://openpi-assets/checkpoints/pi05_base",
+        "spec": {
+          "layout": "droid",
+          "state_dim": 8,
+          "action_dim": 8,
+          "joint_dims": 7,
+          "asset_id": "droid",
+          "mode": "base",
+          "action_horizon": 50,
+          "action_space": "droid_base"
+        },
+        "load_s": 18.8,
+        "compile_s": 13.5,
+        "loaded_at": 1792829833.0650778
+      }
+    ]
+  },
+  "unauthorized": {
+    "infer_no_token": 401,
+    "activate_wrong_token": 401,
+    "ws_no_token": "rejected (InvalidStatus)"
+  },
+  "activate_base": {
+    "activate": {
+      "ok": true,
+      "active_checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "preload_only": false,
+      "cache_hit": true,
+      "swapped": false,
+      "swap_ms": 0.0,
+      "load_s": null,
+      "compile_s": null,
+      "cached": [
+        "gs://openpi-assets/checkpoints/pi05_base"
+      ],
+      "wall_ms": 108.3
+    },
+    "spec": {
+      "layout": "droid",
+      "state_dim": 8,
+      "action_dim": 8,
+      "joint_dims": 7,
+      "asset_id": "droid",
+      "mode": "base",
+      "action_horizon": 50,
+      "action_space": "droid_base"
+    },
+    "infer_ws": {
+      "n": 30,
+      "rtt_ms": {
+        "p50": 231.7,
+        "p95": 647.4,
+        "max": 678.4,
+        "mean": 265.3
+      },
+      "gpu_ms_p50": 40.1,
+      "server_ms_p50": 51.2,
+      "chunk_shape": [
+        50,
+        8
+      ],
+      "action_space": "droid_base",
+      "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "first_action": [
+        -0.0567,
+        -0.0283,
+        0.0284,
+        0.6115,
+        0.0513,
+        -0.5277,
+        -0.1498,
+        0.4973
+      ],
+      "last_action": [
+        0.1624,
+        0.0117,
+        0.0179,
+        0.4717,
+        0.0815,
+        -0.273,
+        -0.1788,
+        0.5007
+      ]
+    }
+  },
+  "activate_finetuned": {
+    "activate": {
+      "ok": true,
+      "active_checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "preload_only": false,
+      "cache_hit": false,
+      "swapped": true,
+      "swap_ms": 44225.3,
+      "load_s": 28.3,
+      "compile_s": 14.6,
+      "cached": [
+        "gs://openpi-assets/checkpoints/pi05_base",
+        "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199"
+      ],
+      "wall_ms": 45149.1
+    },
+    "spec": {
+      "layout": "single_arm",
+      "state_dim": 6,
+      "action_dim": 6,
+      "joint_dims": 5,
+      "asset_id": "lerobot/svla_so100_pickplace",
+      "mode": "lora",
+      "action_horizon": 50,
+      "action_space": "joint_pos_abs"
+    },
+    "infer_ws": {
+      "n": 30,
+      "rtt_ms": {
+        "p50": 269.9,
+        "p95": 858.7,
+        "max": 980.7,
+        "mean": 332.7
+      },
+      "gpu_ms_p50": 47.0,
+      "server_ms_p50": 61.2,
+      "chunk_shape": [
+        50,
+        6
+      ],
+      "action_space": "joint_pos_abs",
+      "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "first_action": [
+        -3.4986,
+        -4.9229,
+        -16.0587,
+        5.1268,
+        -16.1281,
+        15.3961
+      ],
+      "last_action": [
+        8.6235,
+        -4.7867,
+        -14.0169,
+        19.2532,
+        -7.6432,
+        16.6003
+      ]
+    }
+  },
+  "flip_to_base": {
+    "activate": {
+      "ok": true,
+      "active_checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "preload_only": false,
+      "cache_hit": true,
+      "swapped": true,
+      "swap_ms": 0.0,
+      "load_s": null,
+      "compile_s": null,
+      "cached": [
+        "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+        "gs://openpi-assets/checkpoints/pi05_base"
+      ],
+      "wall_ms": 412.5
+    },
+    "spec": {
+      "layout": "droid",
+      "state_dim": 8,
+      "action_dim": 8,
+      "joint_dims": 7,
+      "asset_id": "droid",
+      "mode": "base",
+      "action_horizon": 50,
+      "action_space": "droid_base"
+    },
+    "infer_ws": {
+      "n": 30,
+      "rtt_ms": {
+        "p50": 237.9,
+        "p95": 1049.0,
+        "max": 1515.3,
+        "mean": 340.4
+      },
+      "gpu_ms_p50": 40.5,
+      "server_ms_p50": 55.1,
+      "chunk_shape": [
+        50,
+        8
+      ],
+      "action_space": "droid_base",
+      "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+      "first_action": [
+        -0.0207,
+        -0.0355,
+        0.005,
+        0.3896,
+        0.0232,
+        -0.4656,
+        -0.7319,
+        0.5008
+      ],
+      "last_action": [
+        -0.012,
+        -0.0639,
+        0.0162,
+        0.7172,
+        -0.0373,
+        -0.2729,
+        -0.728,
+        0.4976
+      ]
+    }
+  },
+  "flip_to_finetuned": {
+    "activate": {
+      "ok": true,
+      "active_checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "preload_only": false,
+      "cache_hit": true,
+      "swapped": true,
+      "swap_ms": 0.0,
+      "load_s": null,
+      "compile_s": null,
+      "cached": [
+        "gs://openpi-assets/checkpoints/pi05_base",
+        "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199"
+      ],
+      "wall_ms": 533.5
+    },
+    "spec": {
+      "layout": "single_arm",
+      "state_dim": 6,
+      "action_dim": 6,
+      "joint_dims": 5,
+      "asset_id": "lerobot/svla_so100_pickplace",
+      "mode": "lora",
+      "action_horizon": 50,
+      "action_space": "joint_pos_abs"
+    },
+    "infer_ws": {
+      "n": 30,
+      "rtt_ms": {
+        "p50": 244.8,
+        "p95": 275.0,
+        "max": 283.7,
+        "mean": 244.5
+      },
+      "gpu_ms_p50": 47.1,
+      "server_ms_p50": 61.5,
+      "chunk_shape": [
+        50,
+        6
+      ],
+      "action_space": "joint_pos_abs",
+      "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "first_action": [
+        -2.5294,
+        -7.9529,
+        -20.0034,
+        -4.8468,
+        -13.1208,
+        18.2554
+      ],
+      "last_action": [
+        4.1328,
+        -7.0452,
+        -9.3211,
+        44.471,
+        -12.7612,
+        22.4117
+      ]
+    }
+  },
+  "health_final": {
+    "ok": true,
+    "ready": true,
+    "active_checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+    "active": {
+      "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "requested_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+      "spec": {
+        "layout": "single_arm",
+        "state_dim": 6,
+        "action_dim": 6,
+        "joint_dims": 5,
+        "asset_id": "lerobot/svla_so100_pickplace",
+        "mode": "lora",
+        "action_horizon": 50,
+        "action_space": "joint_pos_abs"
+      },
+      "load_s": 28.3,
+      "compile_s": 14.6,
+      "loaded_at": 1792829892.1058896
+    },
+    "previous_checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+    "cached": [
+      {
+        "checkpoint_uri": "gs://openpi-assets/checkpoints/pi05_base",
+        "requested_uri": "base",
+        "spec": {
+          "layout": "droid",
+          "state_dim": 8,
+          "action_dim": 8,
+          "joint_dims": 7,
+          "asset_id": "droid",
+          "mode": "base",
+          "action_horizon": 50,
+          "action_space": "droid_base"
+        },
+        "load_s": 18.8,
+        "compile_s": 13.5,
+        "loaded_at": 1792829833.0650778
+      },
+      {
+        "checkpoint_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+        "requested_uri": "modal-vol://rdf-s05a-checkpoints/checkpoints/rdf_s05a_pi05_lora/smoke_lora_h100/199",
+        "spec": {
+          "layout": "single_arm",
+          "state_dim": 6,
+          "action_dim": 6,
+          "joint_dims": 5,
+          "asset_id": "lerobot/svla_so100_pickplace",
+          "mode": "lora",
+          "action_horizon": 50,
+          "action_space": "joint_pos_abs"
+        },
+        "load_s": 28.3,
+        "compile_s": 14.6,
+        "loaded_at": 1792829892.1058896
+      }
+    ],
+    "cache_capacity": 2,
+    "loading": null,
+    "container_started_at": 1792829814.0787623,
+    "auth": "bearer",
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "app": "rdf-training",
+    "startup_s": 34.4
+  }
+}

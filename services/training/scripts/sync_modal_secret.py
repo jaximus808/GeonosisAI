@@ -30,6 +30,7 @@ KEYS = [
     "STORAGE_SECRET_KEY",
     "RDF_MEDIA_BACKEND",
     "RDF_MEDIA_STORE_URL",
+    "POLICY_SERVER_TOKEN",  # TDM-41 policy server bearer auth
 ]
 
 

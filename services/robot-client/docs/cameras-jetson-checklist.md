@@ -61,3 +61,48 @@ Run all commands from `services/robot-client/` after `uv sync`.
 - TDM-49 command loop: `rig = CameraRig.from_config(); rig.start()`. Put `rig.healthy()` and `rig.stats()` into the heartbeat. Wire the `rdf-robot-client cameras-check` subcommand to `cameras.main(["check", *args])`.
 - TDM-48 recorder: `rig.add_synced_callback(fn)` or `rig.subscribe_synced()`. One `SyncedFrames` arrives per top-camera frame (30 Hz), with `.frames[name].image` (full-res BGR), `.t_ns` (monotonic) and `.in_sync`. Stamp robot state with `time.monotonic_ns()` so it lines up.
 - Rollout (TDM-50): `rig.latest_synced().policy_images()` returns 224x224 RGB under the S-05a keys `observation/image` and `observation/wrist_image`.
+
+## 7. Remote browser stream (TDM-55): Jetson -> public URL -> contributor's browser
+Code: `src/rdf_robot_client/stream.py` (JPEG over WebSocket, ack-paced, token auth) and `QuickTunnel` (cloudflared). Decision and revert plan: `docs/decisions.md`, "TDM-55".
+
+Already done on the laptop (Oct 24), synthetic cameras, both at 424 px and 20 fps:
+- Local: capture->receive p50 about 7 ms.
+- Through a cloudflared quick tunnel (laptop -> Cloudflare LAX -> laptop): probe p50 38–40 ms and p95 77–92 ms. In Chrome, capture->screen p50 was 50–60 ms. Under a congestion blip the stream dropped to about 13 fps at about 120 ms and then recovered. It never built a backlog.
+
+Steps on the Jetson:
+- [ ] Install cloudflared (arm64). It needs no account: `curl -L -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb && sudo dpkg -i /tmp/cloudflared.deb`, then check `cloudflared --version`. Without dpkg, download the `cloudflared-linux-arm64` binary and set `CLOUDFLARED_BIN=/path/to/it`.
+- [ ] Copy `RDF_STREAM_TOKEN_SECRET` from the laptop's `.env` into the Jetson's `.env`. It must be the **same value** the orchestrator uses. Don't print it; use `scp` or paste it into the file.
+- [ ] Look up the robot's name and id in SpacetimeDB (the `robot` row that TDM-49 registers).
+- [ ] Start the stream: `uv run python -m rdf_robot_client.stream serve --robot-name <name> --robot-id <id> --announce -v`.
+  - It prints `{"stream": {"url": "wss://<random>.trycloudflare.com/ws/cameras", ...}}` in about 3–5 s.
+  - `--announce` merges that into `robot.camera_config_json["stream"]`. The orchestrator reads it there when minting tokens.
+  - Inside the command loop, use `start_stream(rig, ...)` and merge `stream.info()` into the registered `camera_config` (section 8).
+- [ ] Check from **another network**, such as a phone on cellular:
+  - Mint an ops token on the laptop: `cd services/robot-client && uv run python -m rdf_common.stream_token mint --robot-id <id> --ttl 600 --sub ops:<you>`.
+  - Open `http://<web host>/dev/tdm55-cameras?url=<wss url>&token=<token>`.
+  - Expect both feeds, a green `NN ms · 20 fps` badge, and `Live`.
+  - Don't query the new tunnel URL from the Jetson or laptop in its first seconds. An early NXDOMAIN gets cached and the URL then looks dead *on that machine only*. If that happens, use `probe --connect-ip <ip from dig @1.1.1.1>`.
+- [ ] Get numbers from the Jetson side: `uv run python -m rdf_robot_client.stream probe <wss url> --token <token> --seconds 15` prints per-camera fps and latency p50/p95.
+- [ ] Measure **true glass-to-glass**. The numbers above start at the capture timestamp, so they leave out exposure and USB transfer (about one frame, roughly 30–50 ms more).
+  - Put a phone showing a millisecond stopwatch (e.g. an online stopwatch) in front of the top camera.
+  - Open the feed on a laptop next to it, and take one photo with a third phone that shows both screens.
+  - Latency = stopwatch minus the stopwatch in the feed. Take 5 photos and use the median.
+  - The target is under 300 ms. Expect about 100–150 ms over the internet.
+- [ ] CPU: with viewers on 2 cameras, it encodes two 424-px JPEGs at 20 fps. Each took 2.4 ms on the laptop (Apple silicon, `/healthz` `encoders.*.encode_ms_p50`); expect a few times that on the Jetson's ARM cores. Encoding is shared by all viewers and runs only while someone watches. Check `tegrastats` and `/healthz`. If it is too heavy, use `--fps 15` or `--width 320`.
+- [ ] Auth checks:
+  - A token for another robot id gets `error wrong_robot` and close code 4003.
+  - Wait out a `--ttl 20` ops token: the feed shows STALE, then `Reconnecting`.
+  - `curl <https url>/snapshot/top.jpg` with no token returns 403.
+- [ ] If cloudflared is blocked at the office or venue: `cloudflared` falls back from QUIC/UDP to HTTP2/TCP 443 by itself (`--protocol auto`). If it still fails, use `--tunnel none` on the LAN and set `RDF_STREAM_URL=ws://<jetson-ip>:8091/ws/cameras` on the orchestrator. For other options, see the decision revert plan.
+
+## 8. Hand-off to TDM-49 (command loop) for streaming
+```python
+from rdf_robot_client.stream import start_stream
+stream = start_stream(rig, robot_id=<id or None>, robot_name=<registered name>, tunnel="cloudflared")  # blocks <=30 s for the URL
+camera_config = {**camera_config, **stream.info()}     # register_robot(..., json.dumps(camera_config))
+stream.on_url(lambda info: re_register_with({**camera_config, **info}))   # tunnel restarts change the URL
+...
+stream.stop()
+```
+- Start it after `rig.start()`. It needs `RDF_STREAM_TOKEN_SECRET` in the env or `.env`.
+- It binds 127.0.0.1:8091; only cloudflared exposes it. Don't expose `camera_stream.serve_mjpeg` (port 8090, no auth) beyond localhost.

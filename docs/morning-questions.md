@@ -24,4 +24,8 @@ Work kept going around each of these. Answer in any order.
 
     Check its license or terms before using it in the pitch.
 
+14. **TDM-55 camera stream on the Jetson.** It needs `cloudflared` installed (arm64 .deb from Cloudflare's GitHub releases) and `RDF_STREAM_TOKEN_SECRET` copied from the laptop `.env`. The steps are in `services/robot-client/docs/cameras-jetson-checklist.md`, sections 7–8. TDM-49 still has to call `start_stream(rig, ...)` and merge `stream.info()` into the registered `camera_config`; until then, run `python -m rdf_robot_client.stream serve --robot-name <name> --robot-id <id> --announce` next to the command loop. Two things to decide:
+    - **Quick tunnels have no uptime guarantee.** Is a named tunnel (Cloudflare account) or ngrok (`NGROK_AUTHTOKEN`) OK for the live demo?
+    - **Who else should see the feed?** Should the dashboard show the feed to non-claimants, e.g. judges? Right now only the task claimant and CLI-minted ops tokens can watch.
+
 15. **Robot safety limits (TDM-45) need a human at the arm before any remote control**: the YAM profile in `services/robot-client/config/safety.yaml` is placeholders (marked `TO VERIFY ON ARM`): joint margins, velocity/acceleration caps, the workspace box (assumed +x forward, +z up from the base) and the table floor height. Walk through `services/robot-client/docs/safety-jetson-checklist.md` with the physical e-stop in hand (`uv run python -m rdf_robot_client.safety_check --floor-test`), then set `verified: true`. Until then real-arm speed is capped at 0.3 of the caps, and starts at 0.25.

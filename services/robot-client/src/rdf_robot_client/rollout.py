@@ -19,6 +19,9 @@ Scheme (S-05b decision, docs/WORKER_GUIDE.md "Policy inference"):
   * A pause (pause_for_takeover, waiting_reset, link loss) holds the arm in run_control_loop; the
     executor notices the time gap on resume, drops the stale chunk and re-queries.
   * ``mode='sync'`` is the S-05b v0 fallback: execute 25 steps, then hold while one query is answered.
+  * TDM-99: while an episode runs, ``ctx.services["chunk_preview"]`` is ``ChunkExecutor.preview``
+    (the remaining targets of the chunk being executed, downsampled to 10 rows of joints + gripper),
+    which the ``/ws/state`` feed (stream.LiveStateSampler) publishes for the HUD ghost. Removed at the end.
 
 Public API (TDM-51's trial runner builds on this)::
 
@@ -198,6 +201,27 @@ class ChunkExecutor:
 
     def _end_hold(self) -> None:
         self._hold = None
+
+    # ---- TDM-99: the plan the arm is executing, for the HUD ghost (``/ws/state`` chunk_preview)
+    def preview(self, points: int = 10, now: float | None = None) -> list[list[float]] | None:
+        """Downsampled remaining targets of the chunk being executed: ``points`` rows of joints (rad) +
+        gripper (0..1), from the next tick's target to the chunk's last step (always included).
+
+        None when nothing is planned: no chunk yet, the chunk ran out (holding), or the loop has not
+        ticked for ``gap_reset_s`` (paused for a takeover / reset: the chunk describes the past).
+        Called from another thread (the state feed): reads one snapshot of (chunk, pos), never mutates.
+        """
+        chunk, pos, last = self.chunk, self.pos, self.last_now
+        if chunk is None or last is None:
+            return None
+        now = time.monotonic() if now is None else now
+        if now - last > self.cfg.gap_reset_s:
+            return None
+        n = len(chunk)
+        if pos >= n:
+            return None
+        idx = np.unique(np.linspace(pos, n - 1, num=max(2, int(points))).round().astype(int))
+        return [[float(v) for v in chunk[i]] for i in idx]
 
     def _accept(self, r: PolicyReply, step: int, now: float, st: ArmState) -> None:
         self.stats.chunks_received += 1
@@ -471,11 +495,16 @@ class PolicyRollout:
                 return None
             return JointTarget(tuple(float(v) for v in tgt[:dof]), gripper=float(np.clip(tgt[dof], 0.0, 1.0)))
 
+        # TDM-99: the state feed (stream.LiveStateSampler) publishes this as chunk_preview while it is ours
+        preview = ex.preview
+        ctx.services["chunk_preview"] = preview
         t0 = time.monotonic()
         try:
             stats = ctx.run_control_loop(step, max_steps=max_steps, max_seconds=timeout_s,
                                          active_state=RobotState.ROLLOUT, control_source="policy")
         finally:
+            if ctx.services.get("chunk_preview") is preview:
+                ctx.services.pop("chunk_preview", None)
             ctx.arm.hold()
         ended = state["ended"] or stats.ended
         if ex.stats.hold_ticks:

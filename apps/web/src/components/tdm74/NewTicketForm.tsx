@@ -29,6 +29,13 @@ import {
   type Tdm74Inputs,
   type Tdm74Preview,
 } from '@/lib/tdm74/ticket';
+import {
+  TDM107_MODE_HINT,
+  TDM107_MODE_LABEL,
+  tdm107DefaultMode,
+  tdm107IsSimRobot,
+  type Tdm107Mode,
+} from '@/lib/tdm107/robotMode';
 
 const TDM74_EXAMPLES = [
   'Put the cup in the bin, 80% reliable, $50 budget',
@@ -50,6 +57,9 @@ export function NewTicketForm() {
   const [prompt, setPrompt] = useState('');
   const [robotId, setRobotId] = useState('');
   const [robotTouched, setRobotTouched] = useState(false);
+  // TDM-107: which robot the ticket runs on. Defaults to the real arm when one is online, else the sim.
+  const [robotMode, setRobotMode] = useState<Tdm107Mode>('sim');
+  const [modeTouched, setModeTouched] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const [budgetUsd, setBudgetUsd] = useState('');
   const [targetPct, setTargetPct] = useState('');
@@ -78,17 +88,25 @@ export function NewTicketForm() {
     return () => window.clearInterval(t);
   }, []);
   const robots = useMemo(() => {
-    const online = robotRows.filter((r) => TDM74_ROBOT_ONLINE.includes(r.status));
     const isTest = (r: (typeof robotRows)[number]) => r.name.startsWith('test.');
+    const anyOnline = robotRows.filter((r) => TDM74_ROBOT_ONLINE.includes(r.status));
+    const ofMode = (r: (typeof robotRows)[number]) => (robotMode === 'sim') === tdm107IsSimRobot(r);
+    const online = anyOnline.filter(ofMode);
     return {
       shown: online.filter((r) => showTest || !isTest(r)).sort((a, b) => a.name.localeCompare(b.name)),
       hiddenTest: online.filter(isTest).length,
-      offline: robotRows.length - online.length,
+      offline: robotRows.filter(ofMode).length - online.length,
       realOnline: online.filter((r) => !isTest(r)),
+      nonTestOnline: anyOnline.filter((r) => !isTest(r)),
     };
-  }, [robotRows, showTest]);
+  }, [robotRows, showTest, robotMode]);
 
-  // Preselect the robot when exactly one real robot is online and the person hasn't chosen.
+  useEffect(() => {
+    if (modeTouched || !robotsReady) return;
+    setRobotMode(tdm107DefaultMode(robots.nonTestOnline));
+  }, [modeTouched, robotsReady, robots.nonTestOnline]);
+
+  // Preselect the robot when exactly one non-test robot of the mode is online and the person hasn't chosen.
   useEffect(() => {
     if (robotTouched || !robotsReady) return;
     setRobotId(robots.realOnline.length === 1 ? String(robots.realOnline[0].id) : '');
@@ -99,7 +117,7 @@ export function NewTicketForm() {
   }, [robotId, robotsReady, robots.shown]);
 
   // ------------------------------------------------------------ request + validation
-  const inputs: Tdm74Inputs = { prompt, robotId, budgetUsd, targetPct, advanced };
+  const inputs: Tdm74Inputs = { prompt, robotId, robotMode, budgetUsd, targetPct, advanced };
   const stale = !!preview && prompt.trim() !== previewPrompt;
   const { body, errors: localErrors } = tdm74Body(inputs, preview && !stale ? preview.parsed : undefined);
   const localCount = Object.keys(localErrors).filter((k) => k !== 'prompt' || showLocal).length;
@@ -285,7 +303,46 @@ export function NewTicketForm() {
               Show test robots{robots.hiddenTest > 0 && !showTest ? ` (${robots.hiddenTest})` : ''}
             </label>
           </div>
-          <p className="mt-0.5 text-sm text-zinc-500">Robots online right now. The list updates live.</p>
+          {/* TDM-107: Sim robot (MuJoCo 3D scene) or the real YAM. Switchable later by an operator. */}
+          <div role="radiogroup" aria-label="Robot mode" className="mt-3 grid grid-cols-2 gap-2">
+            {(['sim', 'real'] as const).map((m) => {
+              const on = robotMode === m;
+              return (
+                <label
+                  key={m}
+                  className={`cursor-pointer rounded-lg border px-4 py-3 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-blue-600 ${
+                    on
+                      ? m === 'sim'
+                        ? 'border-violet-500 bg-violet-50/70 dark:border-violet-500 dark:bg-violet-950/30'
+                        : 'border-blue-500 bg-blue-50/60 dark:border-blue-500 dark:bg-blue-950/30'
+                      : 'border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="tdm107-robot-mode"
+                    value={m}
+                    checked={on}
+                    onChange={() => {
+                      setRobotMode(m);
+                      setModeTouched(true);
+                      setRobotTouched(false);
+                      clearErr('robot');
+                    }}
+                    className="sr-only"
+                  />
+                  <span className="flex items-center gap-2 font-medium">
+                    {TDM107_MODE_LABEL[m]}
+                    {m === 'sim' && <SimChip />}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-zinc-500">{TDM107_MODE_HINT[m]}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-sm text-zinc-500">
+            {robotMode === 'sim' ? 'Sim robots' : 'Real robots'} online right now. The list updates live.
+          </p>
           <div className="mt-3 space-y-2" role="radiogroup" aria-label="Robot" aria-describedby="tdm74-robot-err">
             {!robotsReady && (
               <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-3 text-sm text-zinc-500 dark:border-zinc-700">
@@ -294,7 +351,10 @@ export function NewTicketForm() {
             )}
             {robotsReady && robots.shown.length === 0 && (
               <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-                No robot is online. Start the robot client on the robot&apos;s computer and it will appear here
+                No {robotMode === 'sim' ? 'sim' : 'real'} robot is online.{' '}
+                {robotMode === 'sim'
+                  ? 'Start the sim robot (make demo) and it will appear here'
+                  : "Start the robot client on the robot's computer and it will appear here"}
                 {robots.hiddenTest > 0 && !showTest ? ', or show the test robots' : ''}.
               </p>
             )}
@@ -324,7 +384,10 @@ export function NewTicketForm() {
                     className="h-4 w-4 accent-blue-600"
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{r.name}</span>
+                    <span className="flex items-center gap-2 truncate font-medium">
+                      {r.name}
+                      {tdm107IsSimRobot(r) && <SimChip />}
+                    </span>
                     <span className="block text-sm text-zinc-500">
                       #{id}, {r.embodiment.replace(/_/g, ' ')}
                       {beat !== null && `, heartbeat ${fmtAgo(beat)}`}
@@ -585,6 +648,7 @@ function WorkOrder({
             <Row label="Budget" value={tdm74Usd(p.budget_cents)} source={budgetSrc} />
           )}
           <Row label="Eval trials" value={String(trials)} source={trialsSrc} />
+          {p.robot_mode && <Row label="Runs on" value={TDM107_MODE_LABEL[p.robot_mode]} source={inputs.robotMode ? 'you' : 'auto'} />}
           {p.robot ? (
             <Row label="Robot" value={p.robot.name} source={robotSrc} />
           ) : (
@@ -615,7 +679,17 @@ const ROBOT_ERROR: Record<string, string> = {
   multiple_online_robots: 'Several robots are online. Pick one in the robot list.',
   no_online_robot: 'No robot is online. Start one, or show the test robots.',
   unknown_robot: 'That robot no longer exists. Pick another.',
+  robot_mode_mismatch: 'That robot is of the other mode (sim vs real). Pick one from the list.',
 };
+
+/** TDM-107: sim is always visibly labelled. */
+function SimChip() {
+  return (
+    <span className="rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-white uppercase">
+      Simulated
+    </span>
+  );
+}
 
 const SETTING_LABEL: Record<string, string> = {
   require_ci_low: 'Ship when',

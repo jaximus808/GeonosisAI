@@ -107,6 +107,11 @@ const TDM9_HYPERPARAM_CHECKS: Record<string, (v: unknown) => unknown> = {
     if (typeof v !== 'boolean') throw new SenderError('hyperparams.interventions_enabled must be true or false');
     return v;
   },
+  // TDM-107: train on sim-robot episodes too. Unset = on for a sim-mode ticket, off for a real one.
+  include_sim_data: (v) => {
+    if (typeof v !== 'boolean') throw new SenderError('hyperparams.include_sim_data must be true or false');
+    return v;
+  },
 };
 
 /**

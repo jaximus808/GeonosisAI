@@ -132,6 +132,7 @@ class TicketView:
     training_runs: list = field(default_factory=list)
     eval_runs: list = field(default_factory=list)
     offers: list = field(default_factory=list)  # dataset_offer rows (TDM-95)
+    robots: dict = field(default_factory=dict)  # TDM-107: every robot row by id (labels rows sim / real)
     step_failed: list = field(default_factory=list)  # STEP_FAILED_EVENTS payloads (+ "type"), id order
     diagnose_events: list = field(default_factory=list)  # DIAGNOSE_EVENTS payloads (+ "type"), id order
     now_us: int | None = None  # wall clock for DIAGNOSE_SETTLE_S (None: rows only, no settle timeout)
@@ -146,6 +147,7 @@ class TicketView:
             return sorted((r for r in bus.rows(table) if r.get("ticket_id") == ticket_id), key=lambda r: r.get("id") or 0)
 
         robot = bus.get("robot", t.get("robot_id"))
+        robots = {r.get("id"): r for r in bus.rows("robot")}  # TDM-107
         ds = of("dataset")
         events = sorted((r for r in bus.rows("event_log") if r.get("type") in STEP_FAILED_EVENTS + DIAGNOSE_EVENTS),
                         key=lambda r: r.get("id") or 0)
@@ -153,7 +155,8 @@ class TicketView:
         failed = [p for p in events if p["type"] in STEP_FAILED_EVENTS]
         v = cls(ticket=t, settings=bus.get("run_settings", ticket_id), robot=robot, dataset=ds[0] if ds else None,
                    clusters=of("failure_cluster"), plans=of("data_plan"), episodes=of("episode"),
-                   training_runs=of("training_run"), eval_runs=of("eval_run"), offers=of("dataset_offer"))
+                   training_runs=of("training_run"), eval_runs=of("eval_run"), offers=of("dataset_offer"),
+                   robots=robots)
         v.step_failed = [p for p in failed if p.get("ticket_id") == ticket_id]
         v.diagnose_events = [p for p in events if p["type"] in DIAGNOSE_EVENTS and p.get("ticket_id") == ticket_id]
         v.now_us = time.time_ns() // 1000
@@ -223,9 +226,20 @@ class TicketView:
         status = (cfg.get("onboarding") or {}).get("status") if isinstance(cfg, dict) else None
         return status in ("passed_sim", "passed_hil")
 
+    # ---- TDM-107 robot mode: the ticket's robot is the sim robot or the real YAM
+    @property
+    def robot_mode(self) -> str | None:
+        from .robot_mode import robot_mode
+
+        return robot_mode(self.robot)
+
     # ---- evals
     def evals(self, *, kind: str | None = None, status: str | None = None, training_run_id: int | None = None) -> list:
-        out = self.eval_runs
+        """Eval runs of this ticket on a robot of the ticket's current mode (TDM-107: a sim eval never
+        counts for a real-robot ticket, nor a real one for a sim ticket)."""
+        from .robot_mode import same_mode_evals
+
+        out = same_mode_evals(self.eval_runs, self.robots, self.robot_mode)
         if kind is not None:
             out = [r for r in out if r.get("kind") == kind]
         if status is not None:
@@ -326,8 +340,18 @@ class TicketView:
 
     @property
     def accepted_episode_ids(self) -> list[int]:
-        """The per-ticket training set: every accepted dataset episode, all iterations."""
-        return [e["id"] for e in self.episodes if e.get("kind") in DATASET_KINDS and e.get("review_status") == "accepted"]
+        """The per-ticket training set: every accepted dataset episode, all iterations. TDM-107: sim-robot
+        episodes only when run_settings ``include_sim_data`` is on (default: on for a sim ticket only)."""
+        from .robot_mode import training_episode_ids
+
+        return training_episode_ids(self.episodes, self.robots, self.settings, self.robot_mode)[0]
+
+    @property
+    def excluded_sim_episode_ids(self) -> list[int]:
+        """TDM-107: accepted sim episodes left out of training (include_sim_data off)."""
+        from .robot_mode import training_episode_ids
+
+        return training_episode_ids(self.episodes, self.robots, self.settings, self.robot_mode)[1]
 
 
 # --------------------------------------------------------------------------- decision
@@ -636,7 +660,8 @@ class QueueTrainingStep:
         if not ids:
             log.warning("step.blocked", extra={"fields": {"stage": "train", "reason": "no accepted episodes"}})
             return
-        ctx.log("step.queue_training", episode_ids=ids, iteration=v.iteration)
+        ctx.log("step.queue_training", episode_ids=ids, iteration=v.iteration, robot_mode=v.robot_mode,
+                excluded_sim_episode_ids=v.excluded_sim_episode_ids)
         await ctx.call("queue_training_run", [ctx.ticket_id, json.dumps(ids), ""])
 
 

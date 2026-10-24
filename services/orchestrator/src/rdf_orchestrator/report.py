@@ -261,6 +261,12 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
     settings = mine["run_settings"][0] if mine["run_settings"] else None
     robot = next((r for r in t.get("robot", []) if _i(r.get("id")) == _i(ticket.get("robot_id"))), None)
     missing: list[str] = []
+    # TDM-107: every eval / episode is labelled by the robot it ran on (sim robot or real YAM). The
+    # before/after numbers use the ticket's current mode only; the other mode is listed apart.
+    from .robot_mode import include_sim_data, robot_mode, row_mode, same_mode_evals
+
+    robots = {_i(r.get("id")): r for r in t.get("robot", [])}
+    mode = robot_mode(robot)
 
     all_events = t.get("event_log", [])
     events = sorted(((e, _payload(e)) for e in all_events), key=lambda x: (_i(x[0]["ts"]), _i(x[0]["id"])))
@@ -283,13 +289,19 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
         if r is None:
             return None
         fin = of_type("eval.finalized", eval_run_id=_i(r["id"]))
-        return _eval_view(r, trials_by_run.get(_i(r["id"]), []), fin[-1][0] if fin else None)
+        v = _eval_view(r, trials_by_run.get(_i(r["id"]), []), fin[-1][0] if fin else None)
+        v["robot_id"] = _i(r.get("robot_id")) or None
+        v["robot_mode"] = row_mode(r, robots)
+        return v
 
-    done_evals = [r for r in mine["eval_run"] if r.get("status") == "done"]
-    baseline_rows = [r for r in mine["eval_run"] if r.get("kind") == "baseline"]
+    mode_evals = same_mode_evals(mine["eval_run"], robots, mode)  # TDM-107: never mix sim into real numbers
+    done_evals = [r for r in mode_evals if r.get("status") == "done"]
+    baseline_rows = [r for r in mode_evals if r.get("kind") == "baseline"]
     baseline_row = ([r for r in baseline_rows if r.get("status") == "done"] or baseline_rows or [None])[0]
     if baseline_row is None:
-        missing.append("no baseline eval_run: the before number does not exist yet")
+        missing.append(f"no baseline eval_run{f' on the {mode} robot' if mode else ''}: the before number does not exist yet"
+                       + (" (evals on the other robot mode are listed under robot_mode.by_mode)"
+                          if len(mode_evals) < len(mine["eval_run"]) else ""))
     elif baseline_row.get("status") != "done":
         missing.append(f"baseline eval_run {baseline_row['id']} is {baseline_row.get('status')}, not finalized")
 
@@ -364,6 +376,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
             "duration_ms": _i(ep.get("duration_ms")), "frame_count": _i(ep.get("frame_count")),
             "storage_uri": ep.get("storage_uri"), "created_at": _i(ep.get("created_at")),
             "fake": bool(fake_markers(ep)),
+            "robot_id": _i(ep.get("robot_id")) or None, "robot_mode": row_mode(ep, robots),  # TDM-107
         })
 
     # ---- every payment, assigned to an iteration
@@ -453,7 +466,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
         run = ([r for r in it_runs if r.get("status") == "done"] or it_runs or [None])[-1]
         gpu = sum(_i(r.get("gpu_cost_cents")) for r in it_runs)
         it_run_ids = {_i(r["id"]) for r in it_runs}
-        cand = [r for r in mine["eval_run"] if _i(r.get("training_run_id")) in it_run_ids]
+        cand = [r for r in mode_evals if _i(r.get("training_run_id")) in it_run_ids]
         cand_row = ([r for r in cand if r.get("status") == "done"] or cand or [None])[-1]
         offers = [_tdm95_offer_view(o, mine, events, settings)
                   for o in mine["dataset_offer"] if iteration_at(_i(o.get("created_at"))) == it]
@@ -474,6 +487,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
                       "task_ids": [_i(x["id"]) for x in it_tasks]},
             "episodes_bought": len(eps),
             "episodes_accepted": len(accepted),
+            "episodes_sim": sum(1 for v in eps if v["robot_mode"] == "sim"),  # TDM-107
             "episodes_rejected": rejected,
             "episodes": eps,
             "dataset_offers": offers,
@@ -644,6 +658,37 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
 
     rs = settings or {}
     hyper = _json(rs.get("hyperparams_json")) or {}
+
+    # ---- TDM-107: sim vs real, side by side and never mixed
+    by_mode: dict[str, dict] = {}
+    for m in ("real", "sim"):
+        runs = [r for r in mine["eval_run"] if row_mode(r, robots) == m]
+        done = [r for r in runs if r.get("status") == "done"]
+        eps = [v for v in episode_views if v["robot_mode"] == m]
+        b_row = next((r for r in done if r.get("kind") == "baseline"), None)
+        cands = [r for r in done if r.get("kind") != "baseline"]
+        by_mode[m] = {
+            "robot_ids": sorted({_i(r.get("robot_id")) for r in runs} | {v["robot_id"] or 0 for v in eps} - {0}),
+            "eval_runs": [eval_view(r) for r in runs],
+            "baseline": eval_view(b_row),
+            "latest_candidate": eval_view(cands[-1] if cands else None),
+            "trials": sum(_i(r.get("trials")) for r in done),
+            "successes": sum(_i(r.get("successes")) for r in done),
+            "episodes": len(eps),
+            "episodes_accepted": sum(1 for v in eps if v["review_status"] == "accepted"),
+        }
+    switches = [{**_ref(e), **{k: p.get(k) for k in ("from_robot_id", "from_mode", "to_robot_id", "to_mode", "status",
+                                                     "iteration", "by", "reason")}}
+                for e, p in of_type("ticket.robot_mode_changed")]
+    robot_mode_block = {
+        "current": mode,
+        "headline_mode": mode,
+        "note": ("before/after numbers are from the ticket's current robot mode only; "
+                 "sim-robot results are never mixed into real-robot success numbers"),
+        "include_sim_data": include_sim_data(settings, mode),
+        "by_mode": by_mode,
+        "switches": switches,
+    }
     return {
         "report_version": REPORT_VERSION,
         "ticket_id": tid,
@@ -659,8 +704,9 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
                                   | {"hyperparams": hyper}) if settings else None},
         "robot": ({"id": _i(robot["id"]), "name": robot.get("name"), "embodiment": robot.get("embodiment"),
                    "adapter_version": robot.get("adapter_version"), "status": robot.get("status"),
-                   "fake": bool(fake_markers(robot))} if robot else None),
+                   "fake": bool(fake_markers(robot)), "robot_mode": mode} if robot else None),
         "outcome": outcome,
+        "robot_mode": robot_mode_block,
         "baseline": baseline,
         "final": final,
         "iterations": iter_blocks,
@@ -717,8 +763,10 @@ def render_markdown(r: dict) -> str:
     if task.get("policy_prompt"):
         add(f"**Policy prompt:** `{task['policy_prompt']}`  ")
     rb = r["robot"]
+    rm = r.get("robot_mode") or {}  # TDM-107 (absent in reports saved before it)
     if rb:
-        add(f"**Robot:** {rb['name']} ({rb['embodiment']}, adapter {rb['adapter_version']}, id {rb['id']})  ")
+        add(f"**Robot:** {rb['name']} ({rb['embodiment']}, adapter {rb['adapter_version']}, id {rb['id']})"
+            + (" **[SIM robot: MuJoCo simulation, not the real arm]**" if rm.get("current") == "sim" else "") + "  ")
     o = r["outcome"]
     add(f"**Status:** {o['status']} after {len(r['iterations'])} data iteration(s); target {_pct(o['target_success'])}  ")
     add(f"**Generated:** {iso(r['generated_at'])} ({r['report_version']})")
@@ -726,6 +774,11 @@ def render_markdown(r: dict) -> str:
 
     add("## Success before and after")
     add("")
+    if rm.get("current"):
+        add(f"These are **{rm['current']}-robot** results only"
+            + (" (SIMULATED: not real-arm success numbers)" if rm["current"] == "sim" else "")
+            + ". Results on the other robot mode are under *Sim vs real robot*.")
+        add("")
     add("| | Result | 95% CI |")
     add("|---|---|---|")
     for name, v in (("Before (baseline)", r["baseline"]), ("After (deployed)", r["final"])):
@@ -734,6 +787,27 @@ def render_markdown(r: dict) -> str:
     add("")
     add(f"Verdict: {o['verdict']}.")
     add("")
+
+    if rm.get("by_mode"):
+        add("## Sim vs real robot")
+        add("")
+        add("| Mode | Robots | Finalized eval trials | Baseline | Latest fine-tune eval | Episodes (accepted) |")
+        add("|---|---|---|---|---|---|")
+        for m in ("real", "sim"):
+            bm = rm["by_mode"].get(m) or {}
+            add(f"| {'**SIM**' if m == 'sim' else 'real'} | {', '.join(map(str, bm.get('robot_ids') or [])) or '-'} "
+                f"| {bm.get('successes', 0)}/{bm.get('trials', 0)} | {_eval_line(bm.get('baseline'))} "
+                f"| {_eval_line(bm.get('latest_candidate'))} | {bm.get('episodes', 0)} ({bm.get('episodes_accepted', 0)}) |")
+        add("")
+        add(f"Sim and real results are never pooled. Training {'includes' if rm.get('include_sim_data') else 'excludes'} "
+            "sim-robot episodes (run_settings include_sim_data).")
+        add("")
+        for sw in rm.get("switches") or []:
+            add(f"- {sw.get('at') or iso(sw.get('ts'))}: switched {sw.get('from_mode')} robot {sw.get('from_robot_id')} -> "
+                f"{sw.get('to_mode')} robot {sw.get('to_robot_id')} in {sw.get('status')} by {sw.get('by')}"
+                + (f" ({_md_text(sw['reason'])})" if sw.get("reason") else "") + f" (event {sw.get('event_id')})")
+        if rm.get("switches"):
+            add("")
 
     d = r["deployed_checkpoint"]
     add("## Deployed checkpoint")
@@ -878,7 +952,7 @@ async def load_tables(sql: Sql, ticket_id: int) -> Tables:
     if not tickets:
         return tables
     queries = [sql(f"SELECT * FROM {n} WHERE ticket_id = {tid}") for n in TICKET_TABLES]
-    queries.append(sql(f"SELECT * FROM robot WHERE id = {_i(tickets[0]['robot_id'])}"))
+    queries.append(sql("SELECT * FROM robot"))  # TDM-107: every robot an eval / episode ran on (sim vs real)
     queries.append(sql("SELECT * FROM event_log"))
     results = await asyncio.gather(*queries)
     tables.update(zip(TICKET_TABLES, results[:len(TICKET_TABLES)]))

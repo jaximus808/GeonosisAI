@@ -241,7 +241,13 @@ class EvalOrchestrator:
             out = [r for r in out if _i(r.get("training_run_id")) == tgt["training_run_id"]]
         else:
             out = [r for r in out if r.get("kind") == "baseline"]
-        return out
+        # TDM-107: only evals on a robot of the ticket's current mode count (a switched ticket re-runs its eval)
+        from .robot_mode import robot_mode, same_mode_evals
+
+        ticket = self.m.get("ticket", ticket_id)
+        robots = {_i(r.get("id")): r for r in self.m.rows("robot")}
+        mode = robot_mode(robots.get(_i(ticket.get("robot_id")))) if ticket is not None else None
+        return same_mode_evals(out, robots, mode)
 
     def robot_problem(self, robot: dict | None, *, running: bool = False) -> str | None:
         """Why this robot can't run (or keep running) an eval right now, else None. ``running``: a
@@ -381,6 +387,9 @@ class EvalOrchestrator:
         from .interventions import eval_payload  # TDM-69: only when run_settings explicitly enables it
 
         payload.update(eval_payload(self.m, ticket_id, run.get("kind") or ""))
+        from .robot_mode import robot_mode  # TDM-107: the robot knows (and labels) a sim eval
+
+        payload["robot_mode"] = robot_mode(self.m.get("robot", robot_id))
         base = {"ticket_id": ticket_id, "robot_id": robot_id, "eval_run_id": run_id, "kind": run.get("kind"),
                 "checkpoint_uri": run.get("checkpoint_uri"), "trials": trials, "solo_mode": self.cfg.solo_mode,
                 "why": why, "interventions": bool(payload.get("interventions"))}

@@ -23,6 +23,7 @@ import {
   type Tdm79LoopState,
   type Tdm79Settings,
 } from '@/lib/tdm79/settings';
+import { Tdm107RobotModePanel } from '@/components/tdm107/RobotModePanel';
 
 const NAME_KEY = 'rdf.tdm79.humanId';
 const HUMAN_ID = /^[A-Za-z0-9._@:+-]{1,64}$/;
@@ -222,6 +223,16 @@ function RunSettingsDrawer({
                 Load their version
               </button>
             </p>
+          )}
+
+          {/* TDM-107: sim robot or real YAM, switchable by an operator; include_sim_data. */}
+          {base && (
+            <Tdm107RobotModePanel
+              ticketId={ticketId}
+              humanId={name && HUMAN_ID.test(name) ? name : 'web-dashboard'}
+              frozen={frozen}
+              onSettingsSaved={(s) => setBase(s)}
+            />
           )}
 
           {form && base && (

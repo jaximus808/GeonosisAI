@@ -7,7 +7,8 @@ Routes (mounted by ``app.py``):
         budget_cents (int >= 0, >= what the ticket already approved/spent)
         target_episodes (int 1-10000)     max_iterations (int 1-20, > the ticket's current iteration)
         data_type_override (null | "clean_teleop" | "recovery_takeover"; null = the planner decides)
-        hyperparams {lr (0-1], steps 1-1e6, batch_size 1-4096, lora_rank 0-1024, prompt} (merged)
+        hyperparams {lr (0-1], steps 1-1e6, batch_size 1-4096, lora_rank 0-1024, prompt,
+                     include_sim_data (TDM-107)} (merged)
       header ``X-Human-Id: <id>`` (optional, default ``anonymous``) names the person; the change
       is logged to event_log as actor ``human:<id>`` (type ``human.run_settings_changed``) next
       to the reducer's own ``ticket.run_settings_updated`` row.
@@ -53,6 +54,8 @@ class HyperparamsPatch(BaseModel):
     batch_size: int = Field(default=None, ge=1, le=4096)
     lora_rank: int = Field(default=None, ge=0, le=1024, description="0 = full fine-tune")
     prompt: str = Field(default=None, description="language instruction given to the policy")
+    include_sim_data: bool = Field(default=None, description="TDM-107: train on sim-robot episodes too "
+                                                             "(unset = on for a sim ticket, off for a real one)")
 
 
 class RunSettingsPatch(BaseModel):

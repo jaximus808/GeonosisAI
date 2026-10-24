@@ -220,6 +220,13 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Until a dependency lands,** code against these signatures with a recorded fixture under `apps/web/src/lib/robotview/fixtures/`.
 - **The MuJoCo sim robot** (`make demo`) is being built off the board. Check `git log` for `mujoco`.
 
+## Robot mode: sim robot or real YAM per ticket (TDM-107: build to this)
+- **The mode is the robot's.** A robot is sim iff `robot.camera_config_json.sim === true`; a ticket's mode is its robot's (`ticket.robot_id`). Python: `rdf_orchestrator.robot_mode` (`robot_mode(row)`, `row_mode(row, robots)`, `include_sim_data(settings, mode)`). TS: `apps/web/src/lib/tdm107/robotMode.ts` (`tdm107ModeOf`, `tdm107SimIds`).
+- **Label rows by their own `robot_id`**, never by the ticket's current robot: a ticket can switch, its old rows keep the robot they ran on.
+- **Never pool sim with real:** success numbers, ship decisions and "before/after" use only evals on the ticket's current mode. Training takes sim episodes only with `hyperparams.include_sim_data` (unset = on for sim tickets, off for real).
+- **Switch:** operator only, `POST /tickets/{id}/robot_mode {mode}` (reducer `set_ticket_robot`, event `ticket.robot_mode_changed`). Refused during a running eval.
+- **Robot view (TDM-98):** default `<RobotView defaultMode>` to the ticket's mode (`'sim'` for a sim ticket, `'live'` for a real one).
+
 ## Scene spec (TDM-104): one 3D task scene per ticket, for the MuJoCo sim and the twin
 - **Schema:** `services/common/src/rdf_common/scene_spec.py` (`validate(raw) -> spec` or `SceneSpecError(.errors)`, `evaluate_success(spec, poses, held=)`, `describe_success` -> `inside(cube, plate)` / `on_top(a, b)`, `sample_poses`). Example: `sim_assets/scenes/cube_plate.json`. Web: `SceneSpec` + `toRenderSpec()` in `apps/web/src/lib/robotview/scene.ts` (the twin draws the render form).
 - **Storage (event_log, actor `orchestrator:scene`):** `scene.created` {ticket_id, revision, scene_id `t<ticket>r<rev>`, source, spec}, `scene.generation_failed`, `scene.deployed` {robot_id, deploy_id, spec}, `scene.loaded` (robot) {deploy_id, ok, error?}.

@@ -25,7 +25,7 @@ const TDM74_ORCH = (
   'http://localhost:8000'
 ).replace(/\/$/, '');
 
-const TDM74_BODY_KEYS = new Set(['prompt', 'robot_id', 'settings_overrides', 'budget_cents', 'target_success', 'parsed']);
+const TDM74_BODY_KEYS = new Set(['prompt', 'robot_id', 'robot_mode', 'settings_overrides', 'budget_cents', 'target_success', 'parsed']);
 // create_ticket overrides (budget_cents is its own argument, not an override).
 const TDM74_OVERRIDE_KEYS = new Set([
   'eval_trials',
@@ -63,6 +63,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return tdm74Invalid(['body'], 'send a JSON object');
   const extra = Object.keys(body).filter((k) => !TDM74_BODY_KEYS.has(k));
   if (extra.length) return tdm74Invalid(['body', extra[0]], `${extra[0]} is not a ticket field`, 'extra_forbidden');
+  if (body.robot_mode !== undefined && body.robot_mode !== 'sim' && body.robot_mode !== 'real') {
+    return tdm74Invalid(['body', 'robot_mode'], 'robot_mode must be sim or real'); // TDM-107
+  }
   const ov = body.settings_overrides;
   if (ov !== undefined && ov !== null) {
     if (typeof ov !== 'object' || Array.isArray(ov)) return tdm74Invalid(['body', 'settings_overrides'], 'must be an object');

@@ -31,6 +31,28 @@ export const dynamic = 'force-dynamic';
 
 type Loaded = { ok: true; report: Report } | { ok: false; status: number; message: string };
 
+// TDM-107: the report's robot_mode block (absent in reports saved before it). Sim and real results
+// are listed apart and never pooled; the hero numbers are the ticket's current mode only.
+type Tdm107ModeBlock = {
+  current: 'sim' | 'real' | null;
+  include_sim_data: boolean;
+  by_mode: Record<'sim' | 'real', {
+    robot_ids: number[];
+    eval_runs: EvalView[];
+    baseline: EvalView | null;
+    latest_candidate: EvalView | null;
+    trials: number;
+    successes: number;
+    episodes: number;
+    episodes_accepted: number;
+  }>;
+  switches: { event_id: number; from_mode?: string; to_mode?: string; from_robot_id?: number; to_robot_id?: number; status?: string; by?: string; reason?: string }[];
+};
+
+function tdm107Mode(r: Report): Tdm107ModeBlock | null {
+  return ((r as unknown as { robot_mode?: Tdm107ModeBlock }).robot_mode ?? null) || null;
+}
+
 async function loadReport(id: string): Promise<Loaded> {
   try {
     const res = await fetch(`${ORCH}/tickets/${id}/report`, { cache: 'no-store', signal: AbortSignal.timeout(30_000) });
@@ -105,6 +127,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
                 <>
                   {r.robot.name} <span className="r-muted">({r.robot.embodiment}, adapter {r.robot.adapter_version})</span>
                   {r.robot.fake && <FakeTag />}
+                  {tdm107Mode(r)?.current === 'sim' && <span className="r-sim-tag">SIM ROBOT</span>}
                 </>
               ) : (
                 <span className="r-missing-inline">not recorded</span>
@@ -135,6 +158,13 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         )}
 
         <section className="r-hero" aria-label="Success before and after">
+          {tdm107Mode(r)?.current && (
+            <p className="r-muted">
+              {tdm107Mode(r)!.current === 'sim'
+                ? 'SIMULATED: sim-robot results (MuJoCo), not real-arm success numbers.'
+                : 'Real-robot results only. Sim-robot results are listed separately below.'}
+            </p>
+          )}
           <div className="r-hero-nums">
             <EvalNumber label="Before" sub="base policy" v={r.baseline} />
             <svg className="r-hero-arrow" viewBox="0 0 48 24" aria-hidden>
@@ -145,6 +175,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           <IntervalChart before={r.baseline} after={r.final} threshold={threshold} />
           <p className={`r-verdict ${o.met_target === true ? 'r-pass' : o.met_target === false ? 'r-fail' : ''}`}>{o.verdict}.</p>
         </section>
+
+        {tdm107Mode(r) && <Tdm107SimVsReal m={tdm107Mode(r)!} />}
 
         <Section title="What data was bought, and why">
           {r.iterations.length === 0 ? (
@@ -284,6 +316,52 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
+  );
+}
+
+function Tdm107SimVsReal({ m }: { m: Tdm107ModeBlock }) {
+  const line = (v: EvalView | null) => (v ? (v.ci_text ?? `${v.status}, ${v.completed}/${v.trials} trials`) : 'not run');
+  return (
+    <Section title="Sim vs real robot">
+      <table className="r-table">
+        <thead>
+          <tr>
+            <th scope="col">Mode</th>
+            <th scope="col">Finalized trials</th>
+            <th scope="col">Baseline</th>
+            <th scope="col">Latest fine-tune</th>
+            <th scope="col">Episodes (accepted)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(['real', 'sim'] as const).map((k) => {
+            const b = m.by_mode[k];
+            return (
+              <tr key={k}>
+                <th scope="row">{k === 'sim' ? <span className="r-sim-tag">SIM</span> : 'Real'}{m.current === k ? ' (current)' : ''}</th>
+                <td>{b.successes}/{b.trials}</td>
+                <td>{line(b.baseline)}</td>
+                <td>{line(b.latest_candidate)}</td>
+                <td>{b.episodes} ({b.episodes_accepted})</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="r-muted">
+        Sim and real results are never pooled. Training {m.include_sim_data ? 'includes' : 'excludes'} sim-robot episodes.
+      </p>
+      {m.switches.length > 0 && (
+        <ul className="r-muted">
+          {m.switches.map((s) => (
+            <li key={s.event_id}>
+              Switched {s.from_mode} robot {s.from_robot_id} to {s.to_mode} robot {s.to_robot_id} during {s.status} by {s.by}
+              {s.reason ? `: ${s.reason}` : ''} (event {s.event_id})
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 

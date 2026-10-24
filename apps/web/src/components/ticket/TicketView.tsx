@@ -16,6 +16,7 @@ import { TrainingRuns } from './TrainingRuns';
 import { RunSettingsButton } from './RunSettingsDrawer';
 import { Tdm100WatchRobot } from './Tdm100WatchRobot';
 import { isFakeRobot, ticketEvents } from './util';
+import { tdm107ModeOf, tdm107SimIds } from '@/lib/tdm107/robotMode';
 
 /** TDM-75: the live ticket page. Every section is a SpacetimeDB subscription; nothing here is mocked. */
 export function TicketView({ id }: { id: string }) {
@@ -29,6 +30,9 @@ export function TicketView({ id }: { id: string }) {
   const [ticket, ready] = useTicket(tid < 0n ? 0n : tid);
   const robotId = ticket?.robotId ?? 0n;
   const [robots] = useRows('robot', (r) => r.id.eq(robotId));
+  // TDM-107: every robot, so each eval / episode is labelled by the robot it actually ran on.
+  const [allRobots] = useRows('robot');
+  const simRobotIds = useMemo(() => tdm107SimIds(allRobots), [allRobots]);
   const [settingsRows] = useRows('runSettings', (r) => r.ticketId.eq(tid));
   const [datasets] = useRows('dataset', (r) => r.ticketId.eq(tid));
   const [evalRuns] = useRows('evalRun', (r) => r.ticketId.eq(tid));
@@ -74,10 +78,11 @@ export function TicketView({ id }: { id: string }) {
   const robot = robots[0];
   const settings = settingsRows[0];
   const robotFake = isFakeRobot(robot);
+  const mode = tdm107ModeOf(robot);
 
   return (
     <>
-      <TicketHeader ticket={ticket} robot={robot} dataset={datasets[0]} />
+      <TicketHeader ticket={ticket} robot={robot} dataset={datasets[0]} mode={mode} />
       <TimelineStrip ticket={ticket} events={events} />
 
       {/* TDM-79: run-settings editor (drawer). The report is linked from the header. */}
@@ -89,7 +94,7 @@ export function TicketView({ id }: { id: string }) {
       <Tdm100WatchRobot status={ticket.status} robotId={robotId} robot={robot} ticketId={tid} />
 
       <Block title="Before and after" aside={<span className="text-sm text-zinc-500">task success per eval run, live as trials finish</span>}>
-        <EvalCards runs={evalRuns} events={events} settings={settings} robotFake={robotFake} iterationOf={iterationOf} />
+        <EvalCards runs={evalRuns} events={events} settings={settings} robotFake={robotFake} iterationOf={iterationOf} simRobotIds={simRobotIds} mode={mode} />
       </Block>
 
       {/* TDM-68 evidence trail, preferred over DecisionCard (whose rejected-alternative line reads a
@@ -126,7 +131,7 @@ export function TicketView({ id }: { id: string }) {
       )}
 
       <Block title="Episodes and reviews" id="episodes">
-        <EpisodesGrid episodes={episodes} reviews={reviews} payments={payments} people={people} />
+        <EpisodesGrid episodes={episodes} reviews={reviews} payments={payments} people={people} simRobotIds={simRobotIds} />
       </Block>
 
       <Block title="Training runs">

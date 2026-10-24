@@ -37,6 +37,7 @@ export interface Tdm74Robot {
   name: string;
   status: string;
   embodiment?: string | null;
+  robot_mode?: 'sim' | 'real' | null; // TDM-107
 }
 
 export interface Tdm74Preview {
@@ -48,6 +49,7 @@ export interface Tdm74Preview {
   defaults_applied: string[];
   missing: string[];
   robot: Tdm74Robot | null;
+  robot_mode?: 'sim' | 'real' | null; // TDM-107: the mode the ticket would run in
   robot_selection: string | null;
   robot_error: { code: string; message: string; robots?: Tdm74Robot[] } | null;
 }
@@ -61,6 +63,7 @@ export interface Tdm74Created {
 export interface Tdm74Inputs {
   prompt: string;
   robotId: string; // '' = let the orchestrator pick the only online robot
+  robotMode?: 'sim' | 'real' | ''; // TDM-107: '' = any robot; else only robots of that mode
   budgetUsd: string; // '' = use the prompt's budget
   targetPct: string; // '' = use the prompt's target (or the 80% default)
   advanced: Tdm79Form;
@@ -87,6 +90,7 @@ export function tdm74Body(
   else if ((body.prompt as string).length > 4000) errors.prompt = 'Keep the description under 4,000 characters';
 
   if (inp.robotId) body.robot_id = Number(inp.robotId);
+  if (inp.robotMode) body.robot_mode = inp.robotMode;
 
   const b = inp.budgetUsd.trim().replace(/^\$/, '').replace(/,/g, '');
   if (b) {
@@ -115,6 +119,7 @@ export function tdm74Body(
 const TDM74_LOC: Record<string, Tdm74Field> = {
   prompt: 'prompt',
   robot_id: 'robot',
+  robot_mode: 'robot',
   budget_cents: 'budget',
   target_success: 'target',
   eval_trials: 'eval_trials',
@@ -138,6 +143,7 @@ const TDM74_CODE: Record<string, Tdm74Field> = {
   unknown_robot: 'robot',
   no_online_robot: 'robot',
   multiple_online_robots: 'robot',
+  robot_mode_mismatch: 'robot',
 };
 
 export interface Tdm74Failure {

@@ -15,6 +15,9 @@ POST flow:
      defaulted: it is real spend, so the answer is a 422 ``budget_required`` asking for one.
   3. Robot: ``robot_id`` if given, else the only online robot (status online/busy/paused, names
      starting ``test.`` ignored). None or several online -> 422 listing the candidates.
+     TDM-107 ``robot_mode`` ("sim" | "real"): only robots of that mode are candidates (sim = the
+     MuJoCo sim robot, ``camera_config_json.sim``; see ``robot_mode.py``), and a ``robot_id`` of the
+     other mode is a 422 ``robot_mode_mismatch``. The answer says which mode the ticket runs in.
   4. ``create_ticket(robot_id, task_description, target_success, budget_cents, overrides_json)``.
      ``policy_prompt`` goes into ``hyperparams.prompt`` (the language instruction the policy gets).
      Reducers return nothing, so the new id is read back from the ``ticket`` table (rows on that
@@ -30,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -52,6 +55,9 @@ class CreateTicketRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000,
                         examples=["Put the cup in the bin, 80% reliable, $50 budget"])
     robot_id: int | None = Field(None, ge=1, description="Defaults to the only online robot.")
+    robot_mode: Literal["sim", "real"] | None = Field(
+        None, description="TDM-107: run on the sim robot (MuJoCo scene) or the real YAM. Default: whatever "
+                          "robot is picked (the only online one).")
     settings_overrides: dict[str, Any] | None = Field(
         None, description="update_run_settings keys minus budget_cents: eval_trials, success_threshold, "
                           "require_ci_low, target_episodes, max_iterations, hyperparams{lr,steps,batch_size,lora_rank,prompt}")
@@ -166,7 +172,10 @@ class TicketError(Exception):
 
 
 def _public_robot(r: dict) -> dict:
-    return {"id": r["id"], "name": r["name"], "status": r["status"], "embodiment": r.get("embodiment")}
+    from .robot_mode import robot_mode
+
+    return {"id": r["id"], "name": r["name"], "status": r["status"], "embodiment": r.get("embodiment"),
+            "robot_mode": robot_mode(r)}
 
 
 def _with_hyperparams(rs: dict | None) -> dict | None:
@@ -191,8 +200,15 @@ class TicketsService:
     async def _rows(self, table: str, col: str, value: int) -> list[dict]:
         return await self.stdb.sql(f"SELECT * FROM {table} WHERE {col} = {int(value)}")
 
-    async def pick_robot(self, robot_id: int | None) -> tuple[dict, str]:
+    async def pick_robot(self, robot_id: int | None, mode: str | None = None) -> tuple[dict, str]:
         robots = await self.stdb.sql("SELECT * FROM robot")
+        if mode is not None:  # TDM-107
+            from .robot_mode import RobotModeError, pick_robot_for_mode
+
+            try:
+                return pick_robot_for_mode(robots, mode, robot_id)
+            except RobotModeError as e:
+                raise TicketError(e.status, e.code, e.message, **e.extra) from None
         if robot_id is not None:
             for r in robots:
                 if r["id"] == robot_id:
@@ -256,7 +272,7 @@ class TicketsService:
         r = self._resolve(req, parsed)
         robot, selection, robot_error = None, None, None
         try:
-            robot, selection = await self.pick_robot(req.robot_id)
+            robot, selection = await self.pick_robot(req.robot_id, req.robot_mode)
         except TicketError as e:
             robot_error = {"code": e.code, "message": e.message, **e.extra}
         return {
@@ -264,6 +280,7 @@ class TicketsService:
             **r,
             "missing": [] if r["budget_cents"] is not None else ["budget"],
             "robot": _public_robot(robot) if robot else None,
+            "robot_mode": _public_robot(robot)["robot_mode"] if robot else req.robot_mode,
             "robot_selection": selection,
             "robot_error": robot_error,
         }
@@ -279,7 +296,7 @@ class TicketsService:
                               "(e.g. '$50 budget') or pass budget_cents.",
                               parsed=parsed.model_dump())
 
-        robot, selection = await self.pick_robot(req.robot_id)
+        robot, selection = await self.pick_robot(req.robot_id, req.robot_mode)
         rid = int(robot["id"])
         from rdf_common.spacetime_client import SpacetimeError
 
@@ -298,11 +315,14 @@ class TicketsService:
             raise TicketError(502, "ticket_not_found", "create_ticket succeeded but the new ticket row was not found.")
         ticket = new[0]
         settings = await self._rows("run_settings", "ticket_id", ticket["id"])
+        mode = _public_robot(robot)["robot_mode"]
         log.info("tickets.created", extra={"fields": {"ticket_id": ticket["id"], "robot_id": rid, "selection": selection,
-                                                      "budget_cents": budget_cents, "target_success": target}})
+                                                      "budget_cents": budget_cents, "target_success": target,
+                                                      "robot_mode": mode}})
         return {
             "ticket_id": ticket["id"],
             "robot": _public_robot(robot),
+            "robot_mode": mode,
             "robot_selection": selection,
             "ticket": ticket,
             "run_settings": _with_hyperparams(settings[0] if settings else None),
@@ -334,6 +354,7 @@ class TicketsService:
         return {
             "ticket": t,
             "robot": _public_robot(robot[0]) if robot else None,
+            "robot_mode": _public_robot(robot[0])["robot_mode"] if robot else None,  # TDM-107
             "run_settings": _with_hyperparams(settings[0] if settings else None),
             "dataset": dataset[0] if dataset else None,
             "latest_eval_run": evals[-1] if evals else None,

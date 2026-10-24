@@ -109,3 +109,4 @@ export * from './reducers/payouts'; // TDM-63
 export * from './reducers/eval_orchestration'; // TDM-67
 export * from './reducers/ship'; // TDM-70
 export * from './reducers/data_droid'; // TDM-33
+export * from './reducers/robot_mode'; // TDM-107

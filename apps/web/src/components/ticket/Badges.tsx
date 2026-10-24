@@ -13,6 +13,18 @@ export function FakeBadge({ title }: { title?: string }) {
   );
 }
 
+/** TDM-107: recorded on the MuJoCo sim robot, never a real-arm result. */
+export function SimBadge({ title }: { title?: string }) {
+  return (
+    <span
+      title={title ?? 'Recorded on the SIM robot (MuJoCo simulation of the YAM). Never counted in real-robot numbers.'}
+      className="inline-flex items-center rounded-sm bg-violet-600 px-1.5 py-px text-[11px] font-bold tracking-wide text-white"
+    >
+      SIM
+    </span>
+  );
+}
+
 /** Stripe test mode marker: no real money moves. */
 export function TestModeBadge() {
   return (

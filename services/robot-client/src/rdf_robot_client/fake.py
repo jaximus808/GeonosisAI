@@ -138,6 +138,7 @@ class FakeConfig:
     media_dir: Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "tdm-28" / "media")
     seed: int | None = None
     episodes: bool = True  # create episode rows (needs the TDM-11 create_episode reducer)
+    sim: bool = False  # TDM-107: register as a sim-mode robot (camera_config_json.sim = true), still [FAKE]
 
 
 class Aborted(Exception):
@@ -199,7 +200,8 @@ class FakeRobot:
             _fixtures()  # fail at boot, not on the first episode
             if not shutil.which("ffmpeg"):
                 raise RuntimeError("fake robot episodes need ffmpeg to render the camera mp4s (or pass --no-episodes)")
-        cams = {"fake": True, "tag": FAKE_TAG, "cameras": {c: f"fake://{c}" for c in FAKE_CAMERAS}}
+        cams = {"fake": True, "tag": FAKE_TAG, "cameras": {c: f"fake://{c}" for c in FAKE_CAMERAS},
+                **({"sim": True} if self.cfg.sim else {})}  # TDM-107: stands in for the MuJoCo sim robot
         self.call("register_robot", self.cfg.name, "fake_yam", "fake-tdm28", json.dumps(cams))
         rows = self.http.sql(f"SELECT * FROM robot WHERE name = '{self.cfg.name}'")
         if not rows:
@@ -625,6 +627,8 @@ def parse_args(argv: list[str] | None = None) -> FakeConfig:
     p.add_argument("--media-dir", type=Path, default=Path(tempfile.gettempdir()) / "tdm-28" / "media")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--no-episodes", action="store_true", help="record trials without episode rows")
+    p.add_argument("--sim-mode", action="store_true",
+                   help="TDM-107: register as a sim-mode robot (camera_config_json.sim = true) for robot-mode tests")
     p.add_argument("--allow-remote", action="store_true",
                    help="allow a non-local SpacetimeDB (never maincloud: fake evals must not mix with real ones)")
     a = p.parse_args(argv)
@@ -645,7 +649,7 @@ def parse_args(argv: list[str] | None = None) -> FakeConfig:
         trial_ms=a.trial_ms, reset_ms=a.reset_ms,
         teleop_ms=a.teleop_ms, time_scale=a.time_scale, estop_clear_seconds=a.estop_clear_seconds,
         command_fail_prob=a.command_fail_prob, heartbeat_seconds=a.heartbeat_seconds,
-        media_dir=a.media_dir, seed=a.seed, episodes=not a.no_episodes,
+        media_dir=a.media_dir, seed=a.seed, episodes=not a.no_episodes, sim=a.sim_mode,
     )
 
 

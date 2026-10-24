@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRows } from '@/lib/spacetime/hooks';
 import { fmtCents, fmtTs } from '@/lib/format';
-import { Empty, FakeBadge, StatusPill } from './Badges';
+import { Empty, FakeBadge, SimBadge, StatusPill } from './Badges';
 import { CamVideo } from './media';
 import {
   KIND_LABEL,
@@ -65,7 +65,7 @@ function Verdict({ e, review }: { e: Episode; review?: Review }) {
   return <p className="mt-3"><StatusPill status={e.reviewStatus} /></p>;
 }
 
-function EpisodeCard({ e, review, payment, who }: { e: Episode; review?: Review; payment?: Payment; who?: Contributor }) {
+function EpisodeCard({ e, review, payment, who, sim }: { e: Episode; review?: Review; payment?: Payment; who?: Contributor; sim?: boolean }) {
   const fake = isFakeEpisode(e);
   const cams = cameraUris(e);
   return (
@@ -74,6 +74,7 @@ function EpisodeCard({ e, review, payment, who }: { e: Episode; review?: Review;
         <span className="font-semibold tabular-nums">#{e.id.toString()}</span>
         <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs dark:bg-zinc-800">{KIND_LABEL[e.kind] ?? e.kind}</span>
         {fake && <FakeBadge />}
+        {sim && <SimBadge />}
         {e.success !== undefined && (
           <span className={`text-xs font-medium ${e.success ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>
             {e.success ? 'task succeeded' : 'task failed'}
@@ -107,8 +108,10 @@ function EpisodeCard({ e, review, payment, who }: { e: Episode; review?: Review;
   );
 }
 
-export function EpisodesGrid({ episodes, reviews, payments, people }: {
+export function EpisodesGrid({ episodes, reviews, payments, people, simRobotIds }: {
   episodes: readonly Episode[]; reviews: readonly Review[]; payments: readonly Payment[]; people: Map<bigint, Contributor>;
+  /** TDM-107: each episode is labelled SIM by the robot it was recorded on. */
+  simRobotIds?: Set<bigint>;
 }) {
   const [filter, setFilter] = useState<FilterKey>('collected');
   const [showAll, setShowAll] = useState(false);
@@ -175,7 +178,7 @@ export function EpisodesGrid({ episodes, reviews, payments, people }: {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {shown.map((e) => (
-            <EpisodeCard key={e.id.toString()} e={e} review={latestReview.get(e.id)} payment={payByEp.get(e.id)} who={e.contributorId ? people.get(e.contributorId) : undefined} />
+            <EpisodeCard key={e.id.toString()} e={e} review={latestReview.get(e.id)} payment={payByEp.get(e.id)} who={e.contributorId ? people.get(e.contributorId) : undefined} sim={!!simRobotIds?.has(e.robotId)} />
           ))}
         </div>
       )}

@@ -129,7 +129,10 @@ def _review(bus, ep, source: str) -> None:
         judge = make_judge(cfg)
         if judge is not None and llm_retry.REFUSAL in kinds:
             judge = llm_retry.PrefacedJudge(judge)
-        decision = rv.review_episode(dict(ep), dict(ticket), config=cfg, judge=judge)
+        from ..robot_mode import robot_mode  # TDM-107: label the review sim / real from the episode's robot
+
+        ep_row = {**dict(ep), "robot_mode": robot_mode(bus.get("robot", ep.get("robot_id")))}
+        decision = rv.review_episode(ep_row, dict(ticket), config=cfg, judge=judge)
         rv.record_review(stdb, decision)
         _attempts.clear(eid)
         log.info("review.done", extra={"fields": {

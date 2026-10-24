@@ -164,12 +164,14 @@ class RealModal:
 
 # --------------------------------------------------------------------------- manifest
 
-def build_manifest(run: dict, ticket: dict | None, episodes: dict[int, dict]) -> dict:
+def build_manifest(run: dict, ticket: dict | None, episodes: dict[int, dict], robots: dict[int, dict] | None = None) -> dict:
     """TDM-39 ``ConvertManifest`` (as a dict) for a run: its accepted episodes, the ticket's prompt.
 
     Only accepted episodes are included (``queue_training_run`` already refuses others). ``repo_id``
     is per run (``rdf/ticket-<t>-run-<id>``) so a retrain never overwrites a dataset being read.
     """
+    from .robot_mode import row_mode  # TDM-107: each episode's sim | real label (convert ignores the key)
+
     hp = _json(run.get("hyperparams_json"))
     eps, missing = [], []
     for eid in run.get("episode_ids") or []:
@@ -183,6 +185,7 @@ def build_manifest(run: dict, ticket: dict | None, episodes: dict[int, dict]) ->
             "episode_id": str(ep["id"]), "kind": ep.get("kind") or "clean_teleop",
             "cameras_json": ep.get("cameras_json") or "{}", "actions_uri": ep.get("actions_uri") or "",
             "takeover_ts": ep.get("takeover_ts"), "handback_ts": ep.get("handback_ts"),
+            "robot_mode": row_mode(ep, robots or {}),
         })
     if missing:
         raise ValueError(f"episodes {missing} of training run {run['id']} not found")
@@ -311,7 +314,11 @@ class TrainingRunner:
             rows = self._rows or (lambda _t: [])
             episodes = {int(e["id"]): dict(e) for e in rows("episode")}
             ticket = next((dict(t) for t in rows("ticket") if int(t["id"]) == tid), None)
-            manifest = build_manifest(run, ticket, episodes)
+            try:  # TDM-107 sim / real label; a mirror without the robot table just leaves it unknown
+                robots = {int(r["id"]): dict(r) for r in rows("robot")}
+            except (KeyError, TypeError, ValueError):
+                robots = {}
+            manifest = build_manifest(run, ticket, episodes, robots)
             call_id = self.modal.spawn("convert", ticket_id=str(tid), episode_manifest=manifest)
         except Exception as e:  # noqa: BLE001 - a launch error fails the run, visibly
             self._fail(run, f"launch failed: {type(e).__name__}: {e}", {"phase": "launch"})

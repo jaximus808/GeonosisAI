@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRows } from '@/lib/spacetime/hooks';
-import { FakeBadge, StatusPill } from './Badges';
+import { FakeBadge, SimBadge, StatusPill } from './Badges';
 import { byOldest, ciText, isFakeTrial, pct, shortUri, type EvalRun, type TicketEvent } from './util';
 
 type Settings = { successThreshold: number; requireCiLow: boolean } | undefined;
@@ -92,8 +92,8 @@ function TrialChips({ run, onFake }: { run: EvalRun; onFake: (fake: boolean) => 
 }
 
 
-function EvalRow({ run, label, summary, settings, robotFake, emphasis }: {
-  run: EvalRun; label: string; summary?: string; settings: Settings; robotFake: boolean; emphasis: boolean;
+function EvalRow({ run, label, summary, settings, robotFake, emphasis, sim }: {
+  run: EvalRun; label: string; summary?: string; settings: Settings; robotFake: boolean; emphasis: boolean; sim: boolean;
 }) {
   const [trialFake, setTrialFake] = useState(false);
   const fake = robotFake || trialFake;
@@ -108,6 +108,7 @@ function EvalRow({ run, label, summary, settings, robotFake, emphasis }: {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-semibold">{label}</h3>
           {fake && <FakeBadge />}
+          {sim && <SimBadge />}
           {run.status !== 'done' && <StatusPill status={run.status} />}
         </div>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={run.checkpointUri}>
@@ -132,16 +133,23 @@ function EvalRow({ run, label, summary, settings, robotFake, emphasis }: {
  * Baseline vs fine-tuned evals on one 0–100% axis: Wilson 95% CI band, point estimate, target line,
  * and one chip per trial (green success, red failure) linking to its episode.
  */
-export function EvalCards({ runs, events, settings, robotFake, iterationOf }: {
+export function EvalCards({ runs, events, settings, robotFake, iterationOf, simRobotIds, mode }: {
   runs: readonly EvalRun[]; events: TicketEvent[]; settings: Settings; robotFake: boolean; iterationOf: Map<bigint, number>;
+  /** TDM-107: robots that are the sim robot (each run is labelled by the robot it ran on). */
+  simRobotIds?: Set<bigint>;
+  /** TDM-107: the ticket's current robot mode; the before/after headline uses that mode's runs only. */
+  mode?: 'sim' | 'real' | null;
 }) {
   const ordered = byOldest(runs);
   const summaries = new Map<number, string>();
   for (const { row, payload } of events) {
     if (row.type === 'eval.finalized' && typeof payload.summary === 'string') summaries.set(Number(payload.eval_run_id), payload.summary);
   }
-  const baseline = [...ordered].reverse().find((r) => r.kind === 'baseline');
-  const candidate = [...ordered].reverse().find((r) => r.kind === 'candidate');
+  const isSim = (r: EvalRun) => !!simRobotIds?.has(r.robotId);
+  // Never mix sim and real: the headline compares runs of the ticket's current mode only.
+  const sameMode = (r: EvalRun) => !mode || isSim(r) === (mode === 'sim');
+  const baseline = [...ordered].reverse().find((r) => r.kind === 'baseline' && sameMode(r));
+  const candidate = [...ordered].reverse().find((r) => r.kind === 'candidate' && sameMode(r));
   const before = baseline?.status === 'done' && baseline.trials ? baseline.successes / baseline.trials : undefined;
   const after = candidate?.status === 'done' && candidate.trials ? candidate.successes / candidate.trials : undefined;
 
@@ -153,6 +161,8 @@ export function EvalCards({ runs, events, settings, robotFake, iterationOf }: {
       {before !== undefined && after !== undefined && (
         <p className="mb-2 text-2xl font-semibold tracking-tight">
           {pct(before)}% before, {pct(after)}% after fine-tuning
+          {mode === 'sim' && <span className="ml-2 text-base font-medium text-violet-700 dark:text-violet-300">on the sim robot</span>}
+          {mode === 'sim' && <span className="ml-2 align-middle"><SimBadge /></span>}
           {robotFake && <span className="ml-2 align-middle"><FakeBadge /></span>}
         </p>
       )}
@@ -174,6 +184,7 @@ export function EvalCards({ runs, events, settings, robotFake, iterationOf }: {
             summary={summaries.get(Number(r.id))}
             settings={settings}
             robotFake={robotFake}
+            sim={isSim(r)}
             emphasis={r === baseline || r === candidate || r.kind === 'ab_live'}
           />
         ))}

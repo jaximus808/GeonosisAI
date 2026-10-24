@@ -360,6 +360,9 @@ def _summary(ticket: Any, episode: Any, report: ChecksReport) -> str:
         f"{(_g(episode, 'duration_ms') or 0) / 1000:.1f} s, {_g(episode, 'frame_count')} frames, "
         f"operator success flag: {_g(episode, 'success')}.",
     ]
+    if _g(episode, "robot_mode") == "sim":  # TDM-107: set by handlers/reviewer.py from the episode's robot row
+        lines.append("Recorded on the SIM robot: a MuJoCo simulation of the arm, so the camera frames are renders, "
+                     "not photos. Judge the demonstration of the task, not the realism of the images.")
     if "failure_before_takeover" in m and m["failure_before_takeover"].get("status") == PASS:
         f = m["failure_before_takeover"]
         lines.append(f"Recovery takeover: the policy drove the first {f.get('pre_takeover_s')} s, then a human took "
@@ -425,7 +428,8 @@ def review_episode(episode: Any, ticket: Any, *, config: ReviewConfig | None = N
     report = run_checks(episode, actions, cfg.thresholds, actions_error=err)
     checks = list(report.results)
     metrics: dict[str, Any] = {"reviewer": "tdm25", "config_version": cfg.version, "kind": _g(episode, "kind"),
-                               "thresholds": cfg.thresholds.to_dict()}
+                               "thresholds": cfg.thresholds.to_dict(),
+                               "robot_mode": _g(episode, "robot_mode")}  # TDM-107: sim | real (None: unknown)
 
     def done(accepted: bool, reason: str, by: str, claude: dict) -> ReviewDecision:
         metrics.update(decided_by=by, claude=claude,

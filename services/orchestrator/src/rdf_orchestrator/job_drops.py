@@ -84,6 +84,18 @@ LIVE_STATES = ("posted", "claimed_edit")  # a message of ours is up in that chan
 OPEN, TAKEN, DONE = "open", "taken", "done"  # a drop's lifecycle, from its tasks' statuses
 TERMINAL = ("completed", "expired", "cancelled")
 DEFAULT_DIR = Path.home() / ".local" / "state" / "rdf" / "job_drops"
+
+
+def default_drop_dir(host: str | None = None, db: str | None = None) -> Path:
+    """Drop state is per SpacetimeDB database: task ids repeat across databases, so a shared folder let one
+    stack's task N edit or delete another stack's post for task N."""
+    host = host if host is not None else os.environ.get("SPACETIME_HOST", "")
+    db = db if db is not None else os.environ.get("SPACETIME_DB_NAME", "")
+    if not db:
+        return DEFAULT_DIR / "_unknown-db"
+    h = re.sub(r"^https?://", "", host or "").strip("/")
+    key = re.sub(r"[^a-z0-9.-]+", "-", f"{h}--{db}".lower()).strip("-")[:120] or "_unknown-db"
+    return DEFAULT_DIR / key
 KIND = {"clean_teleop": "Clean demo", "recovery_takeover": "Recovery takeover", "reset": "Reset"}
 MINUTES = {"clean_teleop": 3, "recovery_takeover": 2, "reset": 1}  # = the marketplace's estimates (tdm61.ts)
 BLURB = {"clean_teleop": "Drive the arm from your phone through one clean, full run of the task.",
@@ -412,7 +424,7 @@ class Dropper:
                  sleep: Callable[[float], None] = time.sleep, inline: bool = False,
                  still_runner: Callable[[dict, list, list], bool] | None = None) -> None:
         self.s = settings or DropSettings()
-        self.store = store or DropStore(self.s.rdf_drop_dir or DEFAULT_DIR)
+        self.store = store or DropStore(self.s.rdf_drop_dir or default_drop_dir())
         self.http = http or httpx.Client(timeout=20.0, follow_redirects=False)
         self._append = append
         self.photo = photo if photo is not None else self._reset_photo
@@ -797,8 +809,10 @@ class Dropper:
     def _take_down(self, drop: Drop, *, claimed: bool, reason: str | None = None,
                    states: tuple[str, ...] = LIVE_STATES) -> dict:
         """claimed: mark each live post "Claimed, no longer available" (delete where the network can't edit).
-        Otherwise delete them. Touches only our own messages, in either mode."""
+        Otherwise delete them. Live mode only: a dry_run stack never edits or deletes anything on a network."""
         out: dict[str, Any] = {}
+        if self.mode != "live":
+            return out
         f = self._facts_of(drop)
         for name, c in drop.channels.items():
             if c.get("state") not in states:
@@ -905,7 +919,7 @@ def attribution(event_rows: Iterable[dict]) -> dict:
     claims = []
     for r in event_rows:
         t = r.get("type")
-        if t not in (EV_CLAIMED, EV_POSTED):
+        if t not in (EV_CLAIMED, EV_POSTED, "text.offer_sent"):  # TDM-113: a text offer counts as a "text" post
             continue
         try:
             p = json.loads(r.get("payload_json") or "{}")

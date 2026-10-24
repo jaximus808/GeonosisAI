@@ -701,3 +701,29 @@ def test_ticket_channel_choice(tmp_path, monkeypatch):
     r = c.put("/drops/tickets/4/channels", json={"channels": {"discord": True, "x": False}}, headers=h).json()
     assert r["channels"] == {"discord": True, "bluesky": True, "x": False, "telegram": True}
     assert c.put("/drops/tickets/4/channels", json={"channels": {"myspace": True}}, headers=h).status_code == 422
+
+
+def test_dry_run_stack_never_edits_or_deletes_posts(tmp_path):
+    # Incident: a dry_run test stack sharing the drop folder deleted another stack's live posts.
+    def post(req):
+        return httpx.Response(200, json={"id": "901", "channel_id": "42", "guild_id": "7"})
+
+    http = Tdm108Http({("POST", "/channels/42/messages"): post})
+    live, _ = tdm108_dropper(tmp_path, http, rdf_drop_mode="live", discord_bot_token=BOT,
+                             rdf_drop_discord_channel_id="42")
+    t = Tdm108Tasks()
+    live.on_page(tdm108_req(), t)
+    n_calls = len(http.calls)
+    dry, _ = tdm108_dropper(tmp_path, http, rdf_drop_mode="dry_run", discord_bot_token=BOT,
+                            rdf_drop_discord_channel_id="42")
+    t.task["status"] = "completed"
+    dry.on_task_change(12, t)
+    assert len(http.calls) == n_calls  # no PATCH / DELETE from the dry_run stack
+    assert dry.store.load("task-12").channels["discord"]["state"] == "posted"
+
+
+def test_default_drop_dir_is_per_database():
+    a = jd.default_drop_dir("https://maincloud.spacetimedb.com", "robo-factory-a706j")
+    b = jd.default_drop_dir("http://127.0.0.1:3112", "rdfdemo")
+    assert a != b and a.parent == b.parent == jd.DEFAULT_DIR
+    assert jd.default_drop_dir("", "").name == "_unknown-db"

@@ -4,6 +4,24 @@
   "private": true,
   "description": "Dashboard and contributor phone task pages (Next.js + SpacetimeDB TS client)",
   "scripts": {
-    "dev": "node -e \"console.log('[web] placeholder: Dashboard and contributor phone task pages (Next.js + SpacetimeDB TS client) (not implemented yet)')\""
+    "dev": "next dev --port 3737",
+    "build": "next build",
+    "start": "next start --port 3737",
+    "typecheck": "tsc --noEmit",
+    "gen:bindings": "node scripts/gen-bindings.mjs"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
   }
 }

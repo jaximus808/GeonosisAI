@@ -9,6 +9,12 @@ def main() -> None:
 
         fake_main(sys.argv[1:])
         return
+    if sys.argv[1:2] == ["demo-square"]:
+        # TDM-46 CP-1: trace a 10 cm square, check the state rate, cycle the gripper (demo_square.py)
+        from .demo_square import main as demo_square_main
+
+        demo_square_main(sys.argv[2:])
+        return
     # TDM-49: the real command loop (--sim for the simulated arm); see main.py
     from .main import run
 

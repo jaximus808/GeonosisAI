@@ -30,7 +30,7 @@ export interface Tdm56Cmd {
 export type Tdm56OutMsg =
   | Tdm56Cmd
   | { t: 'stop' }
-  | { t: 'handback' }
+  | { t: 'handback'; success?: boolean } // TDM-69: the claimant's "Did you recover the task?" answer
   | { t: 'takeover' }
   | { t: 'record_start' }
   | { t: 'record_stop'; success?: boolean }

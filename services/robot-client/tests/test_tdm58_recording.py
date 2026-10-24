@@ -163,7 +163,9 @@ def test_adopts_rollout_owned_takeover_recording(setup):
     _wait(rc, "takeover")
     assert rc.handle({"t": "takeover"})["ok"]
     _wait(rc, "handback")
-    assert rc.handle({"t": "handback"})["ok"]
+    assert rc.handback_success is None
+    assert rc.handle({"t": "handback", "success": True})["ok"]
+    assert rc.handback_success is True  # the claimant's "recovered?" answer, for the rollout runner
     assert not rc.handle({"t": "record_stop", "success": True})["ok"]  # the rollout ends the trial
     assert not rc.handle({"t": "record_discard"})["ok"]
     time.sleep(0.8)

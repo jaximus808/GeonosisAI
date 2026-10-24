@@ -17,7 +17,9 @@ Protocol ``rdf-control/1`` (JSON text frames; the type key is ``t``, and ``type`
                                          after the lease is lost. It LATCHES; only a human at the arm clears it.
     {t:"takeover"}                       paused_for_takeover -> teleop. The first clutch-down while paused
                                          also does it (TeleopConfig.takeover_on_clutch)
-    {t:"handback"}                       takeover: back to the policy (mark_handback + resume). Clean
+    {t:"handback", success?}             takeover: back to the policy (mark_handback + resume); success is
+                                         the claimant's "Did you recover the task?" (TDM-69: the paused
+                                         rollout writes it as the recovery episode's success). Clean
                                          teleop: ends the start_teleop session
     {t:"record_start"} / {t:"record_stop", success:bool}   a clean demo's recording
     {t:"ping", ts_ms}
@@ -423,6 +425,7 @@ class TeleopHub:
         self._driver: threading.Thread | None = None
         self._auto_takeover = False
         self._takeover_task_id = 0            # the claimant's task during a DAgger takeover
+        self._handback_success: bool | None = None  # TDM-69: the claimant's "recovered?" answer at handback
         self._rec_owned: str | None = None    # episode key started via record_start (we may stop it)
         self.episodes: list[dict[str, Any]] = []
         self._last_handback: dict[str, Any] = {}
@@ -562,7 +565,7 @@ class TeleopHub:
             sm = self.client.sm
             sess.rc = RecordingControl(rec, lambda: lookup_task(sql, sess.claims.task_id),
                                        on_record_start=self._rc_record_start, on_takeover=lambda: self._rc_takeover(sess),
-                                       on_handback=self._rc_handback,
+                                       on_handback=lambda: self._rc_handback(sess),
                                        # DAgger: takeover_ts = when the policy was paused (same as _op_takeover's own mark)
                                        paused_at_ns=lambda: self._paused_at_ns(sm) if sm.state is S.PAUSED_FOR_TAKEOVER else None)
         return sess.rc
@@ -591,8 +594,9 @@ class TeleopHub:
         if not res.get("ok"):
             raise RuntimeError(res.get("detail") or res.get("code"))
 
-    def _rc_handback(self) -> None:
-        res = self._op_handback(None, {})  # type: ignore[arg-type]
+    def _rc_handback(self, sess: ControlSession) -> None:
+        rc = sess.rc if sess.rc not in (None, False) else None
+        res = self._op_handback(sess, {"success": getattr(rc, "handback_success", None)})
         if not res.get("ok"):
             raise RuntimeError(res.get("detail") or res.get("code"))
 
@@ -614,6 +618,7 @@ class TeleopHub:
                           allowed_from=[S.PAUSED_FOR_TAKEOVER])
             self.mode, self._ctx = "takeover", job
             self._takeover_task_id = sess.claims.task_id
+            self._handback_success = None  # this takeover's answer comes with its own handback
             self._handback.clear()
             self.counters["takeovers"] += 1
         ts = None
@@ -644,6 +649,8 @@ class TeleopHub:
 
     def _op_handback(self, sess: ControlSession, m: dict[str, Any]) -> dict[str, Any]:
         if self.mode == "takeover":
+            ok = m.get("success")
+            self._handback_success = ok if isinstance(ok, bool) else None  # TDM-69: "Did you recover the task?"
             self._handback.set()
             t = self._driver
             if t is not None:
@@ -747,7 +754,8 @@ class TeleopHub:
                 sm.transition(S.ROLLOUT, "handback via /control (resume_policy)", command_id=job.command.id)
                 resumed = True
                 job.signals.put(Command(id=0, seq=0, robot_id=job.command.robot_id, ticket_id=job.command.ticket_id,
-                                        type="handback", payload={"via": "/control", "handback_ts": ts},
+                                        type="handback", payload={"via": "/control", "handback_ts": ts,
+                                                                  "success": self._handback_success},
                                         status="acked", issued_by="teleop:/control", issued_at_us=int(time.time() * 1e6)))
             self.counters["handbacks"] += 1
             self._last_handback = {"handback_ts": ts, "resumed_policy": resumed, "ended": ended}
@@ -756,7 +764,7 @@ class TeleopHub:
             if resumed and self._takeover_task_id:  # TDM-69 contract: the orchestrator logs the handback from this
                 self.client.event("intervention.handed_back", task_id=self._takeover_task_id,
                                   command_id=job.command.id, ticket_id=job.command.ticket_id, handback_ts=ts,
-                                  via="/control")
+                                  via="/control", success=self._handback_success)
             with self._lock:
                 self.mode, self._ctx = None, None
 

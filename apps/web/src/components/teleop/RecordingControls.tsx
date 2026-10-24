@@ -11,6 +11,9 @@
 //
 // clean_teleop:       Start recording -> (timer, frames) -> Finish — success (confirm) | Discard
 // recovery_takeover:  Start episode (policy drives) -> Take over -> Hand back -> Finish — success | Discard
+// TDM-69 rollout-owned takeover (a paused collection rollout's own recording): Take over -> Hand back,
+//   which first asks "Did you recover the task? Yes / No" and sends {t:"handback", success}. The robot
+//   writes that answer as the recovery episode's success (docs/decisions.md); the rollout submits it.
 // Discard records nothing and keeps the claim. After Finish: upload progress, then the reviewer's
 // verdict (accepted / rejected with reason) and the payout state, live.
 //
@@ -98,6 +101,7 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
   const [pending, setPending] = useState<{ op: RecordingOp; req: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [askRecovered, setAskRecovered] = useState(false); // TDM-69 handback question
   const [now, setNow] = useState(() => (typeof performance !== 'undefined' ? performance.now() : 0));
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
@@ -260,8 +264,14 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             Take over
           </Btn>
         )}
-        {active && isTakeover && phase === 'human' && (
-          <Btn tone="go" testId="tdm58-handback" onClick={() => send('handback')} disabled={lockOut || !can?.handback} busy={busy('handback')}>
+        {active && isTakeover && phase === 'human' && !askRecovered && (
+          <Btn
+            tone="go"
+            testId="tdm58-handback"
+            onClick={() => (rolloutOwned ? setAskRecovered(true) : send('handback'))}
+            disabled={lockOut || !can?.handback}
+            busy={busy('handback')}
+          >
             Hand back to policy
           </Btn>
         )}
@@ -295,6 +305,44 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             </Btn>
             <Btn tone="quiet" onClick={() => setConfirming(false)}>
               Not yet
+            </Btn>
+          </div>
+        </div>
+      )}
+
+      {askRecovered && active && isTakeover && phase === 'human' && (
+        <div className="mt-3 rounded-lg border border-emerald-600/40 bg-emerald-50 p-3 text-sm dark:bg-emerald-950/30" data-testid="tdm58-recovered">
+          <p className="mb-1 font-medium">Did you recover the task?</p>
+          <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
+            Your answer goes on the episode. The reviewer checks it against the video; a takeover that did not recover the task is not paid.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              tone="go"
+              testId="tdm58-recovered-yes"
+              onClick={() => {
+                setAskRecovered(false);
+                send('handback', { success: true });
+              }}
+              disabled={lockOut || !can?.handback}
+              busy={busy('handback')}
+            >
+              Yes, hand back
+            </Btn>
+            <Btn
+              tone="quiet"
+              testId="tdm58-recovered-no"
+              onClick={() => {
+                setAskRecovered(false);
+                send('handback', { success: false });
+              }}
+              disabled={lockOut || !can?.handback}
+              busy={busy('handback')}
+            >
+              No, hand back
+            </Btn>
+            <Btn tone="quiet" onClick={() => setAskRecovered(false)}>
+              Keep driving
             </Btn>
           </div>
         </div>

@@ -1,5 +1,6 @@
 """Operator robot commands from the website (TDM-78): the robot page's Home / Stop / Run baseline /
-Load checkpoint / teleop buttons, and the soft e-stop fallback path.
+Load checkpoint / teleop buttons, the eval trial Pass / Fail verdict (``trial_outcome``), and the soft
+e-stop fallback path.
 
     POST /robots/{robot_id}/commands   {type, payload?, ticket_id?}
       header X-RDF-Operator-Key: <RDF_OPERATOR_KEY>   (required for everything except soft_estop)
@@ -36,7 +37,10 @@ robot_commands_router = APIRouter(tags=["robot-commands"])
 
 # What an operator may send from the page. run_eval is left to the eval flow (TDM-67), which
 # owns the eval_run row it needs; reset/takeover commands belong to the marketplace flow.
-TDM78_OPERATOR_TYPES = ("home", "stop", "run_baseline", "load_checkpoint", "start_teleop", "stop_teleop", "soft_estop")
+# trial_outcome (TDM-51): the operator's Pass / Fail {success, note?, eval_run_id, index} for the trial
+# the robot is waiting on; the robot refuses a late, duplicate or wrong-trial verdict (command failed).
+TDM78_OPERATOR_TYPES = ("home", "stop", "run_baseline", "load_checkpoint", "start_teleop", "stop_teleop", "soft_estop",
+                        "trial_outcome")
 
 
 class RobotCommandRequest(BaseModel):

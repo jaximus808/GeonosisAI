@@ -75,3 +75,13 @@ def test_unknown_type_and_reducer_refusal():
     assert r.status_code == 409 and "estop" in r.json()["detail"]
     down = _client(FakeStdb(ConnectionError("refused")), "k")  # type: ignore[arg-type]
     assert down.post("/robots/1/commands", json={"type": "home"}, headers={"x-rdf-operator-key": "k"}).status_code == 502
+
+
+def test_trial_outcome_is_an_operator_command():
+    stdb = FakeStdb()
+    c = _client(stdb, "k")
+    body = {"type": "trial_outcome", "payload": {"success": True, "note": "", "eval_run_id": 3, "index": 1}, "ticket_id": 2}
+    assert c.post("/robots/1/commands", json=body).status_code == 401  # needs the operator key like any verdict
+    r = c.post("/robots/1/commands", json=body, headers={"x-rdf-operator-key": "k"})
+    assert r.status_code == 200 and r.json()["type"] == "trial_outcome"
+    assert stdb.calls[0][1][:2] == (1, "trial_outcome")

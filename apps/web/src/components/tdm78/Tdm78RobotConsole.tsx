@@ -3,8 +3,11 @@
 // TDM-78: the live half of /robots/[id]. Every panel renders from SpacetimeDB subscriptions
 // (lib/tdm78/useRobotConsole.ts) and sits in its own error boundary.
 
+import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import type { FeedHealth } from '@/components/teleop/CameraFeed';
+import { ControlHolderPanel } from '@/components/teleop/ControlLease';
+import { operatorLoginHref, useOperator } from '@/lib/operator/useOperator';
 import { useConnectionStatus } from '@/lib/spacetime/hooks';
 import {
   TDM78_SAFETY_KINDS,
@@ -19,6 +22,7 @@ import {
 import { Tdm78Boundary } from './Tdm78Boundary';
 import { Tdm78CameraHealth, Tdm78LiveFeed } from './Tdm78Cameras';
 import { Tdm78CommandPanel } from './Tdm78CommandPanel';
+import { Tdm78TrialPanel } from './Tdm78TrialPanel';
 
 const STATUS_TONE: Record<string, string> = {
   online: 'bg-emerald-600 text-white',
@@ -123,13 +127,25 @@ export function Tdm78RobotConsole({ id }: { id: string }) {
         </div>
       )}
 
+      <Tdm78Boundary label="Eval and collection">
+        <Tdm78TrialPanel
+          robotId={id}
+          trial={v.trial}
+          verdicts={v.verdicts}
+          collect={v.collect}
+          intervention={v.intervention}
+          now={now}
+          contributorName={v.contributorName}
+        />
+      </Tdm78Boundary>
+
       <Tdm78Boundary label="Robot state">
         <Tdm78StateRail fine={fine} status={r.status} since={v.state?.at ?? null} source={v.state?.source} now={now} />
       </Tdm78Boundary>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Panel title="Arm control">
-          <Tdm78ControlHolder tasks={v.tasks} name={v.contributorName} now={now} />
+          <Tdm78GatedHolders robotId={id} />
         </Panel>
         <Panel title="Active checkpoint">
           {v.checkpoint.uri ? (
@@ -255,29 +271,27 @@ function Tdm78StateRail({ fine, status, since, source, now }: { fine?: string; s
   );
 }
 
-function Tdm78ControlHolder({
-  tasks,
-  name,
-  now,
-}: {
-  tasks: readonly { id: bigint; status: string; assigneeId: bigint; leaseExpiresAt?: { microsSinceUnixEpoch: bigint } | null }[];
-  name: (id: bigint) => string | undefined;
-  now: number;
-}) {
-  const live = tasks.filter((t) => t.status === 'claimed' && t.leaseExpiresAt && Number(t.leaseExpiresAt.microsSinceUnixEpoch / 1000n) > now);
-  if (live.length === 0) return <p className="text-sm text-zinc-600 dark:text-zinc-400">Nobody holds a control lease. The factory drives the arm.</p>;
+/** TDM-57's holder panel (Revoke / Revoke + cancel). Its buttons stay disabled until an operator
+ *  logs in; the revoke route itself answers 401 without the session either way. */
+function Tdm78GatedHolders({ robotId }: { robotId: string }) {
+  const op = useOperator();
+  const notOperator = op.operator !== true;
   return (
-    <ul className="space-y-1 text-sm">
-      {live.map((t) => {
-        const left = Number(t.leaseExpiresAt!.microsSinceUnixEpoch / 1000n) - now;
-        return (
-          <li key={String(t.id)}>
-            <span className="font-medium">{name(t.assigneeId) ?? `Contributor #${t.assigneeId}`}</span> holds task #{String(t.id)}
-            <span className="tabular-nums text-zinc-500">, lease {fmtAge(left)} left</span>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <fieldset disabled={notOperator} className="min-w-0">
+        <legend className="sr-only">Arm control holders</legend>
+        <ControlHolderPanel robotId={robotId} />
+      </fieldset>
+      {notOperator && op.operator !== null && (
+        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+          Revoking needs an operator.{' '}
+          <Link href={operatorLoginHref(`/robots/${robotId}`)} className="font-medium text-sky-700 underline dark:text-sky-400">
+            Log in as operator
+          </Link>
+          .
+        </p>
+      )}
+    </>
   );
 }
 

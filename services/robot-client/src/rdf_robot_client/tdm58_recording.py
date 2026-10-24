@@ -36,9 +36,13 @@ Messages (browser -> robot; ``req`` is echoed back so the page can match replies
                                            takeover_ts is the PAUSE time, so the idle wait is in the
                                            human window (TDM-48 relabels idle ticks there) and the
                                            frames before takeover_ts are all policy.
-  {t:"handback", req?}                     recovery only: ``recorder.mark_handback()`` THEN
+  {t:"handback", req?, success?}           recovery only: ``recorder.mark_handback()`` THEN
                                            ``on_handback()`` (resume_policy). Refused before
                                            ``min_takeover_s`` (the reviewer's minimum human segment).
+                                           ``success`` (bool) is the human's "Did you recover the task?"
+                                           answer, kept in ``handback_success`` for an adopted (rollout-
+                                           owned) episode: the rollout writes it as the episode's success
+                                           (no answer = unknown = the reviewer rejects, nobody is paid).
   {t:"record_stop", success:true, note?}   finish: ``recorder.stop(success, note)`` -> local files, upload
                                            queued (signed PUTs + create_episode in the background).
                                            Recovery: refused while the human still has control.
@@ -127,6 +131,7 @@ class RecordingControl:
         self.on_record_end = on_record_end
         # time.monotonic_ns() at which the policy was paused, while the robot is paused_for_takeover (else None)
         self.paused_at_ns = paused_at_ns
+        self.handback_success: bool | None = None  # last handback's "Did you recover the task?" answer
         self.min_pre_takeover_s, self.min_takeover_s = float(min_pre_takeover_s), float(min_takeover_s)
         self._lock = threading.RLock()
         self._mine: str | None = None  # key of the recording this control started
@@ -277,7 +282,7 @@ class RecordingControl:
         self._tk_ts = int(self.recorder.mark_takeover(at_ns))
         self._tk_mono = (at_ns or time.monotonic_ns()) / 1e9
 
-    def _op_handback(self, _msg: dict[str, Any]) -> None:
+    def _op_handback(self, msg: dict[str, Any]) -> None:
         self._require_takeover_kind()
         if self._tk_mono is None:
             raise RecordingError("take over first")
@@ -288,6 +293,8 @@ class RecordingControl:
             raise RecordingError(f"a takeover must last at least {self.min_takeover_s:g} s ({held:.1f} s so far)")
         self._hb_ts = int(self.recorder.mark_handback())  # stamp first, then the policy resumes
         self._hb_mono = time.monotonic()
+        ok = msg.get("success")
+        self.handback_success = ok if isinstance(ok, bool) else None  # TDM-69: the human's recovered? answer
         if self.on_handback:
             self.on_handback()
 

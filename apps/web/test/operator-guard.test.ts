@@ -38,6 +38,7 @@ let base = '';
 type Handler = (req: Request, ctx: { params: Promise<Record<string, unknown>> }) => Promise<Response> | Response;
 let commands: Handler;
 let estop: Handler;
+let failing: Handler;
 let revoke: Handler;
 let tdm64Patch: Handler;
 let tdm64Post: Handler;
@@ -88,6 +89,7 @@ before(async () => {
 
   commands = (await import('@/app/api/tdm78/robots/[id]/commands/route')).POST as unknown as Handler;
   estop = (await import('@/app/api/tdm78/robots/[id]/estop/route')).POST as unknown as Handler;
+  failing = (await import('@/app/api/tdm78/robots/[id]/interventions/flag/route')).POST as unknown as Handler;
   revoke = (await import('@/app/api/tdm57/tasks/[id]/revoke/route')).POST as unknown as Handler;
   const t64 = await import('@/app/api/tdm64/[...path]/route');
   tdm64Patch = t64.PATCH as unknown as Handler;
@@ -107,6 +109,8 @@ after(() => upstream.close());
 const guarded: [string, () => [Handler, (cookie?: string) => Request, ReturnType<typeof params>]][] = [
   ['tdm78 home', () => [commands, (c) => req('POST', '/api/tdm78/robots/1/commands', { type: 'home' }, c), params({ id: '1' })]],
   ['tdm78 start_teleop', () => [commands, (c) => req('POST', '/api/tdm78/robots/1/commands', { type: 'start_teleop' }, c), params({ id: '1' })]],
+  ['tdm78 trial_outcome', () => [commands, (c) => req('POST', '/api/tdm78/robots/1/commands', { type: 'trial_outcome', payload: { success: true, eval_run_id: 3, index: 0 } }, c), params({ id: '1' })]],
+  ['tdm69 Failing flag', () => [failing, (c) => req('POST', '/api/tdm78/robots/1/interventions/flag', { note: 'wandering' }, c), params({ id: '1' })]],
   ['tdm57 revoke', () => [revoke, (c) => req('POST', '/api/tdm57/tasks/5/revoke', {}, c), params({ id: '5' })]],
   ['tdm64 budget PATCH', () => [tdm64Patch, (c) => req('PATCH', '/api/tdm64/tickets/1/settings', { budget_cents: 500 }, c), params({ path: ['tickets', '1', 'settings'] })]],
   ['tdm74 create ticket', () => [tdm74Post, (c) => req('POST', '/api/tdm74/tickets', { prompt: 'x', budget_cents: 100 }, c), params({ path: ['tickets'] })]],

@@ -47,12 +47,36 @@ Failure handling:
 
 Every trial lands in ``ctx.result["outcomes"]`` as it is recorded, so a command that ends early
 still reports exactly what was recorded.
+
+TDM-69 collection rollouts (``run_baseline`` {purpose: "collect_recovery", eval_run_id: 0, trials: 1,
+interventions: {enabled, trial_timeout_s, no_progress_s, verdict_wait_s}}, issued by the
+orchestrator's InterventionManager while a recovery_takeover plan collects): the same per-trial
+steps (home, record, policy episode) but NO eval_trial rows and no reset wait, and the TDM-69
+``FailureDetector`` runs on every policy tick (``rdf_robot_client.interventions``):
+  * detector fires (timeout; success_check when ``RDF_EVAL_SUCCESS_CHECK`` is set; no_progress needs
+    a progress signal, which this runner does not have): the rollout ends, the arm holds (the
+    recorder keeps rolling), ``intervention.failure_detected`` is appended, and the runner waits
+    ``verdict_wait_s`` for ``pause_for_takeover`` {ref, task_id} or ``resume_policy`` {end_trial, ref}.
+  * operator "Failing" (the orchestrator sends ``pause_for_takeover`` while the policy runs): the
+    control loop holds in paused_for_takeover, exactly like a detector pause.
+  * the recording is a ``recovery_takeover`` episode of the ticket from the start; on the pause it
+    gets the routed task id + its claimant (so the TDM-58 control on the claimant's socket adopts it
+    and stamps the takeover at the pause time). The runner waits for the handback (DB ``handback`` /
+    ``resume_policy``, or ``{t:"handback", success}`` on /control, for which the TDM-52 hub appends
+    ``intervention.handed_back``). Then the policy finishes the trial and the episode is uploaded
+    with task_id + the task's assignee as contributor and ``success`` = the claimant's "Did you
+    recover the task?" answer at handback (none = unknown: the reviewer rejects, nobody is paid).
+  * ``resume_policy`` end_trial (nobody claimed / declined), no verdict in time, or no intervention
+    at all: the trial ends there and the recording stays on the robot (not training data).
+Eval and baseline runs (anything that is not purpose collect_recovery) never run the detector, even
+if the payload asks for interventions, so eval numbers stay clean.
 """
 from __future__ import annotations
 
 import importlib
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -63,6 +87,7 @@ from typing import Any
 from . import handlers as _default_handlers
 from . import rollout as _rollout  # noqa: F401 - TDM-50 handlers first, so the ones below win
 from .commands import Cancelled
+from .interventions import COLLECT_PURPOSE, FAILURE_EVENT, FailureDetector, TrialIntervention
 from .jobs import JobContext, job_handler
 from .policy_client import BASE_CHECKPOINT
 from .recorder import META_FILENAME, _write_json, recorder_for
@@ -73,6 +98,10 @@ INBOX_SERVICE = "eval_outcomes"
 DEFAULT_OUTCOME_TIMEOUT_S = 30.0
 DEFAULT_TRIAL_TIMEOUT_S = 60.0
 DEFAULT_UPLOAD_WAIT_S = 120.0
+DEFAULT_MAX_PAUSE_S = 900.0  # collection: longest wait for a handback once paused (RDF_INTERVENTION_MAX_PAUSE_S)
+# collection: how long the policy finishes the trial after a handback (RDF_INTERVENTION_POST_HANDBACK_S or
+# payload interventions.post_handback_s). Short on purpose: the reviewer rejects episodes over 120 s.
+DEFAULT_POST_HANDBACK_S = 10.0
 MAX_CONSECUTIVE_POLICY_ERRORS = 2
 NOT_CONFIRMED = "outcome not confirmed"
 
@@ -242,6 +271,14 @@ def _is_sim(ctx: JobContext) -> bool:
     return bool(d.get("sim")) or "sim" in str(d.get("adapter", "")) or "sim" in str(getattr(ctx.arm, "embodiment", ""))
 
 
+def _keep_local(ep: Any, why: str) -> None:
+    """Mark a local recording as never-to-upload (the uploader's boot rescan queues every
+    ``status == "recorded"`` episode)."""
+    if ep.meta.get("status") == "recorded":
+        ep.meta.update(status="kept_local", kept_reason=why)
+        _write_json(ep.dir / META_FILENAME, ep.meta)
+
+
 def _go_home(ctx: JobContext) -> None:
     if ctx.state is not RobotState.IDLE:
         ctx.enter(RobotState.IDLE, "eval trial: to the start pose")
@@ -261,6 +298,7 @@ class TrialOutcome:
     suggested: bool | None = None
     episode_key: str | None = None
     flags: list[str] = field(default_factory=list)
+    intervention: dict[str, Any] | None = None  # collection rollouts: TrialIntervention.summary()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -277,15 +315,16 @@ class EvalTrialRunner:
     def __init__(self, ctx: JobContext) -> None:
         p = ctx.payload
         self.ctx = ctx
+        self.collect = str(p.get("purpose") or "") == COLLECT_PURPOSE  # TDM-69 collection rollout
         self.eval_run_id = int(p.get("eval_run_id") or 0)
-        if not self.eval_run_id:
+        if not self.eval_run_id and not self.collect:
             raise ValueError(f"{ctx.command.type} needs payload.eval_run_id (TDM-67 starts the eval run)")
-        self.trials = int(p.get("trials") or 0)
+        self.trials = int(p.get("trials") or (1 if self.collect else 0))
         if self.trials <= 0:
             raise ValueError("payload.trials must be > 0")
         default_kind = "baseline" if ctx.command.type == "run_baseline" else "eval"
-        self.run_kind = str(p.get("kind") or default_kind)  # TDM-67: baseline | candidate
-        self.episode_kind = "baseline" if self.run_kind == "baseline" else "eval"
+        self.run_kind = str(p.get("kind") or default_kind)  # TDM-67: baseline | candidate; TDM-69: collect_recovery
+        self.episode_kind = "baseline" if self.run_kind in ("baseline", COLLECT_PURPOSE) or self.collect else "eval"
         uri = p.get("checkpoint_uri") or (BASE_CHECKPOINT if self.episode_kind == "baseline" else None)
         if not uri:
             raise ValueError("payload.checkpoint_uri is required for a candidate eval")
@@ -304,6 +343,12 @@ class EvalTrialRunner:
         self.policy_errors_in_row = 0
         iv = p.get("interventions")
         self.interventions_requested = bool(isinstance(iv, dict) and iv.get("enabled"))
+        # the detector runs in collection rollouts only (eval / baseline numbers stay clean)
+        self.iv_cfg: dict[str, Any] | None = iv if self.collect and self.interventions_requested else None
+        self.max_pause_s = _env_float("RDF_INTERVENTION_MAX_PAUSE_S", DEFAULT_MAX_PAUSE_S)
+        post = (self.iv_cfg or {}).get("post_handback_s")
+        self.post_handback_s = float(post) if post else _env_float("RDF_INTERVENTION_POST_HANDBACK_S",
+                                                                   DEFAULT_POST_HANDBACK_S)
 
     # ---- reducers
     def _recorded_indices(self) -> set[int]:
@@ -451,26 +496,254 @@ class EvalTrialRunner:
     def _prompt_operator(self, index: int, res: RolloutResult, suggested: bool | None) -> None:
         wait = f"{self.outcome_timeout_s:.0f} s" if self.outcome_timeout_s > 0 else "no time limit"
         self.ctx.event("eval.trial_awaiting_outcome", eval_run_id=self.eval_run_id, index=index, ended=res.ended,
-                       suggested=suggested, timeout_s=self.outcome_timeout_s,
+                       suggested=suggested, timeout_s=self.outcome_timeout_s, trials=self.trials,
                        how="trial_outcome command {success, note?, eval_run_id, index} or 'pass'/'fail <note>' on the robot terminal")
         hint = "" if suggested is None else f" (success check suggests {'PASS' if suggested else 'FAIL'})"
         print(f"\n>>> TRIAL {index + 1}/{self.trials} of eval {self.eval_run_id} ended ({res.ended}){hint}.\n"
               f">>> Type 'pass' or 'fail <note>' + Enter ({wait}; no answer = recorded as FAILURE: {NOT_CONFIRMED})\n",
               file=sys.stderr, flush=True)
 
+    # ---- TDM-69 collection trial (purpose collect_recovery): failure detector + takeover
+    def _watch_interventions(self, tiv: TrialIntervention, rec: Any, stop: threading.Event) -> None:
+        """Side thread for one collection trial: feeds the job's control signals and the robot state
+        into ``tiv`` (the job thread is parked in the control loop while paused) and applies the
+        side effects at the right moment."""
+        ctx = self.ctx
+        busy_states = (RobotState.PAUSED_FOR_TAKEOVER, RobotState.TELEOP)
+        while not stop.is_set():
+            try:
+                c = ctx.signals.get(timeout=0.05)
+            except queue.Empty:
+                c = None
+            try:
+                if c is not None:
+                    what = tiv.on_signal(c.type, dict(c.payload or {}), int(c.id or 0))
+                    if what:
+                        _log("intervention signal", command=c.type, command_id=c.id, meaning=what, ref=tiv.ref)
+                    if what == "end_trial":
+                        ctx.finish_requested.set()  # paused inside the rollout: end it once back in rollout
+                    # a /control handback: the TDM-52 hub already appended intervention.handed_back
+                what = tiv.on_state(ctx.sm.state in busy_states)
+                if what == "paused":
+                    self._retag_recording(rec, tiv, self._assignee(tiv.task_id))
+                    ctx.event("intervention.robot_paused", ref=tiv.ref, task_id=tiv.task_id, purpose=COLLECT_PURPOSE,
+                              detector=tiv.failure.detector if tiv.failure else "operator", sim=self.sim)
+                    _log("paused for takeover", ref=tiv.ref, task_id=tiv.task_id)
+                elif what == "handed_back":
+                    self._mark_handback(rec, tiv)
+                    _log("handed back; the policy finishes the trial", ref=tiv.ref, via=tiv.handback_via)
+                elif what == "ended":
+                    _log("trial ended by the orchestrator while paused", ref=tiv.ref, reason=(tiv.end_trial or {}).get("reason"))
+            except Exception as e:  # noqa: BLE001 - the watcher must keep running
+                _log("intervention watcher error", error=repr(e)[:300])
+
+    @staticmethod
+    def _retag_recording(rec: Any, tiv: TrialIntervention, contributor_id: int = 0) -> None:
+        """The running recovery_takeover recording gets the routed task (TDM-58's control on the
+        claimant's socket adopts it by kind + task_id and stamps the takeover at the pause)."""
+        s = getattr(rec, "_s", None) if rec is not None and rec.recording else None
+        if s is not None:
+            s.info.update(kind="recovery_takeover", task_id=tiv.task_id,
+                          contributor_id=int(contributor_id or s.info.get("contributor_id") or 0))
+
+    @staticmethod
+    def _mark_handback(rec: Any, tiv: TrialIntervention) -> None:
+        """Fallback marks when nobody stamped them (DB handback, no /control session): takeover at the
+        pause, handback now. The TDM-52/58 socket path stamps its own and is left alone."""
+        s = getattr(rec, "_s", None) if rec is not None and rec.recording else None
+        if s is None:
+            return
+        if getattr(s, "takeover_ns", None) is None and tiv.paused_at_ns:
+            rec.mark_takeover(tiv.paused_at_ns)
+        if getattr(s, "handback_ns", None) is None:
+            rec.mark_handback(tiv.handback_at_ns)
+
+    def _assignee(self, task_id: int) -> int:
+        if not task_id:
+            return 0
+        try:
+            rows = self.ctx.sql(f"SELECT * FROM task WHERE id = {int(task_id)}")
+            return int((rows[0] if rows else {}).get("assignee_id") or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def run_collect_trial(self, index: int, prompt: str) -> TrialOutcome:
+        ctx = self.ctx
+        label = f"collection rollout #{ctx.command.id} trial {index + 1}/{self.trials}"
+        det = FailureDetector.from_payload(self.iv_cfg)
+        rid = int(getattr(ctx.client, "robot_id", None) or ctx.command.robot_id or 0)
+        tiv = TrialIntervention(rid, ctx.command.id, index)
+        rec = None
+        stop_watch = threading.Event()
+        watcher: threading.Thread | None = None
+        base_check = self.success_check
+        suggested: dict[str, bool | None] = {"v": None}
+
+        def check(step: int, st: Any) -> bool:
+            """Per-tick: the optional success suggestion, then the TDM-69 detector (fires once). After a
+            handback the policy only finishes the trial for ``post_handback_s``."""
+            if tiv.handback_at_ns is not None and (time.monotonic_ns() - tiv.handback_at_ns) / 1e9 >= self.post_handback_s:
+                ctx.finish_requested.set()
+                return False
+            if tiv.intervened or tiv.failure is not None:
+                return False
+            if base_check is not None and base_check(step, st):
+                suggested["v"] = True
+                return True
+            if det is not None:
+                f = det.tick(time.monotonic(), None)
+                if f is not None:
+                    tiv.failure = f
+                    ctx.finish_requested.set()  # stop stepping the policy; the arm holds
+            return False
+
+        try:
+            ctx.finish_requested.clear()
+            while True:  # signals from before this trial don't count
+                try:
+                    ctx.signals.get_nowait()
+                except queue.Empty:
+                    break
+            _go_home(ctx)
+            rec = recorder_for(ctx)
+            ep_key = None
+            if rec is not None:  # the task and its contributor are filled in when the rollout is paused
+                ep_key = rec.start(ctx.command.ticket_id, "recovery_takeover", 0, 0, checkpoint_uri=self.checkpoint_uri,
+                                   note=f"{label}: {prompt[:80]}")
+            watcher = threading.Thread(target=self._watch_interventions, args=(tiv, rec, stop_watch),
+                                       name="rdf-iv-watch", daemon=True)
+            watcher.start()
+            ctx.event("eval.trial_started", eval_run_id=0, index=index, trials=self.trials, purpose=COLLECT_PURPOSE,
+                      checkpoint_uri=self.checkpoint_uri, kind=self.run_kind, episode_key=ep_key, sim=self.sim,
+                      detector=det is not None)
+            if det is not None:
+                det.start(time.monotonic())
+            # the detector's timeout must win over the episode's own limit
+            ep_timeout = self.timeout_s if det is None else max(self.timeout_s, det.trial_timeout_s) + 2.0
+            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=check, timeout_s=ep_timeout,
+                              checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=True)
+            if res.ended == "policy_error" and int(res.executor.get("chunks_used") or 0) == 0:
+                raise InfraFailure(f"collection trial {index}: the policy never produced an action "
+                                   f"({res.executor.get('aborted') or res.flags})")
+            seconds = res.seconds
+            if (det is not None and base_check is not None and tiv.failure is None and not tiv.intervened
+                    and res.ended not in ("success", "policy_error")):
+                tiv.failure = det.success_check(False, "the success check never passed", time.monotonic())
+
+            # ---- detector fired: report, hold, wait for the orchestrator's verdict
+            no_verdict = False
+            if tiv.failure is not None and not tiv.intervened:
+                f = tiv.failure
+                ctx.client.event(FAILURE_EVENT, **f.payload(rid, ctx.command.ticket_id, ctx.command.id, index, 0,
+                                                            purpose=COLLECT_PURPOSE, sim=self.sim))
+                _log("failure detected; holding for a verdict", detector=f.detector, reason=f.reason, ref=tiv.own_ref)
+                ctx.arm.hold()
+                got = tiv.wait(det.verdict_wait_s if det else 0.0, ctx.check,
+                               lambda: tiv.paused or tiv.end_trial is not None)
+                no_verdict = not got
+            # ---- paused: wait for the handback (or the orchestrator ending the trial)
+            if tiv.paused and tiv.handback_at_ns is None:
+                if not tiv.wait(self.max_pause_s, ctx.check, lambda: tiv.handback_at_ns is not None):
+                    tiv.end_trial = {"reason": f"no handback within {self.max_pause_s:.0f}s (robot side)"}
+            # ---- handed back after a detector pause: the policy finishes the trial
+            if tiv.handed_back and res.ended == "finish_requested" and tiv.failure is not None:
+                ctx.finish_requested.clear()
+                left = max(1.0, self.post_handback_s - (time.monotonic_ns() - tiv.handback_at_ns) / 1e9)
+                res = run_episode(ctx, prompt, max_steps=self.max_steps,
+                                  success_check=(lambda s, st: bool(base_check(s, st))) if base_check else None,
+                                  timeout_s=left, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=False)
+                seconds += res.seconds
+                if base_check is not None:
+                    suggested["v"] = bool(res.success)
+            ep = rec.stop(success=None, note=f"{label} ended={res.ended} intervention={tiv.phase}", upload=False) \
+                if rec is not None and rec.recording else None
+            stop_watch.set()
+
+            # ---- outcome + episode
+            summary = tiv.summary()
+            duration_ms = int(round(seconds * 1000))
+            episode_id, success, confirmed, source = 0, False, False, "not_intervened"
+            if tiv.handed_back:
+                # success = the claimant's "Did you recover the task?" at handback (docs/decisions.md);
+                # no answer = unknown: the reviewer rejects it and nobody is paid
+                answer = tiv.handback_success
+                success, confirmed = bool(answer), answer is not None
+                source = "handback" if confirmed else "unconfirmed"
+                note = (f"[intervened] {summary['detector']}: {summary['reason'] or ''}; recovered by task "
+                        f"#{tiv.task_id}; claimant at handback: "
+                        + ({True: "recovered", False: "NOT recovered"}.get(answer, "no answer (success unknown)")))
+                if ep is not None and ep.meta.get("status") == "recorded":
+                    contributor = self._assignee(tiv.task_id)
+                    ep.meta.update(kind="recovery_takeover", task_id=tiv.task_id, contributor_id=contributor,
+                                   success=answer,
+                                   intervention={**summary, "command_id": ctx.command.id, "trial_index": index})
+                    _write_json(ep.dir / META_FILENAME, ep.meta)
+                    if getattr(rec, "uploader", None) is not None:
+                        rec.uploader.enqueue(ep.dir)
+                    episode_id, ep_note = self._await_upload(rec, ep)
+                else:
+                    ep_note = ("no recorder (cameras off): no recovery episode" if ep is None else
+                               f"episode {ep.key} not usable: {ep.meta.get('status')} {ep.meta.get('problems')}")
+                if ep_note:
+                    note = f"{note}; {ep_note}"
+            else:
+                if tiv.end_trial is not None:
+                    source = "end_trial"
+                    note = f"failure: {summary['detector']}: {summary['reason'] or ''} (orchestrator: {summary['end_trial']})"
+                elif no_verdict:
+                    source = "no_verdict"
+                    note = f"failure: {tiv.failure.detector}: {tiv.failure.reason} (no verdict within the wait)"
+                elif tiv.failure is not None:
+                    source = "failure"
+                    note = f"failure: {tiv.failure.detector}: {tiv.failure.reason}"
+                else:
+                    success = bool(suggested["v"]) if suggested["v"] is not None else False
+                    note = f"no intervention (rollout ended {res.ended})"
+                if ep is not None:
+                    _keep_local(ep, "collection trial without a handed-back takeover: not a recovery episode")
+                    note += "; recording kept on the robot (not a recovery episode)"
+            if self.sim and not note.startswith("[SIM]"):
+                note = f"[SIM] {note}"
+            out = TrialOutcome(index=index, success=success, note=note[:1000], duration_ms=duration_ms,
+                               episode_id=episode_id, outcome_source=source, confirmed=confirmed, ended=res.ended,
+                               suggested=suggested["v"], episode_key=ep_key, flags=list(res.flags), intervention=summary)
+            ctx.event("collect.trial_ended", index=index, purpose=COLLECT_PURPOSE, **{k: v for k, v in out.to_dict().items()
+                                                                                       if k != "index"})
+            return out
+        except Cancelled as e:
+            ctx.event("eval.trial_interrupted", eval_run_id=0, index=index, purpose=COLLECT_PURPOSE, reason=e.reason,
+                      detail=e.detail, intervention=tiv.summary(), note="collection trial interrupted; nothing restarts")
+            raise
+        finally:
+            stop_watch.set()
+            if watcher is not None:
+                watcher.join(1.0)
+            self.inbox.close()
+            ctx.finish_requested.clear()
+            if rec is not None and rec.recording:
+                try:
+                    ep = rec.stop(success=None, note=f"{label} interrupted; not a recovery episode", upload=False)
+                    _keep_local(ep, "collection trial interrupted")
+                    _log("recording kept on disk (not uploaded)", dir=str(ep.dir))
+                except Exception:  # noqa: BLE001
+                    pass
+
     # ---- the job
     def run(self) -> dict[str, Any]:
         ctx = self.ctx
         prompt = policy_prompt(ctx)
         activate = self._activate()
+        if self.collect:
+            return self._run_collect(prompt, activate)
         done = self._recorded_indices()
         todo = [i for i in range(self.trials) if i not in done]
         base = {"eval_run_id": self.eval_run_id, "kind": self.run_kind, "checkpoint_uri": self.checkpoint_uri,
                 "trials": self.trials, "prompt": prompt, "sim": self.sim, "outcome_timeout_s": self.outcome_timeout_s,
                 "already_recorded": sorted(done), "activate": activate}
-        if self.interventions_requested:  # TDM-69 failure detection is not wired into this runner yet
-            base["interventions_note"] = ("payload asked for interventions; this runner only honours operator "
-                                          "pause_for_takeover (trial recorded as [intervened] failure)")
+        if self.interventions_requested:  # TDM-69: the detector runs in collection rollouts only
+            base["interventions_note"] = ("payload asked for interventions; eval/baseline runs never run the failure "
+                                          "detector (eval numbers stay clean); an operator pause_for_takeover still "
+                                          "records the trial as an [intervened] failure")
         ctx.result.update(base, outcomes=[])
         ctx.event("eval.trials_started", **{k: v for k, v in base.items() if k != "activate"})
         _log("eval started", **{k: v for k, v in base.items() if k != "activate"})
@@ -496,6 +769,31 @@ class EvalTrialRunner:
         _log("eval trials done", eval_run_id=self.eval_run_id, recorded=len(self.outcomes), successes=succ)
         return out
 
+    def _run_collect(self, prompt: str, activate: dict[str, Any]) -> dict[str, Any]:
+        """TDM-69 collection rollout: no eval_trial rows; the orchestrator asks for the reset afterwards."""
+        ctx = self.ctx
+        base = {"purpose": COLLECT_PURPOSE, "eval_run_id": 0, "kind": self.run_kind,
+                "data_plan_id": int(ctx.payload.get("data_plan_id") or 0), "checkpoint_uri": self.checkpoint_uri,
+                "trials": self.trials, "prompt": prompt, "sim": self.sim, "activate": activate,
+                "interventions": "on" if self.iv_cfg else "off (payload has no interventions.enabled)"}
+        ctx.result.update(base, outcomes=[])
+        ctx.event("eval.trials_started", **{k: v for k, v in base.items() if k != "activate"})
+        _log("collection rollout started", **{k: v for k, v in base.items() if k != "activate"})
+        for i in range(self.trials):
+            o = self.run_collect_trial(i, prompt)
+            self.outcomes.append(o)
+            ctx.result["outcomes"] = [x.to_dict() for x in self.outcomes]
+            _log("collection trial ended", index=i, intervention=o.intervention, episode_id=o.episode_id, note=o.note)
+            if i < self.trials - 1:
+                ctx.wait_for_reset(reason=f"collection rollout {ctx.command.id}: reset the scene for trial {i + 2}")
+        recovered = [o for o in self.outcomes if (o.intervention or {}).get("phase") == "handed_back"]
+        return {**base, "outcomes": [o.to_dict() for o in self.outcomes],
+                "intervened": sum(1 for o in self.outcomes if (o.intervention or {}).get("ref")),
+                "recovery_episode_ids": [o.episode_id for o in recovered if o.episode_id],
+                "note": ("[SIM] sim arm / synthetic cameras: NOT real-robot data. " if self.sim else "")
+                        + "TDM-69 collection rollout: no eval_trial rows; only a handed-back takeover uploads an "
+                          "episode (kind recovery_takeover)"}
+
 
 # --------------------------------------------------------------------------- job handlers
 
@@ -507,9 +805,10 @@ def run_eval(ctx: JobContext) -> dict[str, Any]:
 
 @job_handler("run_baseline")
 def run_baseline(ctx: JobContext) -> dict[str, Any]:
-    """With payload.eval_run_id: the trial runner (kind baseline, base checkpoint by default).
-    Without: TDM-50's single policy episode (the robot page's demo button), which records no trials."""
-    if ctx.payload.get("eval_run_id"):
+    """With payload.eval_run_id: the trial runner (kind baseline, base checkpoint by default). With
+    purpose collect_recovery: a TDM-69 collection rollout (failure detector + takeover, no eval rows).
+    Otherwise: TDM-50's single policy episode (the robot page's demo button), which records no trials."""
+    if ctx.payload.get("eval_run_id") or ctx.payload.get("purpose") == COLLECT_PURPOSE:
         return EvalTrialRunner(ctx).run()
     return rollout_episode_job(ctx)
 

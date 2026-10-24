@@ -269,3 +269,176 @@ def test_run_eval_needs_an_eval_run_and_run_baseline_without_one_is_a_single_epi
         pc.close()
         srv.stop()
     assert out["rollout"]["ended"] == "max_seconds" and robot.http.rows == []
+
+
+# --------------------------------------------------------------------------- TDM-69 collection rollouts
+
+from rdf_robot_client.commands import Command  # noqa: E402
+from rdf_robot_client.interventions import FAILURE_EVENT, HANDBACK_EVENT, advertise  # noqa: E402
+
+S = RobotState
+
+
+def _collect_payload(**iv):
+    return {"purpose": "collect_recovery", "eval_run_id": 0, "trials": 1, "timeout_s": 1.5, "kind": "collect_recovery",
+            "checkpoint_uri": BASE_CHECKPOINT + "/params", "prompt": "pick up the cube", "outcome_timeout_s": 3.0,
+            "interventions": {"enabled": True, "trial_timeout_s": 0.8, "verdict_wait_s": 3.0, **iv}}
+
+
+def _control(ctx, type_, payload, cid, *, state_first=False):
+    """What loop._run_control does: the command lands on ctx.signals, then the state changes."""
+    dst = S.PAUSED_FOR_TAKEOVER if type_ == "pause_for_takeover" else S.ROLLOUT
+    c = Command(id=cid, seq=cid, robot_id=0, ticket_id=0, type=type_, payload=payload, status="acked",
+                issued_by="test", issued_at_us=None)
+    if state_first:
+        ctx.sm.transition(dst, f"test {type_}")
+    ctx.signals.put(c)
+    if not state_first:
+        time.sleep(0.05)
+        ctx.sm.transition(dst, f"test {type_}")
+
+
+def _wait_event(robot, type_, timeout=10.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        for t, p in list(robot.events):
+            if t == type_:
+                return p
+        time.sleep(0.02)
+    raise AssertionError(f"no {type_} event")
+
+
+def _run_with(robot, ctx, script):
+    t = threading.Thread(target=script, daemon=True)
+    t.start()
+    try:
+        return run_baseline(ctx)
+    finally:
+        t.join(5)
+
+
+def test_collect_detector_pause_handback_recovers_with_the_claimants_answer(sim_arm):
+    srv = FakePolicyServer(schedule=jitter_schedule(60, 10), velocity=V).start()
+    robot, pc = _setup(sim_arm, srv, 1)
+    ctx = robot.context(_collect_payload(), "run_baseline")
+
+    def orchestrator_and_claimant():
+        f = _wait_event(robot, FAILURE_EVENT)
+        assert f["detector"] == "timeout" and f["ref"] == "iv:0:0:0" and f["eval_run_id"] == 0
+        assert robot.sm.state is S.ROLLOUT  # holding for the verdict, still in rollout
+        _control(ctx, "pause_for_takeover", {"ref": f["ref"], "task_id": 5}, 11)
+        time.sleep(0.4)
+        _control(ctx, "handback", {"ref": f["ref"], "task_id": 5, "success": True}, 12)
+
+    try:
+        out = _run_with(robot, ctx, orchestrator_and_claimant)
+    finally:
+        pc.close()
+        srv.stop()
+    assert robot.http.rows == []  # never an eval_trial row
+    (o,) = out["outcomes"]
+    assert o["intervention"]["phase"] == "handed_back" and o["intervention"]["task_id"] == 5
+    assert o["intervention"]["detector"] == "timeout" and o["success"] is True and o["confirmed"] is True
+    assert o["outcome_source"] == "handback" and o["intervention"]["handback_success"] is True
+    assert o["note"].startswith("[SIM] [intervened] timeout") and "claimant at handback: recovered" in o["note"]
+    assert not any(t == "eval.trial_awaiting_outcome" for t, _ in robot.events)  # no operator prompt
+    assert sum(1 for t, _ in robot.events if t == "rollout.started") == 2  # the policy finished the trial
+    assert any(t == "intervention.robot_paused" for t, _ in robot.events)
+    assert not any(t == HANDBACK_EVENT for t, _ in robot.events)  # DB handback: the orchestrator saw it already
+    ended = _wait_event(robot, "collect.trial_ended")
+    assert ended["intervention"]["ref"] == "iv:0:0:0"
+
+
+def test_collect_no_verdict_or_end_trial_is_a_failure_without_an_outcome_prompt(sim_arm):
+    srv = FakePolicyServer(schedule=jitter_schedule(60, 10), velocity=V).start()
+    robot, pc = _setup(sim_arm, srv, 1)
+    try:
+        out = run_baseline(robot.context(_collect_payload(verdict_wait_s=0.4), "run_baseline"))
+        ctx = robot.context(_collect_payload(), "run_baseline")
+
+        def decline():
+            f = _wait_event(robot, FAILURE_EVENT)
+            robot.events.clear()
+            _control(ctx, "resume_policy", {"end_trial": True, "ref": f["ref"], "reason": "declined: budget"}, 21)
+
+        robot.events.clear()
+        out2 = _run_with(robot, ctx, decline)
+    finally:
+        pc.close()
+        srv.stop()
+    assert out["outcomes"][0]["outcome_source"] == "no_verdict" and out["outcomes"][0]["success"] is False
+    assert out2["outcomes"][0]["outcome_source"] == "end_trial"
+    assert "declined: budget" in out2["outcomes"][0]["note"]
+    assert not any(t == "eval.trial_awaiting_outcome" for t, _ in robot.events)
+
+
+def test_collect_operator_flag_mid_rollout_and_control_socket_handback(sim_arm):
+    srv = FakePolicyServer(schedule=jitter_schedule(60, 10), velocity=V).start()
+    robot, pc = _setup(sim_arm, srv, 1)
+    ctx = robot.context({**_collect_payload(trial_timeout_s=2.0), "timeout_s": 2.0}, "run_baseline")
+
+    def flag():
+        _wait_event(robot, "rollout.started")
+        time.sleep(0.5)
+        _control(ctx, "pause_for_takeover", {"ref": "iv:0:0:0", "task_id": 8, "detector": "operator",
+                                             "reason": "operator pressed Failing"}, 31)
+        time.sleep(0.3)
+        ctx.sm.transition(S.TELEOP, "test takeover via /control")
+        time.sleep(0.3)
+        _control(ctx, "handback", {"via": "/control", "success": False}, 0, state_first=True)  # TDM-52 synthetic
+
+    try:
+        out = _run_with(robot, ctx, flag)
+    finally:
+        pc.close()
+        srv.stop()
+    (o,) = out["outcomes"]
+    assert o["intervention"]["detector"] == "operator" and o["intervention"]["handback_via"] == "/control"
+    assert o["success"] is False and o["confirmed"] is True and o["intervention"]["handback_success"] is False
+    assert not any(t == FAILURE_EVENT for t, _ in robot.events)  # the operator flagged it, no detector event
+    assert not any(t == HANDBACK_EVENT for t, _ in robot.events)  # the TDM-52 hub appends it, not the runner
+    assert sum(1 for t, _ in robot.events if t == "rollout.started") == 1  # the same rollout continued
+
+
+def test_eval_runs_never_run_the_detector(sim_arm):
+    srv = FakePolicyServer(schedule=jitter_schedule(60, 10), velocity=V).start()
+    robot, pc = _setup(sim_arm, srv, 1)
+    op = Operator(robot, [("after", True, "")])
+    op.start()
+    try:
+        out = run_eval(robot.context(_payload(1, interventions={"enabled": True, "trial_timeout_s": 0.3}), "run_eval"))
+    finally:
+        op.stop.set()
+        pc.close()
+        srv.stop()
+    assert not any(t == FAILURE_EVENT for t, _ in robot.events)
+    assert robot.http.rows[0]["success"] is True and "interventions_note" in out
+
+
+def test_advertise_capability():
+    cfg = {"cameras": "off", "capabilities": ["x"]}
+    assert advertise(cfg, True)["capabilities"] == ["x", "interventions"]
+    assert advertise(cfg, True)["capabilities"] == ["x", "interventions"]  # idempotent
+    assert advertise(cfg, False)["capabilities"] == ["x"]
+    assert "capabilities" not in advertise({"cameras": "off"}, False)
+
+
+def test_collect_handback_without_an_answer_leaves_success_unknown(sim_arm):
+    srv = FakePolicyServer(schedule=jitter_schedule(60, 10), velocity=V).start()
+    robot, pc = _setup(sim_arm, srv, 1)
+    ctx = robot.context(_collect_payload(), "run_baseline")
+
+    def pause_and_hand_back():
+        f = _wait_event(robot, FAILURE_EVENT)
+        _control(ctx, "pause_for_takeover", {"ref": f["ref"], "task_id": 6}, 41)
+        time.sleep(0.3)
+        _control(ctx, "handback", {"ref": f["ref"]}, 42)  # e.g. the orchestrator after complete_task
+
+    try:
+        out = _run_with(robot, ctx, pause_and_hand_back)
+    finally:
+        pc.close()
+        srv.stop()
+    (o,) = out["outcomes"]
+    assert o["intervention"]["phase"] == "handed_back" and o["intervention"]["handback_success"] is None
+    assert o["confirmed"] is False and o["outcome_source"] == "unconfirmed" and "success unknown" in o["note"]

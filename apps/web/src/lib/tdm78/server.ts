@@ -124,3 +124,43 @@ export async function tdm78ViaOrchestrator(
 }
 
 export const TDM78_ROBOT_ID = /^\d{1,15}$/;
+
+/** What the robot page may send through /api/tdm78/robots/{id}/commands (the orchestrator has the same
+ *  list as TDM78_OPERATOR_TYPES in robot_commands_api.py; soft_estop has its own route). trial_outcome
+ *  (TDM-51) is the eval trial's Pass / Fail verdict {success, note?, eval_run_id, index}. */
+export const TDM78_OPERATOR_TYPES = new Set([
+  'home',
+  'stop',
+  'run_baseline',
+  'load_checkpoint',
+  'start_teleop',
+  'stop_teleop',
+  'trial_outcome',
+]);
+
+/** TDM-69 "Failing": orchestrator POST /robots/{id}/interventions/flag (operator key added here). */
+export async function tdm78FlagFailing(
+  robotId: number,
+  note: string,
+): Promise<{ ok: boolean; status: number; elapsedMs: number; body: Record<string, unknown> }> {
+  const key = tdm78Env('RDF_OPERATOR_KEY');
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`${tdm78Orchestrator()}/robots/${robotId}/interventions/flag`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(key ? { 'x-rdf-operator-key': key } : {}) },
+      body: JSON.stringify({ note, by: 'web-robot-page' }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ok: res.ok, status: res.status, elapsedMs: Math.round(performance.now() - t0), body };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 502,
+      elapsedMs: Math.round(performance.now() - t0),
+      body: { detail: `Orchestrator not reachable at ${tdm78Orchestrator()} (${(e as Error).message})` },
+    };
+  }
+}

@@ -446,9 +446,12 @@ def test_takeover_handback_episode_passes_review_checks(bench, via):
         rec.start(1, "recovery_takeover", task_id=TASK, contributor_id=CONTRIB)
         try:
             out["stats"] = ctx.run_control_loop(policy, max_seconds=6.0, active_state=S.ROLLOUT)
-            out["signals"] = []
+            out["signals"], out["handback_payloads"] = [], []
             while not ctx.signals.empty():
-                out["signals"].append(ctx.signals.get().type)
+                c = ctx.signals.get()
+                out["signals"].append(c.type)
+                if c.type == "handback":
+                    out["handback_payloads"].append(c.payload)
         finally:
             out["ep"] = rec.stop(success=True, note="tdm52 test")
             robot.sm.transition(S.IDLE, "test done")
@@ -470,7 +473,7 @@ def test_takeover_handback_episode_passes_review_checks(bench, via):
             await b.drive(2.0, lambda t: [0.0, 0.025 * min(t, 1.0), 0.01 * min(t, 1.0)], gripper=0.8, speed_scale=0.6)
             await b.cmd(clutch=False)
             await asyncio.sleep(0.1)
-            await b.send(t="handback")
+            await b.send(t="handback", success=True)  # TDM-69: "Did you recover the task?" -> Yes
             hb = await b.wait_msg(lambda m: m.get("op") == "handback")
             await asyncio.sleep(0.3)
             return hb, b.states[-1]
@@ -490,6 +493,7 @@ def test_takeover_handback_episode_passes_review_checks(bench, via):
     assert m["control_source_counts"].get("human", 0) > 30
     assert m["control_source_counts"].get("policy", 0) > 100
     assert "handback" in out["signals"]
+    assert out["handback_payloads"][-1]["success"] is True  # the answer reaches the rollout runner
     from pathlib import Path
 
     from rdf_common.review_checks import ReviewThresholds

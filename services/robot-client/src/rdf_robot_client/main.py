@@ -126,6 +126,12 @@ def run(argv: list[str] | None = None) -> None:
         clear_estop_on_boot=a.clear_estop_on_boot or sim, max_command_age_s=a.max_command_age_s,
         estop_auto_clear_s=a.estop_auto_clear_s,
     )
+    # TDM-69: advertise DAgger interventions (camera_config_json.capabilities) only when run_baseline is the
+    # TDM-51 trial runner, which runs the failure detector in collection rollouts. RDF_INTERVENTIONS=0 opts out.
+    from . import interventions as _iv
+
+    _iv.advertise(client.camera_config, client.handlers.get("run_baseline") is _eval_trials.run_baseline
+                  and _iv.robot_enabled())
     if hasattr(arm, "set_event_sink"):  # TDM-45: rate-limited robot.limit_hit event_log rows
         arm.set_event_sink(client.event)
     # TDM-52: TDM-55 video stream + teleop /ws/control (same server, tunnel and token). stream.info() is merged

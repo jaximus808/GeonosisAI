@@ -163,3 +163,38 @@ def test_get_aggregate():
     assert d["run_settings"]["hyperparams"]["prompt"] == "put the cup in the bin"
     assert d["data_plans"] == [] and d["agent_sessions"] == [] and d["dataset"]["ticket_id"] == tid
     assert c.get("/tickets/424242").status_code == 404
+
+
+# ---------------------------------------------------------------- TDM-74: preview, then create from it
+
+def test_parse_previews_without_creating():
+    parser = FakeParser(budget_usd=None, target_success=None)
+    c, stdb = make(parser)
+    r = c.post("/tickets/parse", json={"prompt": "Put the cup in the bin",
+                                       "settings_overrides": {"max_iterations": 2}})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["missing"] == ["budget"] and b["budget_cents"] is None
+    assert b["target_success"] == 0.8 and b["defaults_applied"] == ["target_success=0.8"]
+    assert b["settings_overrides"] == {"max_iterations": 2, "hyperparams": {"prompt": "put the cup in the bin"}}
+    assert b["robot"]["id"] == 1 and b["robot_selection"] == "only_online_robot" and b["robot_error"] is None
+    assert stdb.calls == [] and stdb.tables["ticket"] == []
+
+
+def test_parse_reports_robot_problem_in_body():
+    c, _ = make(robots=((1, "a", "online"), (2, "b", "online")))
+    b = c.post("/tickets/parse", json={"prompt": "x"}).json()
+    assert b["robot"] is None and b["robot_error"]["code"] == "multiple_online_robots"
+    assert {r["id"] for r in b["robot_error"]["robots"]} == {1, 2}
+
+
+def test_create_with_parsed_skips_claude_and_matches_preview():
+    parser = FakeParser()
+    c, stdb = make(parser)
+    preview = c.post("/tickets/parse", json={"prompt": "Put the cup in the bin, 80% reliable, $50 budget"}).json()
+    r = c.post("/tickets", json={"prompt": "Put the cup in the bin, 80% reliable, $50 budget",
+                                 "parsed": preview["parsed"], "budget_cents": 4000})
+    assert r.status_code == 201, r.text
+    assert len(parser.prompts) == 1  # only the preview called the parser
+    assert r.json()["ticket"]["budget_cents"] == 4000
+    assert r.json()["ticket"]["task_description"] == preview["task_description"]

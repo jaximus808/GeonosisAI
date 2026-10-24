@@ -1,6 +1,7 @@
 """Ticket entry point (TDM-19): a natural-language prompt becomes a ticket plus its run settings.
 
     POST /tickets        {prompt, robot_id?, settings_overrides?, budget_cents?, target_success?}
+    POST /tickets/parse  same body; Claude's reading + what create would do, WITHOUT creating (TDM-74)
     GET  /tickets/{id}   ticket + run_settings + dataset + eval runs + data plans + spend + agents
 
 Used by the website's prompt page and the Claude connector (``apps/mcp``). Mounted from ``app.py``.
@@ -19,6 +20,11 @@ POST flow:
      Reducers return nothing, so the new id is read back from the ``ticket`` table (rows on that
      robot that were not there before the call, matched on task_description). A process-wide
      lock around read-call-read keeps two concurrent creates from picking each other's id.
+
+Preview (TDM-74, the website's confirm step): ``POST /tickets/parse`` runs step 1-3 and returns the
+result with ``missing`` (e.g. ``["budget"]``) and ``robot_error`` instead of 422s. Sending its
+``parsed`` back on ``POST /tickets`` skips the second Claude call, so the ticket is exactly the
+preview the person confirmed.
 """
 from __future__ import annotations
 
@@ -51,6 +57,9 @@ class CreateTicketRequest(BaseModel):
                           "require_ci_low, target_episodes, max_iterations, hyperparams{lr,steps,batch_size,lora_rank,prompt}")
     budget_cents: int | None = Field(None, ge=0, description="Overrides any budget in the prompt.")
     target_success: float | None = Field(None, gt=0, le=1, description="Overrides any target in the prompt.")
+    parsed: "ParsedTicket | None" = Field(
+        None, description="TDM-74: the `parsed` object from POST /tickets/parse. When given, Claude is not called "
+                          "again, so the ticket matches the preview that was confirmed.")
 
 
 class ParsedTicket(BaseModel):
@@ -61,6 +70,9 @@ class ParsedTicket(BaseModel):
     budget_usd: float | None = Field(description="Spending cap in US dollars, e.g. '$50' -> 50. Null if not stated.")
     policy_prompt: str = Field(description="Short lowercase imperative instruction for the robot policy, e.g. 'put the cup in the bin'.")
     eval_trials: int | None = Field(description="Number of evaluation trials if the prompt explicitly asks for one. Null otherwise.")
+
+
+CreateTicketRequest.model_rebuild()
 
 
 PARSER_SYSTEM = """You turn a customer's request for a robot job into a structured ticket for a robot \
@@ -176,8 +188,9 @@ class TicketsService:
         raise TicketError(422, "multiple_online_robots", "Several robots are online. Pass robot_id to pick one.",
                           robots=[_public_robot(r) for r in live])
 
-    async def create(self, req: CreateTicketRequest) -> dict:
-        parsed = await self.parser.parse(req.prompt)
+    def _resolve(self, req: CreateTicketRequest, parsed: ParsedTicket) -> dict:
+        """Steps 1-2 without any I/O: explicit fields over the prompt, defaults, overrides.
+        ``budget_cents`` is None when neither the prompt nor the request gave one."""
         defaults_applied: list[str] = []
 
         task_description = parsed.task_description.strip()
@@ -193,16 +206,12 @@ class TicketsService:
             raise TicketError(422, "bad_target_success", f"target_success must be in (0, 1], got {target}.",
                               parsed=parsed.model_dump())
 
+        budget_cents: int | None = None
         if req.budget_cents is not None:
             budget_cents = req.budget_cents
         elif parsed.budget_usd is not None:
             budget_cents = round(parsed.budget_usd * 100)
-        else:
-            raise TicketError(422, "budget_required",
-                              "How much may the factory spend on data and training? Add a budget to the prompt "
-                              "(e.g. '$50 budget') or pass budget_cents.",
-                              parsed=parsed.model_dump())
-        if budget_cents < 0:
+        if budget_cents is not None and budget_cents < 0:
             raise TicketError(422, "bad_budget", "budget must not be negative.", parsed=parsed.model_dump())
 
         overrides: dict[str, Any] = dict(req.settings_overrides or {})
@@ -214,6 +223,41 @@ class TicketsService:
             overrides["hyperparams"] = hyper
         if parsed.eval_trials is not None and "eval_trials" not in overrides:
             overrides["eval_trials"] = parsed.eval_trials
+        return {"task_description": task_description, "target_success": float(target), "budget_cents": budget_cents,
+                "settings_overrides": overrides, "defaults_applied": defaults_applied}
+
+    async def _parsed(self, req: CreateTicketRequest) -> ParsedTicket:
+        return req.parsed if req.parsed is not None else await self.parser.parse(req.prompt)
+
+    async def preview(self, req: CreateTicketRequest) -> dict:
+        """TDM-74: what ``create`` would do, without creating. Missing budget and robot problems are
+        reported in the body (``missing``, ``robot_error``) rather than as 422s."""
+        parsed = await self._parsed(req)
+        r = self._resolve(req, parsed)
+        robot, selection, robot_error = None, None, None
+        try:
+            robot, selection = await self.pick_robot(req.robot_id)
+        except TicketError as e:
+            robot_error = {"code": e.code, "message": e.message, **e.extra}
+        return {
+            "parsed": parsed.model_dump(),
+            **r,
+            "missing": [] if r["budget_cents"] is not None else ["budget"],
+            "robot": _public_robot(robot) if robot else None,
+            "robot_selection": selection,
+            "robot_error": robot_error,
+        }
+
+    async def create(self, req: CreateTicketRequest) -> dict:
+        parsed = await self._parsed(req)
+        r = self._resolve(req, parsed)
+        task_description, target, budget_cents = r["task_description"], r["target_success"], r["budget_cents"]
+        overrides, defaults_applied = r["settings_overrides"], r["defaults_applied"]
+        if budget_cents is None:
+            raise TicketError(422, "budget_required",
+                              "How much may the factory spend on data and training? Add a budget to the prompt "
+                              "(e.g. '$50 budget') or pass budget_cents.",
+                              parsed=parsed.model_dump())
 
         robot, selection = await self.pick_robot(req.robot_id)
         rid = int(robot["id"])
@@ -310,6 +354,15 @@ async def create_ticket(body: CreateTicketRequest, svc: TicketsService = Depends
     """Prompt -> ticket + run settings. 422 ``budget_required`` when no budget is given."""
     try:
         return await svc.create(body)
+    except TicketError as e:
+        raise e.http() from None
+
+
+@router.post("/parse")
+async def parse_ticket(body: CreateTicketRequest, svc: TicketsService = Depends(get_tickets_service)) -> dict:
+    """TDM-74 preview: Claude's reading of the prompt and what POST /tickets would create. Creates nothing."""
+    try:
+        return await svc.preview(body)
     except TicketError as e:
         raise e.http() from None
 

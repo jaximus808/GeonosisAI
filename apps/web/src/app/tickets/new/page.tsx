@@ -1,10 +1,8 @@
-import { Placeholder } from '@/components/Section';
+// TDM-74: ticket creation, the main entry point (CONTEXT.md user flow step 2).
+import { NewTicketForm } from '@/components/tdm74/NewTicketForm';
+
+export const metadata = { title: 'New ticket · Robot Deployment Factory' };
 
 export default function NewTicketPage() {
-  return (
-    <>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">New ticket</h1>
-      <Placeholder owner="E11 ticket-creation ticket">Ticket-creation prompt goes here.</Placeholder>
-    </>
-  );
+  return <NewTicketForm />;
 }

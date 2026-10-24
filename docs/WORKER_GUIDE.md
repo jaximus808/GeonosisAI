@@ -53,7 +53,7 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - Put your reducers in **your own file** (`src/reducers/<area>.ts`) and add **one** re-export line to `src/index.ts`. Re-read `index.ts` right before you edit it, and check afterwards that the other tickets' lines are still there.
 - Change `schema.ts` only if your brief needs a new column or index. Keep it to one targeted edit, and say so in your result.
 - **Test locally first:** start a throwaway server on your own port (`spacetime start --listen-addr 127.0.0.1:<30xx>` with its own data dir under `spikes/` or `$TMPDIR`) and publish there.
-- **Publishing to maincloud is serialized.** Take the lock with `mkdir spacetime/.publish-lock` (retry every 10 s if it exists). Then run `npx tsc --noEmit` for the whole module; if another ticket's half-written file breaks the build, wait and retry rather than editing it. Publish with `--delete-data=never --yes=remote,migrate`, then `rmdir spacetime/.publish-lock`. Never leave the lock behind.
+- **Publishing to maincloud is serialized.** Take the lock with `mkdir spacetime/.publish-lock` (retry every 10 s if it exists). Then run `npx tsc --noEmit` for the whole module; if another ticket's half-written file breaks the build, wait and retry rather than editing it. Publish with `--delete-data=never --yes=remote,migrate`, then `rmdir spacetime/.publish-lock`. Adding a column needs `--yes=remote,migrate,break-clients`. That drops connected clients once, so do it only when your brief needs the column. After any schema change, rerun bindings generation (TDM-16's command / `apps/web` `gen:bindings`). Never leave the lock behind.
 - Every state-changing reducer appends an `event_log` row (actor, type, payload_json). Important reducers check `ctx.sender` with the auth helpers.
 - The **one-time event_log wipe is held** until right before the Saturday-night real run (TDM-72). Until then, test rows on maincloud are fine. Tag them `test.*`.
 
@@ -66,3 +66,8 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 
 ## Temp files
 - Keep scratch files in `spikes/<ticket>/tmp/` (gitignored by `tmp/`) or in a ticket-named dir under `$TMPDIR`. Never use a shared scratchpad, and never use generic names like `probe.py`.
+
+## Reducers live on maincloud (check `spacetime/schema.md` for args and auth)
+- TDM-9 tickets: `register_robot`, `robot_heartbeat`, `create_ticket` (the new id is in the `ticket.created` event), `update_run_settings`, `set_ticket_status`. Status names come from `enums.ts`: created→onboard→baseline→diagnose→plan_data→dispatch→review→train→eval→shipped/failed/cancelled.
+- TDM-12 training/eval: `queue_training_run`, `set_training_status`, `start_eval_run`, `record_eval_trial`, `finalize_eval_run` (matches `stats.EvalRunFinalizer`), `record_failure_cluster`, `record_data_plan` (insert-only).
+- TDM-13 agents/robot: `upsert_agent_session`, `agent_wait_for(session_id, predicate_json, resume_payload_json)`, `agent_resume` (only one caller can win it), `agent_step`, `issue_robot_command(robot_id, type, payload_json, ticket_id)` plus ack/complete/fail. `soft_estop` is always accepted.

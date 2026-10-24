@@ -87,3 +87,9 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Our datasets must be LeRobot format v2.1** (openpi pins that LeRobot version).
 - 2,000 steps takes ~49 min end to end and costs ~$3–4, whether we have 5 or 10 episodes. Fixed overhead is ~4.5 min per run. Checkpoints are 9.5 GB.
 - The working spike is `spikes/tdm-36-finetune/` (Volume `rdf-s05a-checkpoints`). Production code goes in `services/training/`.
+
+## Running the orchestrator (IMPORTANT)
+- **Don't leave a full orchestrator process running against maincloud.** Its handlers (diagnose, planner, dispatcher, payouts) act on maincloud rows, so two copies would duplicate Claude calls, tasks and payments. Run full-app tests against a local throwaway SpacetimeDB. Against maincloud, run only your own router or handler in isolation, and stop it when you're done.
+- The one real maincloud orchestrator gets started by the planner/orchestrator session for the real run.
+- Port 8000 on this laptop is taken by an unrelated project. Use another port.
+- Maincloud already holds test robot `test.tdm19-yam` (id 1) and ticket 1. Names starting `test.` are ignored by robot auto-selection.

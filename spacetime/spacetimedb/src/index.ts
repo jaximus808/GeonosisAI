@@ -6,7 +6,8 @@
 import { t, SenderError } from 'spacetimedb/server';
 import { Identity } from 'spacetimedb';
 import spacetimedb from './schema';
-import { requireOwner } from './auth';
+import { requireOwner, requireService } from './auth';
+import { logEvent, checkEventActor, checkEventType, eventActorKind } from './event_log'; // TDM-15
 import { SERVICE_ROLES, oneOf } from './enums';
 
 export default spacetimedb;
@@ -20,13 +21,7 @@ export const init = spacetimedb.init((ctx) => {
     label: 'database owner (CLI / SPACETIME_TOKEN)',
     added_at: ctx.timestamp,
   });
-  ctx.db.eventLog.insert({
-    id: 0n,
-    ts: ctx.timestamp,
-    actor: 'spacetime',
-    type: 'infra.module_init',
-    payload_json: JSON.stringify({ schema: 'TDM-8', owner: ctx.sender.toHexString() }),
-  });
+  logEvent(ctx, 'spacetime', 'infra.module_init', { schema: 'TDM-8', owner: ctx.sender.toHexString() });
 });
 
 // The maincloud DB predates this module version, so `init` never ran there.
@@ -45,22 +40,32 @@ export const bootstrap_owner = spacetimedb.reducer((ctx) => {
     label: 'database owner (CLI / SPACETIME_TOKEN)',
     added_at: ctx.timestamp,
   });
-  ctx.db.eventLog.insert({
-    id: 0n,
-    ts: ctx.timestamp,
-    actor: 'owner',
-    type: 'infra.owner_bootstrapped',
-    payload_json: JSON.stringify({ schema: 'TDM-8', owner: OWNER_IDENTITY_HEX }),
-  });
+  logEvent(ctx, 'owner', 'infra.owner_bootstrapped', { schema: 'TDM-8', owner: OWNER_IDENTITY_HEX });
 });
 
-// Append-only. ts is the server timestamp of the reducer call.
-// Left open to any caller for now (smoke tests and S-02 use it anonymously);
-// tighten with requireService once every service has an identity.
+// Append-only (TDM-15). ts is the server timestamp of the reducer call.
+// Service identities only (anonymous callers are refused). actor follows the
+// convention in event_log.ts; a non-owner may not log as another service role
+// or as 'spacetime' (the module itself). payload_json must be valid JSON
+// ('' is stored as '{}') and is stored verbatim.
 export const append_event = spacetimedb.reducer(
   { actor: t.string(), type: t.string(), payload_json: t.string() },
   (ctx, { actor, type, payload_json }) => {
-    ctx.db.eventLog.insert({ id: 0n, ts: ctx.timestamp, actor, type, payload_json });
+    const role = requireService(ctx);
+    checkEventActor(actor);
+    checkEventType(type);
+    const kind = eventActorKind(actor);
+    if (role !== 'owner' && kind !== role && ((SERVICE_ROLES as readonly string[]).includes(kind) || kind === 'spacetime')) {
+      throw new SenderError(`a ${role} identity may not log as actor ${JSON.stringify(actor)}`);
+    }
+    const body = payload_json.trim() === '' ? '{}' : payload_json;
+    if (body.length > 64_000) throw new SenderError('payload_json is over 64 KB');
+    try {
+      JSON.parse(body);
+    } catch {
+      throw new SenderError('payload_json must be valid JSON');
+    }
+    logEvent(ctx, actor, type, body);
   }
 );
 
@@ -77,13 +82,7 @@ export const register_service_identity = spacetimedb.reducer(
     } else {
       ctx.db.serviceIdentity.insert(row);
     }
-    ctx.db.eventLog.insert({
-      id: 0n,
-      ts: ctx.timestamp,
-      actor: 'owner',
-      type: 'infra.service_identity_registered',
-      payload_json: JSON.stringify({ identity: identity.toHexString(), role, label }),
-    });
+    logEvent(ctx, 'owner', 'infra.service_identity_registered', { identity: identity.toHexString(), role, label });
   }
 );
 
@@ -96,13 +95,7 @@ export const revoke_service_identity = spacetimedb.reducer(
     if (!row) throw new SenderError('unknown service identity');
     if (row.role === 'owner') throw new SenderError('cannot revoke owner');
     ctx.db.serviceIdentity.identity.delete(identity);
-    ctx.db.eventLog.insert({
-      id: 0n,
-      ts: ctx.timestamp,
-      actor: 'owner',
-      type: 'infra.service_identity_revoked',
-      payload_json: JSON.stringify({ identity: identity.toHexString(), role: row.role }),
-    });
+    logEvent(ctx, 'owner', 'infra.service_identity_revoked', { identity: identity.toHexString(), role: row.role });
   }
 );
 export * from './reducers/tickets'; // TDM-9

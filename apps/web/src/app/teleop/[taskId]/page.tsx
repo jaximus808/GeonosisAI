@@ -9,6 +9,7 @@
 
 import { ContributorPresence } from '@/components/ContributorPresence';
 import { Tdm56TeleopConsole } from '@/components/teleop/Tdm56TeleopConsole';
+import { Tdm59TeleopOnboarding } from '@/components/teleop/Tdm59TeleopOnboarding';
 
 export default async function TeleopPage({
   params,
@@ -27,6 +28,8 @@ export default async function TeleopPage({
     <>
       <ContributorPresence page="teleop" />
       <h1 className="mb-3 text-xl font-semibold tracking-tight">Drive the arm for task {taskId}</h1>
+      {/* TDM-59: first-time operator help, connection indicator, session state. Keep it before the console. */}
+      <Tdm59TeleopOnboarding taskId={taskId} />
       <Tdm56TeleopConsole taskId={taskId} dev={dev} />
     </>
   );

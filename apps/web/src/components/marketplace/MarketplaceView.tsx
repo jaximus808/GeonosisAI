@@ -37,6 +37,7 @@ import {
   type MarketTask,
   type TaskType,
 } from '@/lib/marketplace/tdm61';
+import { Tdm59ClaimGate } from '@/components/teleop/Tdm59ClaimGate'; // TDM-59 practice unlocks arm-control claims
 
 type Ticket = RowOf<'ticket'>;
 type Robot = RowOf<'robot'>;
@@ -315,14 +316,14 @@ export function MarketplaceView() {
                       busy={busy === t.id}
                       action={
                         canClaim ? (
-                          <button
+                          <Tdm59ClaimGate taskType={t.type} taskId={t.id}><button
                             type="button"
                             disabled={busy !== undefined}
                             onClick={() => void onClaim(t)}
                             className="w-full rounded-md bg-zinc-900 px-4 py-3 text-base font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-900 active:translate-y-px disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                           >
                             {busy === t.id ? 'Claiming…' : `Claim for ${fmtPrice(t.priceCents)}`}
-                          </button>
+                          </button></Tdm59ClaimGate>
                         ) : contributor ? null : (
                           <Link
                             href="/join"

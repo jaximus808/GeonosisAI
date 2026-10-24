@@ -94,7 +94,7 @@ DEFAULT_KEYS = {
 @dataclass
 class CameraConfig:
     name: str                               # "top" | "wrist" (matches the LeRobot image keys)
-    source: str = "v4l2"                    # v4l2 | gstreamer | webcam | file | synthetic
+    source: str = "v4l2"                    # v4l2 | gstreamer | webcam | file | synthetic | mujoco ([SIM] render)
     device: str | int | None = None         # v4l2: /dev/v4l/by-id/... (globs ok) or index; webcam: index; file: path
     pipeline: str | None = None             # gstreamer: full pipeline ending in appsink
     width: int = 640
@@ -120,7 +120,7 @@ class CameraConfig:
             raise ValueError(f"camera {self.name}: rotate must be 0/90/180/270, got {self.rotate}")
         if self.flip not in ("none", "horizontal", "vertical"):
             raise ValueError(f"camera {self.name}: flip must be none/horizontal/vertical, got {self.flip}")
-        if self.source not in ("v4l2", "gstreamer", "webcam", "file", "synthetic"):
+        if self.source not in ("v4l2", "gstreamer", "webcam", "file", "synthetic", "mujoco"):
             raise ValueError(f"camera {self.name}: unknown source {self.source!r}")
 
     @property
@@ -456,6 +456,10 @@ class SyntheticSource:
 
 
 def make_source(cfg: CameraConfig) -> FrameSource:
+    if cfg.source == "mujoco":  # [SIM] offscreen render of the MuJoCo arm (adapters/mujoco_sim.py)
+        from .adapters.mujoco_sim import MujocoCameraSource
+
+        return MujocoCameraSource(cfg)
     return SyntheticSource(cfg) if cfg.source == "synthetic" else OpenCVSource(cfg)
 
 
@@ -507,8 +511,8 @@ class _CameraWorker:
 
     def _choose_ts(self, host_ns: int, driver_ns: int | None) -> tuple[int, str]:
         mode = self.cfg.timestamps
-        if self.cfg.source == "synthetic" and driver_ns is not None:
-            return driver_ns, "synthetic"
+        if self.cfg.source in ("synthetic", "mujoco") and driver_ns is not None:
+            return driver_ns, self.cfg.source
         if driver_ns is not None and mode in ("auto", "driver"):
             lag = host_ns - driver_ns
             if -1_000_000 <= lag <= 500_000_000:  # driver stamp is CLOCK_MONOTONIC and recent

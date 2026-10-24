@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "name": "cube_plate",
+  "task": "Pick up the cube and place it in the empty plate.",
+  "notes": "[SIM] MuJoCo scene for the YAM demo. Frames: world == robot base frame (x forward, z up, metres); the table top is z = 0. Box size = full extents; cylinder/plate radius + full height; colors RGBA 0..1; yaw in rad. Randomized objects are re-placed on every reset_scene() inside their region.",
+  "physics": {"timestep": 0.002},
+  "table": {"center": [0.30, 0.0], "size": [0.96, 0.96], "top_z": 0.0, "color": [0.62, 0.50, 0.37, 1.0]},
+  "objects": [
+    {"id": "cube", "primitive": "box", "size": [0.04, 0.04, 0.04], "color": [0.86, 0.12, 0.10, 1.0], "mass": 0.05,
+     "friction": [1.6, 0.02, 0.002], "dynamic": true, "graspable": true,
+     "pose": {"pos": [0.31, -0.14, 0.02], "yaw": 0.0},
+     "randomize": {"region": "cube_spawn", "yaw": [-0.7, 0.7]}},
+    {"id": "plate", "primitive": "plate", "radius": 0.075, "height": 0.012, "color": [0.94, 0.94, 0.92, 1.0],
+     "rim_color": [0.20, 0.42, 0.80, 1.0], "dynamic": false, "pose": {"pos": [0.31, 0.19, 0.0]}},
+    {"id": "full_plate", "primitive": "plate", "radius": 0.075, "height": 0.012, "color": [0.94, 0.94, 0.92, 1.0],
+     "rim_color": [0.75, 0.75, 0.78, 1.0], "dynamic": false, "pose": {"pos": [0.47, -0.05, 0.0]}},
+    {"id": "filler", "primitive": "cylinder", "radius": 0.028, "height": 0.05, "color": [0.95, 0.78, 0.15, 1.0],
+     "mass": 0.08, "dynamic": true, "pose": {"pos": [0.47, -0.05, 0.0371]}}
+  ],
+  "regions": {"cube_spawn": {"x": [0.25, 0.37], "y": [-0.21, -0.07]}},
+  "cameras": {
+    "top": {"pos": [0.86, -0.50, 0.58], "target": [0.27, 0.03, 0.06], "fovy": 52, "width": 640, "height": 480},
+    "wrist": {"mount": "wrist_d405", "fovy": 72, "width": 640, "height": 480}
+  },
+  "success": {"type": "object_in", "object": "cube", "target": "plate", "margin": 0.012, "released": true}
+}

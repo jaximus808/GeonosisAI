@@ -81,3 +81,36 @@ profiles:
     watchdog_ms: 200
     log_every_s: 1.0
     event_every_s: 5.0
+
+  mujoco:
+    # [SIM] MujocoSimArm: the real YAM geometry and URDF joint ranges in a MuJoCo physics scene.
+    # Same workspace box as the yam profile (it is the same arm); the table top is z = 0 and the
+    # 4 cm cube is grasped with the tool point ~2 cm above it, so the clearance is 1 cm. Not hardware.
+    verified: true
+    speed_scale: 1.0
+    max_speed_scale: 1.0
+    slow_mode_scale: 0.3
+    joints:
+      margin_rad: 0.05
+      lower: null
+      upper: null
+      max_velocity: [1.6, 1.6, 1.6, 2.4, 2.4, 2.4]
+      max_acceleration: [8.0, 8.0, 8.0, 12.0, 12.0, 12.0]
+      max_jump_rad: 0.40
+    reject:
+      action: hold
+      max_consecutive: 30
+    workspace:
+      enabled: true
+      x: [0.10, 0.55]
+      y: [-0.40, 0.40]
+      z: [0.00, 0.45]
+      table_floor_z: 0.0
+      table_clearance_m: 0.01
+    gripper:
+      min: 0.0
+      max: 1.0
+      max_effort: null
+    watchdog_ms: 200
+    log_every_s: 1.0
+    event_every_s: 5.0

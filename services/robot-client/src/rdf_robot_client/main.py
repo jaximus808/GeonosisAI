@@ -3,6 +3,8 @@
     rdf-robot-client                      # Jetson: YAM adapter (TDM-46), env from .env (RobotClientSettings)
     rdf-robot-client --sim                # laptop: real command loop + SimArm, no hardware
     rdf-robot-client --sim --host http://127.0.0.1:3049 --db tdm49loop --token-file robot_client.token
+    rdf-robot-client --adapter mujoco     # [SIM] MuJoCo YAM: physics + rendered cameras + the real
+                                          # rollout / trial runner (needs `uv sync --extra sim`)
     rdf-robot-client --fake ...           # TDM-28 fake robot (synthetic episodes), see fake.py
 
 Clearing a soft e-stop (robot ``locked`` / status ``estop``) is LOCAL ONLY, by a human at the
@@ -30,6 +32,10 @@ from .handlers import sim_demo_rollout
 from .loop import RobotClient, _log
 
 
+SIM_ADAPTERS = ("sim", "mujoco")  # no hardware: laptop SpacetimeDB config, e-stop auto-clear allowed
+MUJOCO_CAMERAS_CONFIG = Path(__file__).resolve().parents[2] / "config" / "cameras.mujoco.yaml"
+
+
 def build_arm(adapter: str, *, safety: bool = True, **kwargs: Any) -> ArmAdapter:
     """The adapter, wrapped in the TDM-45 safety layer when it exists.
 
@@ -52,7 +58,7 @@ def build_arm(adapter: str, *, safety: bool = True, **kwargs: Any) -> ArmAdapter
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="rdf-robot-client", description="Robot client: SpacetimeDB command loop + arm")
     p.add_argument("--sim", action="store_true", help="use the simulated arm (same as --adapter sim)")
-    p.add_argument("--adapter", default=None, help="arm adapter: yam (default on the Jetson) | sim")
+    p.add_argument("--adapter", default=None, help="arm adapter: yam (default on the Jetson) | sim | mujoco ([SIM] physics)")
     p.add_argument("--name", default=None, help="robot.name (default: $ROBOT_ID, or test.sim-yam-1 with --sim)")
     p.add_argument("--host", default=None, help="SpacetimeDB host (default $SPACETIME_HOST)")
     p.add_argument("--db", default=None, help="SpacetimeDB database (default $SPACETIME_DB_NAME)")
@@ -63,25 +69,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--clear-estop-on-boot", action="store_true",
                    help="start unlocked even if robot.status is estop (default on with --sim)")
     p.add_argument("--estop-auto-clear-s", type=float, default=0.0, help="--sim only: auto-clear a soft e-stop")
-    p.add_argument("--cameras", choices=["off", "synthetic", "config"], default=None,
-                   help="TDM-47 CameraRig: off (default with --sim) | synthetic | config (default on the Jetson)")
+    p.add_argument("--cameras", choices=["off", "synthetic", "config", "mujoco"], default=None,
+                   help="TDM-47 CameraRig: off (default with --sim) | synthetic | config (default on the Jetson) | "
+                        "mujoco ([SIM] rendered top + wrist, default with --adapter mujoco)")
     p.add_argument("--sim-policy", action="store_true",
                    help="with --sim: run_baseline/run_eval use the real TDM-50 rollout + TDM-51 trial runner "
                         "($POLICY_BACKEND) instead of the demo")
     p.add_argument("--unsafe-no-safety-layer", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     a.adapter = "sim" if a.sim else (a.adapter or "yam")
-    if a.adapter != "sim" and a.estop_auto_clear_s:
+    if a.adapter not in SIM_ADAPTERS and a.estop_auto_clear_s:
         p.error("--estop-auto-clear-s is only allowed with the sim arm")
+    if a.cameras == "mujoco" and a.adapter != "mujoco":
+        p.error("--cameras mujoco renders the MuJoCo sim: it needs --adapter mujoco")
     if a.cameras is None:
-        a.cameras = "off" if a.adapter == "sim" else "config"
+        a.cameras = {"sim": "off", "mujoco": "mujoco"}.get(a.adapter, "config")
     return a
 
 
 def _stdb_config(a: argparse.Namespace):
     from rdf_common.spacetime_client import SpacetimeConfig, load_dotenv
 
-    if a.adapter == "sim":
+    if a.adapter in SIM_ADAPTERS:
         load_dotenv()
         token = Path(a.token_file).read_text().strip() if a.token_file else None
         return SpacetimeConfig.resolve(a.host, a.db, token), os.environ.get("ROBOT_ID")
@@ -100,23 +109,30 @@ def _start_cameras(mode: str, services: dict[str, Any]) -> dict[str, Any]:
         return {"cameras": "off"}
     from .cameras import CameraRig
 
-    rig = CameraRig.from_config(synthetic=mode == "synthetic")
+    if mode == "mujoco":  # [SIM] offscreen renders of the MuJoCo arm (adapters/mujoco_sim.py)
+        rig = CameraRig.from_config(os.environ.get("RDF_CAMERAS_CONFIG") or MUJOCO_CAMERAS_CONFIG)
+    else:
+        rig = CameraRig.from_config(synthetic=mode == "synthetic")
     rig.start()
     services["cameras"] = rig
-    return {"cameras": mode, "synthetic": mode == "synthetic"}
+    return {"cameras": mode, "synthetic": mode == "synthetic", **({"sim": True, "rendered": "mujoco"} if mode == "mujoco" else {})}
 
 
 def run(argv: list[str] | None = None) -> None:
     a = parse_args(argv)
     cfg, env_name = _stdb_config(a)
-    sim = a.adapter == "sim"
-    name = a.name or (("test.sim-yam-1" if sim else None) or env_name or "yam-1")
+    sim = a.adapter in SIM_ADAPTERS
+    mujoco = a.adapter == "mujoco"
+    name = a.name or (("test.sim-yam-1" if a.adapter == "sim" else "sim-yam-mujoco" if mujoco else None) or env_name or "yam-1")
     arm = build_arm(a.adapter, safety=not a.unsafe_no_safety_layer)
+    if mujoco:  # physics + render threads before the cameras open (they render this sim)
+        arm.connect()
     services: dict[str, Any] = {}
     cams = _start_cameras(a.cameras, services)
+    # --sim: the TDM-49 demo motion; --adapter mujoco: the real TDM-50 rollout + TDM-51 trial runner (registry)
     handlers = {"run_eval": sim_demo_rollout, "run_baseline": sim_demo_rollout,
-                "load_checkpoint": pointer_load_checkpoint} if sim else {}
-    if sim and a.sim_policy:  # TDM-50: the real rollout + policy endpoint, on the sim arm
+                "load_checkpoint": pointer_load_checkpoint} if a.adapter == "sim" else {}
+    if a.adapter == "sim" and a.sim_policy:  # TDM-50: the real rollout + policy endpoint, on the sim arm
         handlers.pop("run_baseline")
         handlers.pop("load_checkpoint")
         handlers.pop("run_eval")  # TDM-51 trial runner
@@ -144,17 +160,25 @@ def run(argv: list[str] | None = None) -> None:
 
     client.handlers["start_teleop"] = _teleop.start_teleop
     stream_mode = os.environ.get("RDF_STREAM") or ("none" if sim else "cloudflared")
-    if services.get("cameras") is not None and stream_mode != "off":
+    # [SIM] a sim robot without cameras still serves /ws/control + /ws/state (the browser renders it from state)
+    stream_rig = services.get("cameras")
+    if stream_rig is None and sim:
+        from .stream import NoCameraRig
+
+        stream_rig = NoCameraRig()
+    if stream_rig is not None and stream_mode != "off":
         try:
             from .stream import start_stream
 
-            stream = start_stream(services["cameras"], robot_name=name, tunnel=stream_mode,
+            stream = start_stream(stream_rig, robot_name=name, tunnel=stream_mode,
                                   port=int(os.environ.get("RDF_STREAM_PORT") or 8091))
         except (Exception, SystemExit) as e:  # e.g. RDF_STREAM_TOKEN_SECRET missing: run without video/teleop
             _log("stream + teleop NOT started (no video, no /ws/control)", error=repr(e)[:300])
         else:
             _teleop.install_control(stream, _teleop.hub_for(client, config=_teleop.TeleopConfig(
-                allow_ops_tokens=os.environ.get("RDF_TELEOP_ALLOW_OPS") == "1")))
+                allow_ops_tokens=os.environ.get("RDF_TELEOP_ALLOW_OPS") == "1",
+                # [SIM] practice sessions (no lease, no recording, reset_scene): sim robots only
+                allow_practice=sim and os.environ.get("RDF_TELEOP_PRACTICE", "1") != "0")))
             from .stream import install_state_feed  # TDM-96: /ws/state live robot state (RDF_STATE_HZ, default 30)
 
             install_state_feed(stream, client, sim=sim)

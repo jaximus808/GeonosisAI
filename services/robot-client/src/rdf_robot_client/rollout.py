@@ -453,7 +453,7 @@ class PolicyRollout:
         return r
 
     def _wire_uri(self) -> str | None:
-        return self.checkpoint_uri if self.policy.config.backend == "production" else None
+        return self.checkpoint_uri if self.policy.config.hot_swap else None
 
     def run_episode(self, prompt: str, max_steps: int | None = None, success_check: SuccessCheck | None = None, *,
                     timeout_s: float | None = None, warm: bool = True, success_every: int = 1) -> RolloutResult:
@@ -566,7 +566,7 @@ def rollout_episode_job(ctx: JobContext) -> dict[str, Any]:
     p = ctx.payload
     prompt = resolve_prompt(ctx, None)
     uri = p.get("checkpoint_uri") or getattr(ctx.client, "checkpoint_uri", None)
-    if uri and get_policy(ctx).config.backend == "production":
+    if uri and get_policy(ctx).config.hot_swap:
         get_policy(ctx).activate(uri)
     max_steps = int(p["max_steps"]) if p.get("max_steps") else None
     if p.get("timeout_s"):
@@ -650,7 +650,7 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("--prompt", default="pick up the cube and put it in the bowl")
     ap.add_argument("--seconds", type=float, default=10.0)
     ap.add_argument("--mode", choices=["async", "sync"], default="async")
-    ap.add_argument("--backend", choices=["spike", "production"], default=None, help="default $POLICY_BACKEND or spike")
+    ap.add_argument("--backend", choices=["spike", "production", "sim"], default=None, help="default $POLICY_BACKEND or spike")
     ap.add_argument("--url", default=None, help="override the policy URL (e.g. a local fake)")
     ap.add_argument("--checkpoint", default=None)
     ap.add_argument("--fake-policy", action="store_true", help="start the local fake policy server (laptop tests)")

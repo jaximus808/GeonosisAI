@@ -509,7 +509,10 @@ def _vec(v: Any, n: int) -> list[float] | None:
 
 
 def scene_for_contract(raw: Any) -> dict[str, Any] | None:
-    """An adapter's ``scene_state()`` -> the contract's ``{cube?: {pos, quat}, plate?: {pos}}``.
+    """An adapter's ``scene_state()`` -> the contract's ``{cube?: {pos, quat}, plate?: {pos}, objects?: {id: {pos, quat, ...}}}``.
+
+    ``objects`` is the generic form (every object of the sim's scene spec, with its primitive/size/color
+    for rendering); ``cube`` / ``plate`` stay for viewers that predate it.
 
     Accepts ``pos`` or the MuJoCo sim adapter's ``cube.xyz`` / ``plate.xy`` + ``plate.top_z``;
     everything else (task status, joints, ...) is dropped.
@@ -530,6 +533,18 @@ def scene_for_contract(raw: Any) -> dict[str, Any] | None:
             pos = [*xy, round(float(plate.get("top_z") or 0.0), 5)]
         if pos:
             out["plate"] = {"pos": pos}
+    objs = raw.get("objects") if isinstance(raw.get("objects"), dict) else None
+    if objs:  # [SIM] generic scene-spec objects: {id: {pos, quat, primitive?, size?, radius?, height?, color?}}
+        o_out: dict[str, Any] = {}
+        for oid, o in list(objs.items())[:64]:
+            if not isinstance(o, dict):
+                continue
+            pos, quat = _vec(o.get("pos"), 3), _vec(o.get("quat", (1.0, 0.0, 0.0, 0.0)), 4)
+            if pos and quat:
+                extra = {k: o[k] for k in ("primitive", "size", "radius", "height", "color") if o.get(k) is not None}
+                o_out[str(oid)[:64]] = {"pos": pos, "quat": quat, **extra}
+        if o_out:
+            out["objects"] = o_out
     return out or None
 
 
@@ -902,6 +917,28 @@ class StreamHandle:
         if self.tunnel:
             self.tunnel.stop()
         self.server.stop()
+
+
+class NoCameraRig:
+    """[SIM] stand-in rig for a sim robot started without cameras: the stream server still serves
+    ``/ws/control`` and ``/ws/state`` (the browser renders the robot from state), ``/ws/cameras`` has no
+    cameras, ``/healthz`` says so."""
+
+    names: list[str] = []
+
+    def __init__(self) -> None:
+        from types import SimpleNamespace
+
+        self.config = SimpleNamespace(stream={}, cameras=[], reference=None)
+
+    def latest(self, cam: str) -> None:
+        return None
+
+    def stats(self) -> dict[str, Any]:
+        return {"cameras": {}, "note": "no cameras (sim robot): state + control only"}
+
+    def healthy(self, max_age_ms: float = 500.0) -> bool:
+        return True
 
 
 def start_stream(rig: CameraRig, *, robot_id: int | None = None, robot_name: str | None = None,

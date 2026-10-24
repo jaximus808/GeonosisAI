@@ -109,7 +109,8 @@ CONTROL_PATH = "/ws/control"
 CONTROL_PATHS = (CONTROL_PATH, "/control")  # the contract's name + the path the TDM-56 page derives
 CLOSE_EXPIRED, CLOSE_FORBIDDEN, CLOSE_LEASE_LOST, CLOSE_REPLACED = 4001, 4003, 4004, 4009
 AUTH_TIMEOUT_S = 5.0
-OPS = ("takeover", "handback", "record_start", "record_stop", "record_discard")
+OPS = ("takeover", "handback", "record_start", "record_stop", "record_discard", "reset_scene")
+PRACTICE_SUB = "practice:"  # [SIM] practice tokens (orchestrator practice_api): no task, no lease, no recording
 SAFETY_KEYS = ("clamped_joint_limit", "clamped_speed", "clamped_workspace", "clamped_gripper",
                "rejected_nonfinite", "rejected_jump", "rejected_stopped", "watchdog_holds", "estops")
 
@@ -133,6 +134,9 @@ class TeleopConfig:
     state_hz: float = 10.0
     takeover_on_clutch: bool = True   # first clutch-down while paused_for_takeover = takeover
     allow_ops_tokens: bool = False    # dev/HIL: ops tokens (task_id 0, sub ops:*) may drive without a lease
+    # [SIM] practice sessions (sim robots only, main.py): a token with sub practice:* and task 0 drives a
+    # start_teleop {kind: practice} session with no lease and NO recording, and may reset the sim scene.
+    allow_practice: bool = False
 
 
 # ------------------------------------------------------------------------------------ rotation math
@@ -296,6 +300,10 @@ class ClutchFilter:
 _ids = itertools.count(1)
 
 
+def _is_practice(claims: Any) -> bool:
+    return (getattr(claims, "sub", "") or "").startswith(PRACTICE_SUB) and int(getattr(claims, "task_id", 0) or 0) <= 0
+
+
 class _OpsGuard:
     """Lease guard stand-in for an ops token (``allow_ops_tokens``): expiry only, no task."""
 
@@ -440,6 +448,8 @@ class TeleopHub:
     def make_guard(self, claims: StreamClaims) -> Any:
         if claims.task_id <= 0 and (claims.sub or "").startswith("ops:") and self.cfg.allow_ops_tokens:
             return _OpsGuard(claims)
+        if claims.task_id <= 0 and _is_practice(claims) and self.cfg.allow_practice:
+            return _OpsGuard(claims)  # [SIM] practice: token expiry only, no task lease
         if self.guard_factory is not None:
             return self.guard_factory(claims)
         from .tdm57_lease import ControlLeaseGuard, spacetime_task_fetcher
@@ -529,6 +539,8 @@ class TeleopHub:
             why = self._authorized(sess)
             if why:
                 return {"ok": False, "code": why}
+            if _is_practice(sess.claims) and op.startswith("record_"):
+                return {"ok": False, "code": "practice", "detail": "practice session: nothing is recorded"}
             rc = self._rc_for(sess)
             if rc is not None and (op.startswith("record_") or self._rc_owns_takeover(rc)):
                 return rc.handle({**m, "t": op})  # TDM-58: {t:"record_ack", op, req, ok, error?, recording}
@@ -661,9 +673,26 @@ class TeleopHub:
             return {"ok": True, "ending": "start_teleop"}
         return {"ok": False, "code": "nothing_to_hand_back", "detail": f"robot is {self.client.sm.state}"}
 
+    def _op_reset_scene(self, sess: ControlSession, m: dict[str, Any]) -> dict[str, Any]:
+        """[SIM] put the scene's objects back (randomized) for another try: practice / ops sessions on the
+        MuJoCo sim only (a task's recording must never see a teleported object)."""
+        from .adapters.mujoco_sim import find_sim
+
+        sim = find_sim(self.client.arm)
+        if sim is None:
+            return {"ok": False, "code": "not_sim", "detail": "reset_scene is a simulator command"}
+        if not (_is_practice(sess.claims) or (sess.claims.sub or "").startswith("ops:")):
+            return {"ok": False, "code": "not_practice", "detail": "only practice / ops sessions may reset the sim scene"}
+        out = sim.reset_scene()
+        self.client.event("sim.scene_reset", sub=sess.claims.sub, via="/control", sim=True,
+                          note="[SIM] practice: the simulator re-placed the objects", **out)
+        return {"ok": True, **out}
+
     def _op_record_start(self, sess: ControlSession, m: dict[str, Any]) -> dict[str, Any]:
         from .recorder import recorder_for
 
+        if self.mode == "teleop" and self._kind == "practice":
+            return {"ok": False, "code": "practice", "detail": "practice session: nothing is recorded"}
         if self.mode is None:
             return {"ok": False, "code": "not_driving", "detail": "start_teleop or a takeover first"}
         rec = recorder_for(self.client)

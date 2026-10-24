@@ -2,6 +2,8 @@
 
 Registered names:
   * ``sim``  SimArm (TDM-49), kinematic simulation, no hardware.
+  * ``mujoco`` [SIM] the YAM in a MuJoCo physics scene (cube + plates, rendered cameras), imported
+             lazily from ``adapters/mujoco_sim.py`` (needs the ``sim`` extra: ``uv sync --extra sim``).
   * ``yam``  I2RT YAM (TDM-46), imported lazily from ``adapters/yam.py`` so laptops without the
              I2RT SDK can still import this package. TDM-46: define ``YamArm(ArmAdapter)`` there,
              accepting ``**kwargs`` from ``make_adapter("yam", **kwargs)``.
@@ -32,6 +34,7 @@ from .base import (
 ADAPTERS: dict[str, str] = {
     "sim": "rdf_robot_client.adapters.sim:SimArm",
     "yam": "rdf_robot_client.adapters.yam:YamArm",
+    "mujoco": "rdf_robot_client.adapters.mujoco_sim:MujocoSimArm",
 }
 
 

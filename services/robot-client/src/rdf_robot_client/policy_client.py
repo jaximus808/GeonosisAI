@@ -15,6 +15,9 @@ Backends, chosen by ONE switch (``POLICY_BACKEND``, or ``PolicyConfig(backend=..
               ``POLICY_SERVER_TOKEN`` (bearer, header on the websocket). ``activate(uri)`` posts
               ``/policy/activate`` (hot-swap), and every request carries ``checkpoint_uri`` so the
               server refuses to answer with another policy's actions (code ``checkpoint_mismatch``).
+  sim         [SIM] the local scripted IK policy for the MuJoCo demo (``sim_policy_server.py``, NOT
+              pi0.5): ``SIM_POLICY_URL`` (default http://127.0.0.1:8765) + optional ``SIM_POLICY_TOKEN``.
+              Same protocol as production (activate + checkpoint_uri on every request).
 
 Wire format (S-05b, both backends; see the "S-05b decision" note)::
 
@@ -45,6 +48,7 @@ import numpy as np
 
 SPIKE_URL_DEFAULT = "https://jaxonp808--rdf-s05b-policy-policy-web.us-west.modal.run"
 PRODUCTION_URL_DEFAULT = "https://jaxonp808--rdf-training-policy-web.us-west.modal.run"
+SIM_URL_DEFAULT = "http://127.0.0.1:8765"  # [SIM] sim_policy_server.py
 BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base"
 BASE_ALIASES = {"base", "pi05_base", BASE_CHECKPOINT, BASE_CHECKPOINT + "/", BASE_CHECKPOINT + "/params"}
 IMAGE_KEYS = ("observation/image", "observation/wrist_image")  # S-05a keys, base cam first
@@ -61,7 +65,7 @@ class PolicyClientError(RuntimeError):
 
 @dataclass(frozen=True)
 class PolicyConfig:
-    backend: str = "spike"  # spike | production
+    backend: str = "spike"  # spike | production | sim
     url: str = SPIKE_URL_DEFAULT
     token: str | None = None  # production only; never printed
     transport: str = "ws"  # ws | http
@@ -82,9 +86,12 @@ class PolicyConfig:
         b = (backend or os.environ.get("POLICY_BACKEND") or "spike").strip().lower()
         if b in ("tdm-41", "tdm41", "prod"):
             b = "production"
-        if b not in ("spike", "production"):
-            raise PolicyClientError("bad_config", f"POLICY_BACKEND must be spike|production, got {b!r}")
-        if b == "production":
+        if b not in ("spike", "production", "sim"):
+            raise PolicyClientError("bad_config", f"POLICY_BACKEND must be spike|production|sim, got {b!r}")
+        if b == "sim":  # [SIM] scripted local policy for the MuJoCo demo (sim_policy_server.py)
+            url = os.environ.get("SIM_POLICY_URL") or SIM_URL_DEFAULT
+            token = os.environ.get("SIM_POLICY_TOKEN") or None
+        elif b == "production":
             url = os.environ.get("POLICY_SERVER_URL") or PRODUCTION_URL_DEFAULT
             token = os.environ.get("POLICY_SERVER_TOKEN") or None
             if not token:
@@ -97,9 +104,17 @@ class PolicyConfig:
         kw.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**kw)
 
+    @property
+    def hot_swap(self) -> bool:
+        """The server serves any checkpoint: ``activate(uri)`` + ``checkpoint_uri`` on every request."""
+        return self.backend in ("production", "sim")
+
     def describe(self) -> dict[str, Any]:
-        return {"backend": self.backend, "url": self.url, "transport": self.transport, "auth": bool(self.token),
-                "request_timeout_s": self.request_timeout_s}
+        d = {"backend": self.backend, "url": self.url, "transport": self.transport, "auth": bool(self.token),
+             "request_timeout_s": self.request_timeout_s}
+        if self.backend == "sim":
+            d.update(sim=True, policy="[SIM] scripted IK pick-and-place policy (MuJoCo demo stand-in, NOT pi0.5)")
+        return d
 
 
 # --------------------------------------------------------------------------- values
@@ -403,7 +418,7 @@ class PolicyClient:
         while time.monotonic() < end:
             try:
                 out = self.health(timeout=max(5.0, min(60.0, end - time.monotonic())))
-                if self.config.backend != "production" or out.get("ready", True):
+                if not self.config.hot_swap or out.get("ready", True):
                     return out
                 last = PolicyClientError("not_ready", f"loading={out.get('loading')}")
             except Exception as e:  # noqa: BLE001
@@ -414,7 +429,7 @@ class PolicyClient:
     def activate(self, checkpoint_uri: str | None, timeout: float = 600.0) -> dict[str, Any]:
         """Make ``checkpoint_uri`` the served policy. Spike: only the base checkpoint exists."""
         uri = (checkpoint_uri or "base").strip()
-        if self.config.backend != "production":
+        if not self.config.hot_swap:
             if uri not in BASE_ALIASES:
                 raise PolicyClientError("unsupported", f"the spike endpoint serves only base pi0.5, not {uri!r}; "
                                                        "set POLICY_BACKEND=production (TDM-41) for fine-tuned checkpoints")

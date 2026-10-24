@@ -48,6 +48,13 @@ def load_checkpoint(ctx: JobContext) -> dict[str, Any]:
 
 @job_handler("reset_request")
 def reset_request(ctx: JobContext) -> dict[str, Any]:
+    from .adapters.mujoco_sim import find_sim
+
+    sim = find_sim(ctx.arm)
+    if sim is not None and ctx.payload.get("sim_reset"):  # [SIM] the simulator resets the scene itself
+        out = sim.reset_scene()
+        ctx.event("sim.scene_reset", via="reset_request", sim=True, note="[SIM] the simulator re-placed the objects", **out)
+        return {"reset": "sim", **out}
     tid = ctx.payload.get("task_id")
     done = ctx.wait_for_reset(task_id=int(tid) if tid else None, accept_task_completion=True,
                               reason=str(ctx.payload.get("reason") or "reset_request"))

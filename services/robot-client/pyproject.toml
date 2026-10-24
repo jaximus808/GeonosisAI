@@ -8,6 +8,13 @@ dependencies = ["rdf-common", "numpy>=1.26", "pyyaml>=6", "opencv-python-headles
 [project.scripts]
 rdf-robot-client = "rdf_robot_client.__main__:main"
 
+[project.optional-dependencies]
+sim = [
+    "fastapi>=0.110",
+    "mujoco>=3.3.5",
+    "uvicorn>=0.29",
+]
+
 [tool.uv.sources]
 rdf-common = { path = "../common", editable = true }
 

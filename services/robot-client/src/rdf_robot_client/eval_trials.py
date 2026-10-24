@@ -31,6 +31,14 @@ Outcomes are confirmed by the operator. Nothing is marked a success without a hu
   * Failure notes: the operator's text, else ``timeout: rollout hit the N s limit`` when the
     rollout ran out of time.
 
+[SIM] MuJoCo sim arm only (``adapters/mujoco_sim.py``; never on the real arm, the TDM-49 SimArm or the fake):
+  * every trial starts with a scene reset (random cube pose) after homing (``sim.scene_reset`` event);
+  * the eval outcome is auto-reported from sim state (cube resting in the empty plate = success; a
+    missed grasp / drop = failure, which also ends the rollout early) as verdict source ``sim_auto``
+    with a note starting ``[SIM] auto outcome``; ``RDF_SIM_AUTO_OUTCOME=0`` turns it off (operator
+    verdicts again). Real-arm outcomes stay operator-confirmed;
+  * collection rollouts use the same sim success / failure signals as the TDM-69 detector input.
+
 Failure handling:
   * soft e-stop / ``stop`` mid-trial: the rollout raises Cancelled, the recording is closed
     locally (kept on disk, not uploaded, never an eval outcome), NO trial row is written for the
@@ -271,6 +279,15 @@ def _is_sim(ctx: JobContext) -> bool:
     return bool(d.get("sim")) or "sim" in str(d.get("adapter", "")) or "sim" in str(getattr(ctx.arm, "embodiment", ""))
 
 
+def _sim_scene(ctx: JobContext) -> Any:
+    """[SIM] the MuJoCo sim under the safety layer (scene reset, task status), else None."""
+    try:
+        from .adapters.mujoco_sim import find_sim
+    except Exception:  # noqa: BLE001 - never let the sim helpers break the real arm
+        return None
+    return find_sim(ctx.arm)
+
+
 def _keep_local(ep: Any, why: str) -> None:
     """Mark a local recording as never-to-upload (the uploader's boot rescan queues every
     ``status == "recorded"`` episode)."""
@@ -346,6 +363,10 @@ class EvalTrialRunner:
         # the detector runs in collection rollouts only (eval / baseline numbers stay clean)
         self.iv_cfg: dict[str, Any] | None = iv if self.collect and self.interventions_requested else None
         self.max_pause_s = _env_float("RDF_INTERVENTION_MAX_PAUSE_S", DEFAULT_MAX_PAUSE_S)
+        # [SIM] MuJoCo scene: reset per trial + auto outcome (see module doc); None on hardware
+        self.sim_scene = _sim_scene(ctx)
+        self.sim_auto = self.sim_scene is not None and os.environ.get("RDF_SIM_AUTO_OUTCOME", "1").strip().lower() \
+            not in ("0", "false", "off", "no")
         post = (self.iv_cfg or {}).get("post_handback_s")
         self.post_handback_s = float(post) if post else _env_float("RDF_INTERVENTION_POST_HANDBACK_S",
                                                                    DEFAULT_POST_HANDBACK_S)
@@ -397,6 +418,38 @@ class EvalTrialRunner:
                 return 0, f"episode {ep.key} upload still pending after {self.upload_wait_s:.0f}s"
             self.ctx.sleep(0.2)
 
+    # ---- [SIM] scene helpers (MuJoCo only)
+    def _sim_reset(self, index: int) -> None:
+        if self.sim_scene is None:
+            return
+        info = self.sim_scene.reset_scene()
+        self.ctx.event("sim.scene_reset", index=index, eval_run_id=self.eval_run_id, sim=True,
+                       note="[SIM] the simulator put the cube at a new random pose", **info)
+
+    def _sim_done(self, step: int, st: Any) -> bool:
+        """success_check for the rollout: True ends it as a success; a sim-detected failure (missed
+        grasp, drop) ends it via finish_requested (the arm holds) so the trial isn't run to timeout."""
+        s = self.sim_scene.task_status()
+        if s["failure"]:
+            self.ctx.finish_requested.set()
+        return bool(s["success"])
+
+    def _sim_verdict(self, index: int, res: RolloutResult) -> None:
+        """[SIM] report the outcome from sim state (real-arm outcomes stay operator-confirmed)."""
+        if not self.sim_auto or self.inbox.verdict is not None:
+            return
+        s = self.sim_scene.task_status()
+        if s["success"]:
+            note = "[SIM] auto outcome from sim state: the cube is resting in the empty plate"
+        else:
+            why = s["failure"] or ("the rollout hit its time limit with the cube not in the plate"
+                                   if res.ended in ("max_seconds", "max_steps") else "the cube is not in the plate")
+            note = f"[SIM] auto outcome from sim state: {why}"
+        try:
+            self.inbox.submit(bool(s["success"]), note, "sim_auto", eval_run_id=self.eval_run_id or None, index=index)
+        except ValueError as e:  # an operator verdict won the race: theirs stands
+            _log("sim auto outcome not taken", error=str(e))
+
     def run_trial(self, index: int, prompt: str) -> TrialOutcome:
         ctx = self.ctx
         label = f"eval {self.eval_run_id} trial {index + 1}/{self.trials}"
@@ -404,6 +457,7 @@ class EvalTrialRunner:
         try:
             ctx.finish_requested.clear()
             _go_home(ctx)  # 1. start pose
+            self._sim_reset(index)  # [SIM] new random cube pose (no-op on the real arm)
             rec = recorder_for(ctx)  # 2. recorder
             ep_key = None
             if rec is not None:
@@ -419,7 +473,8 @@ class EvalTrialRunner:
                       checkpoint_uri=self.checkpoint_uri, kind=self.run_kind, episode_key=ep_key, sim=self.sim)
             # 3. the policy episode
             t_start = time.time()
-            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=self.success_check,
+            check = self._sim_done if self.sim_auto else self.success_check
+            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=check,
                               timeout_s=self.timeout_s, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=True)
             duration_ms = int(round(res.seconds * 1000))
             if res.ended == "policy_error" and int(res.executor.get("chunks_used") or 0) == 0:
@@ -430,6 +485,8 @@ class EvalTrialRunner:
 
             # 4. the outcome
             suggested = res.success if self.success_check is not None else None
+            if self.sim_auto:
+                suggested = bool(self.sim_scene.task_status()["success"])
             intervened = any(tr.dst is RobotState.PAUSED_FOR_TAKEOVER and tr.at >= t_start
                              for tr in list(ctx.sm.history))
             if res.ended == "policy_error":
@@ -440,6 +497,8 @@ class EvalTrialRunner:
                 v = self.inbox.verdict
                 note = "[intervened] the policy was paused for a takeover" + (f"; operator: {v.note}" if v and v.note else "")
             else:
+                if res.ended != "policy_error":
+                    self._sim_verdict(index, res)  # [SIM] only
                 verdict = self.inbox.verdict
                 if verdict is None:
                     self._prompt_operator(index, res, suggested)
@@ -578,6 +637,8 @@ class EvalTrialRunner:
         stop_watch = threading.Event()
         watcher: threading.Thread | None = None
         base_check = self.success_check
+        if self.sim_scene is not None:  # [SIM] success from sim state (the rollout ends when the cube is in the plate)
+            base_check = lambda step, st: bool(self.sim_scene.task_status()["success"])  # noqa: E731
         suggested: dict[str, bool | None] = {"v": None}
 
         def check(step: int, st: Any) -> bool:
@@ -591,6 +652,12 @@ class EvalTrialRunner:
             if base_check is not None and base_check(step, st):
                 suggested["v"] = True
                 return True
+            if det is not None and self.sim_scene is not None:  # [SIM] missed grasp / drop from sim state
+                why = self.sim_scene.task_status()["failure"]
+                if why:
+                    tiv.failure = det.success_check(False, f"[SIM] {why}", time.monotonic())
+                    ctx.finish_requested.set()
+                    return False
             if det is not None:
                 f = det.tick(time.monotonic(), None)
                 if f is not None:
@@ -606,6 +673,7 @@ class EvalTrialRunner:
                 except queue.Empty:
                     break
             _go_home(ctx)
+            self._sim_reset(index)  # [SIM] no-op on the real arm
             rec = recorder_for(ctx)
             ep_key = None
             if rec is not None:  # the task and its contributor are filled in when the rollout is paused

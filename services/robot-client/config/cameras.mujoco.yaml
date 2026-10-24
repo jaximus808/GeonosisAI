@@ -1,0 +1,21 @@
+# [SIM] camera rig for the MuJoCo YAM (rdf-robot-client --adapter mujoco --cameras mujoco).
+# Both cameras are offscreen renders of the sim scene (adapters/mujoco_sim.py, MUJOCO_GL=cgl on
+# macOS): same names, size, fps and policy/LeRobot keys as the real rig (config/cameras.yaml), so the
+# recorder, the TDM-55 stream and the policy observation are unchanged. Frames carry a "SIM" tag.
+reference: top
+pair_tolerance_ms: 20
+buffer_seconds: 1.0
+policy_size: 224
+stream: {width: 424, jpeg_quality: 70, fps: 15}
+
+cameras:
+  top:                    # exo / scene camera, front-right of the table looking at the arm
+    source: mujoco
+    width: 640
+    height: 480
+    fps: 30
+  wrist:                  # D405 wrist mount pose from the I2RT station model
+    source: mujoco
+    width: 640
+    height: 480
+    fps: 30

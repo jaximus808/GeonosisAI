@@ -65,7 +65,7 @@ import yaml
 from .adapters.base import ArmAdapter, ArmAdapterWrapper, ArmError, ArmStatus, ArmStopped, JointLimits
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "safety.yaml"
-SIM_ADAPTERS = frozenset({"sim"})
+SIM_ADAPTERS = frozenset({"sim", "mujoco"})
 
 
 class SafetyConfigError(ValueError):

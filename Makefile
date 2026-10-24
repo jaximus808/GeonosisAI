@@ -24,7 +24,7 @@ help:
 	@echo "make dev-down   stop every compose service (all profiles)"
 	@echo "make dev-host   run every app and service directly on the host (no Docker)"
 	@echo "make spacetime-publish  publish spacetime/ to the local SpacetimeDB container"
-	@echo "make seed       seed SpacetimeDB with demo data (stub)"
+	@echo "make seed       seed a LOCAL SpacetimeDB with [SEED] demo robot/contributor/ticket (TDM-17; SEED_HOST, SEED_DB)"
 	@echo "make deploy     deploy the backend (stub)"
 	@echo "make env-check  report which .env keys are set (never prints values)"
 	@echo "make deploy-modal  modal deploy services/training/modal_app.py (app rdf-training, TDM-38)"
@@ -81,8 +81,13 @@ dev-robot-client:
 dev-spacetime:
 	@echo "[spacetime] placeholder: SpacetimeDB module lives in spacetime/ (start it per spacetime/ docs)"
 
+# TDM-17: scripts/seed.py. LOCAL only: refuses maincloud (its event_log is the real-run evidence).
+# Seeds robot test.seed-yam-office-1, contributor test.seed-contributor and one [SEED] ticket;
+# idempotent. Default target is the dev-local container; point it elsewhere with SEED_HOST/SEED_DB.
+SEED_HOST ?= http://127.0.0.1:$(SPACETIME_LOCAL_PORT)
+SEED_DB ?= $(SPACETIME_LOCAL_DB)
 seed:
-	@echo "[seed] placeholder: will seed SpacetimeDB with a demo robot and ticket"
+	cd services/orchestrator && uv run --quiet python ../../scripts/seed.py --host $(SEED_HOST) --db $(SEED_DB) $(ARGS)
 
 deploy:
 	@echo "[deploy] placeholder: Fly.io deploy not wired up yet"

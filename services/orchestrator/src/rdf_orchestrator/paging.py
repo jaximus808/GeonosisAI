@@ -194,7 +194,10 @@ def notification_for(task_ids: list[int], task_type: str, price_cents: int, tick
     label = TYPE_LABEL.get(task_type, task_type.replace("_", " ").title())
     price = f"${price_cents // 100}" if price_cents % 100 == 0 else f"${price_cents / 100:.2f}"  # as the marketplace shows it
     first = task_ids[0] if task_ids else 0
-    path = f"/marketplace?task={first}&src=push" if first else "/marketplace?src=push"
+    if first and task_type == "reset" and len(task_ids) == 1:
+        path = f"/reset/{first}?src=push"  # TDM-62 phone reset page: one tap to the task
+    else:
+        path = f"/marketplace?task={first}&src=push" if first else "/marketplace?src=push"
     url = (web_base.rstrip("/") + path) if web_base else path
     if test:
         return {"title": "Push works on this device", "body": "You'll get a notification like this when the "

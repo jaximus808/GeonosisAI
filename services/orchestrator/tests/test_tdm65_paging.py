@@ -70,7 +70,7 @@ def test_pages_every_subscribed_contributor_with_deep_link():
     assert out["online_without_push"] == [9]  # online, no subscription: live marketplace highlight only
     assert "endpoint" not in json.dumps(out)  # endpoints are sensitive; the result is logged in event_log
     payload = s.sent[0][1]
-    assert payload["url"] == "https://demo.trycloudflare.com/marketplace?task=11&src=push"
+    assert payload["url"] == "https://demo.trycloudflare.com/reset/11?src=push"  # single reset -> TDM-62 page
     assert payload["title"] == "Paid reset · $2" and payload["tag"] == "rdf-task-11"
 
 
@@ -245,3 +245,12 @@ def test_subscribe_refusals(api):
     other = "c2" + "ee" * 31
     assert c.post("/push/subscribe", json={**body(), "identity": other}).status_code == 401
     assert p.store.stats()["subscriptions"] == 0
+
+
+def test_single_reset_push_opens_reset_page():
+    from rdf_orchestrator.paging import notification_for
+    n = notification_for([7], "reset", 200, 3, "https://x.example")
+    assert n["url"] == "https://x.example/reset/7?src=push"
+    m = notification_for([7, 8], "reset", 200, 3)
+    assert m["url"].startswith("/marketplace?task=7")
+    assert notification_for([9], "clean_teleop", 1000, 3)["url"].startswith("/marketplace?task=9")

@@ -72,6 +72,11 @@ Callers: agent reducers need the `orchestrator` or `factory` role (owner always 
 - **`ack_robot_command(id)`**, **`complete_robot_command(id, result_json)`**, **`fail_robot_command(id, error)`:** only the robot's bound `client_identity` may call these, or a `robot_client` role if the robot has no binding. Ack moves issued to acked; repeating an ack is a no-op, and acking a preempted command is refused, so it must not run. Complete needs an acked command. Fail works from issued or acked.
 - **event_log types:** agent.session_created, agent.session_updated, agent.waiting_for, agent.resumed (with mode native or restart), agent.step, robot.command_issued, robot.soft_estop (with the preempted list), robot.command_acked, robot.command_done and robot.command_failed.
 
+## Eval orchestration (TDM-67, `src/reducers/eval_orchestration.ts`)
+
+- **`abort_eval_run(eval_run_id, status, reason)`:** orchestrator only. Moves a `queued`/`running` eval_run to `cancelled` (the robot was lost: offline, stale heartbeat, estop/preempted, timeout, run_eval completed with missing trial rows) or `failed` (the robot reported `fail_robot_command`), sets `finished_at`, and logs `eval.aborted` {eval_run_id, ticket_id, robot_id, kind, from, to, completed, successes, trials, reason}. Trial rows stay. An aborted run can never take more trials or be finalized; the re-run is a new eval_run. A reason starting `estop:` makes the orchestrator wait for an `eval.rerun_requested` event before re-running. Caller: `services/orchestrator/src/rdf_orchestrator/evaluate.py`.
+- **run_eval payload** (orchestrator → robot): `{eval_run_id, checkpoint_uri, trials, timeout_s (per trial), kind, reset_between_trials, solo_mode}`. The robot records each trial with `record_eval_trial` and, after each one, waits for `resume_policy` (issued when the TDM-26 reset task completes).
+
 ## Auth hooks (`auth.ts`)
 
 - `requireService(ctx)`: the caller must be on the allow-list.

@@ -11,6 +11,7 @@
     "gen:bindings": "node scripts/gen-bindings.mjs"
   },
   "dependencies": {
+    "@rdf/env": "workspace:*",
     "next": "16.4.2",
     "qrcode": "1.5.4",
     "react": "19.3.1",

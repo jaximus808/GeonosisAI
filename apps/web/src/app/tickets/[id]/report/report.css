@@ -1,0 +1,692 @@
+/* TDM-79 report page. Scoped under .tdm79-report; the only global rule hides the app header and
+   resets the page ground when a report is on screen or printing. */
+
+.tdm79-report {
+  --r-paper: #ffffff;
+  --r-ink: #17202c;
+  --r-muted: #5a6473;
+  --r-rule: #d4d9e0;
+  --r-before: #8b94a3;
+  --r-after: #1d5bbf;
+  --r-pass: #157a4e;
+  --r-fail: #b42318;
+  --r-fake: #c026d3;
+  --r-threshold: #a35a00;
+  --r-quote-bg: #f3f6fb;
+
+  font-family: var(--r-sans), ui-sans-serif, system-ui, sans-serif;
+  color: var(--r-ink);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-bottom: 4rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tdm79-report {
+    --r-paper: #161b22;
+    --r-ink: #e3e7ed;
+    --r-muted: #9aa4b3;
+    --r-rule: #2b323c;
+    --r-before: #7d8796;
+    --r-after: #6ea6ff;
+    --r-pass: #4cc38a;
+    --r-fail: #ff7b72;
+    --r-fake: #e879f9;
+    --r-threshold: #f0a440;
+    --r-quote-bg: #1c2430;
+  }
+}
+
+.tdm79-report code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+/* ---------------------------------------------------------------- toolbar */
+
+.tdm79-report .r-toolbar {
+  max-width: 52rem;
+  margin: 0 auto 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.tdm79-report .r-back {
+  color: var(--r-muted);
+  font-size: 0.875rem;
+}
+.tdm79-report .r-back:hover {
+  color: var(--r-ink);
+  text-decoration: underline;
+}
+.tdm79-report .r-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tdm79-report .r-btn {
+  background: var(--r-paper);
+  border-color: var(--r-rule);
+  color: var(--r-ink);
+}
+.tdm79-report .r-btn:hover {
+  border-color: var(--r-muted);
+}
+.tdm79-report .r-btn-primary {
+  background: var(--r-after);
+  border-color: var(--r-after);
+  color: #fff;
+}
+.tdm79-report .r-toolbar-note {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  color: var(--r-pass);
+  overflow-wrap: anywhere;
+}
+.tdm79-report .r-toolbar-error {
+  color: var(--r-fail);
+}
+
+/* ---------------------------------------------------------------- fake banner */
+
+.tdm79-report .r-fake {
+  max-width: 52rem;
+  margin: 0 auto 1rem;
+  padding: 0.9rem 1.25rem;
+  background: var(--r-fake);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background-image: repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.09) 0 10px, transparent 10px 20px);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.tdm79-report .r-fake-title {
+  font-weight: 800;
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.15rem;
+}
+.tdm79-report .r-fake-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: 2px;
+  background: var(--r-fake);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  vertical-align: 0.15em;
+  letter-spacing: 0.04em;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.tdm79-report .r-test-tag {
+  margin-left: 0.6rem;
+  padding: 0 0.35rem;
+  border: 1px solid #ea580c;
+  border-radius: 2px;
+  color: #c2410c;
+  font-family: var(--r-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  vertical-align: 0.2em;
+}
+
+/* ---------------------------------------------------------------- sheet */
+
+.tdm79-report .r-sheet {
+  max-width: 52rem;
+  margin: 0 auto;
+  background: var(--r-paper);
+  padding: 2.5rem 3rem 2rem;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08), 0 8px 28px -12px rgb(15 23 42 / 0.18);
+}
+.tdm79-report .r-state {
+  padding: 2rem 3rem;
+}
+.tdm79-report .r-state p + p {
+  margin-top: 0.5rem;
+}
+.tdm79-report .r-muted {
+  color: var(--r-muted);
+}
+.tdm79-report .r-pass {
+  color: var(--r-pass);
+}
+.tdm79-report .r-fail {
+  color: var(--r-fail);
+}
+
+.tdm79-report .r-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--r-muted);
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid var(--r-ink);
+}
+.tdm79-report .r-h1 {
+  font-family: var(--r-serif), Georgia, serif;
+  font-size: 2.125rem;
+  line-height: 1.12;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  margin: 1rem 0 1rem;
+  max-width: 36ch;
+}
+.tdm79-report .r-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem 1.5rem;
+  font-size: 0.875rem;
+}
+.tdm79-report .r-facts dt {
+  color: var(--r-muted);
+  font-size: 0.75rem;
+}
+.tdm79-report .r-mocked {
+  margin-top: 1.25rem;
+  font-size: 0.8125rem;
+  border-left: 3px solid #ea580c;
+  padding: 0.25rem 0 0.25rem 0.75rem;
+}
+
+/* ---------------------------------------------------------------- hero: before / after */
+
+.tdm79-report .r-hero {
+  margin: 2rem 0 0.5rem;
+  padding: 1.5rem 0 1.25rem;
+  border-top: 1px solid var(--r-rule);
+  border-bottom: 1px solid var(--r-rule);
+}
+.tdm79-report .r-hero-nums {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 1.5rem;
+}
+.tdm79-report .r-hero-arrow {
+  width: 3rem;
+  margin-top: 3.4rem;
+  color: var(--r-muted);
+}
+.tdm79-report .r-num-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.tdm79-report .r-num-big {
+  font-family: var(--r-serif), Georgia, serif;
+  font-size: 4.75rem;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  font-variant-numeric: lining-nums tabular-nums;
+  margin: 0.35rem 0 0.4rem;
+}
+.tdm79-report .r-num-before .r-num-big {
+  color: var(--r-before);
+}
+.tdm79-report .r-num-after .r-num-big {
+  color: var(--r-after);
+}
+.tdm79-report .r-num-of {
+  font-size: 0.45em;
+  color: var(--r-muted);
+  letter-spacing: 0;
+}
+.tdm79-report .r-num-ci {
+  font-size: 0.875rem;
+}
+.tdm79-report .r-num-none {
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
+  color: var(--r-muted);
+}
+.tdm79-report .r-trials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0.5rem 0 0.25rem;
+}
+.tdm79-report .r-trial {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1.5px solid var(--r-before);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.tdm79-report .r-num-before .r-trial-ok {
+  background: var(--r-before);
+}
+.tdm79-report .r-num-after .r-trial {
+  border-color: var(--r-after);
+}
+.tdm79-report .r-num-after .r-trial-ok {
+  background: var(--r-after);
+}
+
+.tdm79-report .r-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 1.25rem;
+  overflow: visible;
+}
+.tdm79-report .r-chart-grid {
+  stroke: var(--r-rule);
+  stroke-width: 1;
+}
+.tdm79-report .r-chart-tick {
+  fill: var(--r-muted);
+  font-size: 11px;
+}
+.tdm79-report .r-chart-label {
+  fill: var(--r-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.tdm79-report .r-chart-ci {
+  stroke-width: 8;
+  stroke-linecap: round;
+  opacity: 0.35;
+}
+.tdm79-report .r-chart-dot {
+  stroke: var(--r-paper);
+  stroke-width: 2.5;
+}
+.tdm79-report .r-chart-before .r-chart-ci,
+.tdm79-report .r-chart-before .r-chart-dot {
+  stroke: var(--r-before);
+  fill: var(--r-before);
+}
+.tdm79-report .r-chart-after .r-chart-ci,
+.tdm79-report .r-chart-after .r-chart-dot {
+  stroke: var(--r-after);
+  fill: var(--r-after);
+}
+.tdm79-report .r-chart-before .r-chart-dot,
+.tdm79-report .r-chart-after .r-chart-dot {
+  stroke: var(--r-paper);
+}
+.tdm79-report .r-chart-threshold {
+  stroke: var(--r-threshold);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.tdm79-report .r-chart-threshold-label {
+  fill: var(--r-threshold);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tdm79-report .r-verdict {
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- sections */
+
+.tdm79-report .r-section {
+  margin-top: 2rem;
+}
+.tdm79-report .r-h2,
+.tdm79-report .r-h3 {
+  break-after: avoid;
+}
+.tdm79-report .r-two > .r-section,
+.tdm79-report .r-iter-grid,
+.tdm79-report .r-quote,
+.tdm79-report .r-table,
+.tdm79-report .r-hash {
+  break-inside: avoid;
+}
+.tdm79-report .r-h2 {
+  font-family: var(--r-serif), Georgia, serif;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.75rem;
+}
+.tdm79-report .r-h3 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+.tdm79-report .r-small {
+  font-size: 0.875rem;
+}
+.tdm79-report .r-note {
+  font-size: 0.75rem;
+  color: var(--r-muted);
+  margin-top: 0.3rem;
+}
+.tdm79-report .r-missing-inline {
+  color: var(--r-fail);
+  font-style: italic;
+}
+.tdm79-report .r-missing-block {
+  font-size: 0.875rem;
+  color: var(--r-muted);
+  border: 1px dashed var(--r-rule);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+
+.tdm79-report .r-iter + .r-iter {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--r-rule);
+}
+.tdm79-report .r-iter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.tdm79-report .r-step {
+  font-size: 0.75rem;
+  color: var(--r-muted);
+  margin-bottom: 0.3rem;
+}
+.tdm79-report .r-step-inline {
+  font-weight: 700;
+}
+.tdm79-report .r-clusters li {
+  font-size: 0.875rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.tdm79-report .r-count {
+  min-width: 1.5rem;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tdm79-report .r-bought {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+.tdm79-report .r-quote {
+  margin: 1.1rem 0 0;
+  padding: 0.9rem 1.1rem;
+  background: var(--r-quote-bg);
+  border-left: 3px solid var(--r-after);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.tdm79-report .r-quote blockquote {
+  font-family: var(--r-serif), Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-width: 68ch;
+}
+.tdm79-report .r-quote figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--r-muted);
+}
+.tdm79-report .r-details {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+}
+.tdm79-report .r-details summary {
+  cursor: pointer;
+  color: var(--r-muted);
+}
+.tdm79-report .r-pre {
+  white-space: pre-wrap;
+  margin-top: 0.4rem;
+}
+.tdm79-report .r-rejected {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--r-fail);
+}
+.tdm79-report .r-train {
+  margin-top: 0.9rem;
+}
+
+.tdm79-report .r-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+}
+.tdm79-report .r-table {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+.tdm79-report .r-table th {
+  text-align: left;
+  font-weight: 500;
+  padding: 0.3rem 0;
+}
+.tdm79-report .r-table td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: 0.3rem 0;
+}
+.tdm79-report .r-table tr {
+  border-bottom: 1px solid var(--r-rule);
+}
+.tdm79-report .r-table .r-sub th,
+.tdm79-report .r-table .r-sub td {
+  color: var(--r-muted);
+  font-size: 0.8125rem;
+}
+.tdm79-report .r-table .r-sub th {
+  padding-left: 0.75rem;
+}
+.tdm79-report .r-table .r-total {
+  border-bottom: 2px solid var(--r-ink);
+}
+.tdm79-report .r-table .r-total th,
+.tdm79-report .r-table .r-total td {
+  font-weight: 700;
+}
+.tdm79-report .r-uri,
+.tdm79-report .r-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  margin-bottom: 0.3rem;
+}
+.tdm79-report .r-hash {
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--r-rule);
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.tdm79-report .r-timeline {
+  font-size: 0.8125rem;
+  columns: 2;
+  column-gap: 2rem;
+}
+.tdm79-report .r-timeline li {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  gap: 0 0.5rem;
+  padding: 0.2rem 0;
+  break-inside: avoid;
+  border-bottom: 1px dotted var(--r-rule);
+}
+.tdm79-report .r-timeline time {
+  font-variant-numeric: tabular-nums;
+  color: var(--r-muted);
+}
+.tdm79-report .r-tl-what {
+  text-transform: none;
+}
+.tdm79-report .r-tl-what::first-letter {
+  text-transform: uppercase;
+}
+.tdm79-report .r-tl-ref {
+  grid-column: 2;
+  font-size: 0.6875rem;
+  color: var(--r-muted);
+}
+.tdm79-report .r-missing {
+  list-style: disc;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+.tdm79-report .r-missing li + li {
+  margin-top: 0.2rem;
+}
+.tdm79-report .r-foot {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--r-rule);
+  font-size: 0.75rem;
+  color: var(--r-muted);
+}
+
+/* ---------------------------------------------------------------- small screens */
+
+@media (max-width: 720px) {
+  .tdm79-report .r-sheet {
+    padding: 1.5rem 1.1rem;
+  }
+  .tdm79-report .r-h1 {
+    font-size: 1.625rem;
+  }
+  .tdm79-report .r-hero-nums {
+    grid-template-columns: 1fr 1fr;
+  }
+  .tdm79-report .r-hero-arrow {
+    display: none;
+  }
+  .tdm79-report .r-num-big {
+    font-size: 3.25rem;
+  }
+  .tdm79-report .r-iter-grid,
+  .tdm79-report .r-two {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .tdm79-report .r-timeline {
+    columns: 1;
+  }
+  .tdm79-report .r-actions {
+    margin-left: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- print: one or two Letter pages */
+
+@page {
+  size: letter;
+  margin: 0.55in 0.6in;
+}
+
+@media print {
+  body:has(.tdm79-report) > header,
+  body:has(.tdm79-report) [data-connection-status] {
+    display: none !important;
+  }
+  body:has(.tdm79-report) {
+    background: #fff !important;
+  }
+  body:has(.tdm79-report) main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .tdm79-report {
+    --r-paper: #fff;
+    --r-ink: #111827;
+    --r-muted: #4b5563;
+    --r-rule: #d1d5db;
+    --r-before: #6b7280;
+    --r-after: #1d4ed8;
+    --r-pass: #166534;
+    --r-fail: #b91c1c;
+    --r-fake: #c026d3;
+    --r-threshold: #9a5800;
+    --r-quote-bg: #f3f6fb;
+    padding: 0;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+  .tdm79-report .r-toolbar,
+  .tdm79-report .r-details,
+  .tdm79-report .r-foot {
+    display: none !important;
+  }
+  .tdm79-report .r-fake {
+    max-width: none;
+    margin: 0 0 0.5rem;
+    border-radius: 0;
+  }
+  .tdm79-report .r-sheet {
+    max-width: none;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .tdm79-report .r-h1 {
+    font-size: 20pt;
+    margin: 0.6rem 0;
+  }
+  .tdm79-report .r-hero {
+    margin-top: 1rem;
+    padding: 0.9rem 0;
+    break-inside: avoid;
+  }
+  .tdm79-report .r-num-big {
+    font-size: 40pt;
+  }
+  .tdm79-report .r-hero-arrow {
+    margin-top: 2.4rem;
+  }
+  .tdm79-report .r-section {
+    margin-top: 1.1rem;
+  }
+  .tdm79-report .r-h2 {
+    font-size: 13pt;
+    margin-bottom: 0.4rem;
+  }
+  .tdm79-report .r-quote {
+    padding: 0.6rem 0.9rem;
+  }
+  .tdm79-report .r-quote blockquote {
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+  .tdm79-report .r-timeline {
+    font-size: 8.5pt;
+  }
+  .tdm79-report .r-timeline li {
+    grid-template-columns: 3.6rem 1fr auto;
+    padding: 0.05rem 0;
+  }
+  .tdm79-report .r-tl-ref {
+    grid-column: 3;
+    font-size: 7.5pt;
+  }
+  .tdm79-report .r-chart {
+    max-height: 1.35in;
+    margin-top: 0.6rem;
+  }
+  .tdm79-report .r-foot {
+    margin-top: 1rem;
+    padding-top: 0.4rem;
+  }
+  .tdm79-report .r-facts {
+    font-size: 9.5pt;
+  }
+  .tdm79-report a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

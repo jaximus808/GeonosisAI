@@ -3,13 +3,17 @@
 TypeScript module, published to the database **`robo-factory-a706j`** on **Maincloud**
 (`https://maincloud.spacetimedb.com`). CLI version 2.13.0. Dashboard: https://spacetimedb.com/robo-factory-a706j
 
-For now this is a placeholder: one table, `event_log` (id, ts, actor, type, payload_json),
-and one reducer, `append_event(actor, type, payload_json)`. The full schema is a separate task.
-`CLAUDE.md` here is the SpacetimeDB-generated SDK reference for agents writing that schema.
+The full table set (TDM-8) is documented in **`schema.md`**: 20 tables, all public except the
+`service_identity` allow-list. `event_log` (id, ts, actor, type, payload_json) and
+`append_event(actor, type, payload_json)` are unchanged. `CLAUDE.md` here is the SpacetimeDB-generated
+SDK reference for agents writing reducers.
 
 ```
 spacetime.json           # module-path, server=maincloud, database=robo-factory-a706j
-spacetimedb/src/index.ts # tables + reducers (entry must `export default` the schema)
+spacetimedb/src/schema.ts # all tables (default export = schema)
+spacetimedb/src/index.ts  # module entry: re-exports the schema, init + auth reducers
+spacetimedb/src/enums.ts  # allowed string-enum values, defaults, oneOf()
+spacetimedb/src/auth.ts   # requireService / requireRole / requireOwner (ctx.sender checks)
 ```
 
 ## Setup and publish

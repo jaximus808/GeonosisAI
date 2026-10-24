@@ -22,6 +22,10 @@ Interface for TDM-65 (web push)::
 
     dsp.set_page_hook(fn)   # fn(PageRequest) -> dict | None, called after tasks are created
 
+Interface for TDM-108 (job drops) and any other announcer: extra listeners run after the push hook::
+
+    dsp.add_page_listener(fn)   # fn(PageRequest, rows) -> dict | None; rows(table) reads the bus mirror
+
 Rules (``approve_spend`` is the gate):
   * Only plans with status approved/executing are dispatched. Never more than
     ``min(plan.amount, plan.approved_cents // unit_price)`` tasks are live-or-accepted at once.
@@ -154,6 +158,21 @@ def set_page_hook(fn: PageHook | None) -> None:
     """TDM-65 installs its web-push sender here. Called after new tasks exist; return value is logged."""
     global _page_hook
     _page_hook = fn
+
+
+# TDM-108: more announcers next to the push hook. fn(req, rows) must return fast (queue slow work).
+PageListener = Callable[[PageRequest, Callable[[str], list]], "dict | None"]
+_page_listeners: list[PageListener] = []
+
+
+def add_page_listener(fn: PageListener) -> None:
+    if fn not in _page_listeners:
+        _page_listeners.append(fn)
+
+
+def remove_page_listener(fn: PageListener) -> None:
+    if fn in _page_listeners:
+        _page_listeners.remove(fn)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -498,9 +517,18 @@ class Dispatcher:
                 result = _page_hook(req)
             except Exception as e:  # noqa: BLE001 - paging is best-effort; tasks already exist
                 result = {"error": f"{type(e).__name__}: {e}"}
+        extra: dict[str, Any] = {}
+        for fn in list(_page_listeners):  # TDM-108 job drops (social posts), etc.
+            try:
+                r = fn(req, self.m.rows)
+            except Exception as e:  # noqa: BLE001 - best-effort, like the push hook
+                r = {"error": f"{type(e).__name__}: {e}"}
+            if r is not None:
+                extra[getattr(fn, "__module__", "listener").rsplit(".", 1)[-1]] = r
         # task.notified_json does not exist in the schema; this event is the notification record.
         self.event("dispatch.paged", {**asdict(req), "channel": channel, "result": result,
-                                      "note": None if _page_hook else "no push hook installed (TDM-65)"})
+                                      "note": None if _page_hook else "no push hook installed (TDM-65)",
+                                      **({"listeners": extra} if extra else {})})
 
     # ---- resets
     def _robot_jobs_open(self, robot_id: int) -> list[dict]:

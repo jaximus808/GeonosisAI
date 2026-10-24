@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# TDM-108: print the OAuth2 URL that adds the job-drop bot to a Discord server.
+# Scope bot; permissions View Channel + Send Messages + Embed Links + Attach Files (52224).
+# Reads DISCORD_BOT_TOKEN (or DISCORD_APPLICATION_ID) from the env or .env; prints only the URL
+# (the client id is public), never the token.
+set -euo pipefail
+cd "$(dirname "$0")/../services/orchestrator"
+exec uv run --quiet python -m rdf_orchestrator.job_drops discord-invite

@@ -4,6 +4,7 @@ import { ContributorsPanel } from '@/components/ContributorsPanel';
 import { MarketplaceView } from '@/components/marketplace/MarketplaceView';
 import { PushOptIn } from '@/components/tdm65/PushOptIn';
 import { TaskDeepLink } from '@/components/tdm65/TaskDeepLink';
+import { Tdm108ClaimSource } from '@/components/tdm108/ClaimSource';
 
 export default function MarketplacePage() {
   return (
@@ -13,6 +14,8 @@ export default function MarketplacePage() {
         {/* TDM-65: paid-task push alerts (opt-in) + landing from a notification tap. */}
         <PushOptIn className="mb-4" />
         <TaskDeepLink />
+        {/* TDM-108: job-drop attribution (?src= from a social post -> logged with the claim). */}
+        <Tdm108ClaimSource />
       </div>
       {/* TDM-61: open paid tasks, claim, held-claim lease, my tasks. */}
       <MarketplaceView />

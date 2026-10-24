@@ -95,6 +95,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(interventions_router)
     from .paging_api import paging_router  # TDM-65: /push/config, /push/subscribe, /push/test (web push)
     app.include_router(paging_router)
+    from .job_drops_api import job_drops_router  # TDM-108: /drops (ops), /drops/share/{task}.png, /drops/claim-src
+    app.include_router(job_drops_router)
     from .robot_commands_api import robot_commands_router  # TDM-78: POST /robots/{id}/commands (operator key; soft_estop open)
     app.include_router(robot_commands_router)
     from .reset_api import reset_router  # TDM-62: GET /resets/{id}, POST /resets/{id}/photo (reset task page)

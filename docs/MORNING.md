@@ -58,6 +58,22 @@ The build ran overnight from the Tandem board (`HL4RZKEQ`, http://127.0.0.1:7891
   - Not yet exercised: the 7-dim YAM mapping on the real-YAM smoke checkpoint.
 - **TDM-81 (Claude connector)** is deliberately left `executing`: it's ready, and you finish it by deploying and connecting claude.ai (`docs/connector.md`).
 
+## Job drops: new paid tasks posted to social channels (TDM-108)
+Every new paid task (clean demo, recovery takeover, reset) gets a GeonosisAI share card (task, pay, time, scene sketch or the reset start photo, QR + short link `/j/<task>/<channel>` that lands on `/marketplace?task=N&src=<channel>`) and a post per channel. **Default `RDF_DROP_MODE=dry_run`: cards and texts are written to `~/.local/state/rdf/job_drops/` and shown at `/ops/drops` (operator login); nothing is posted.** `live` posts only to channels with credentials, at most once per task per channel and 6 drops per hour (`RDF_DROP_MAX_PER_HOUR`). Tasks tagged `[operator]` / `[private]` / `[no-drop]` are never posted. Claims that came from a drop log `job_drop.claimed {src}`; `/ops/drops` shows posts and claims per channel. Keys live in `.env` (see `.env.example`, "Job drops").
+- **Discord first (bot):**
+  1. Developer Portal -> New Application -> Bot -> Reset Token. Put it in `.env` as `DISCORD_BOT_TOKEN=` (no message-content or other privileged intents needed; we only post over REST).
+  2. Discord -> Settings -> Advanced -> Developer Mode on; right-click the channel -> Copy Channel ID -> `RDF_DROP_DISCORD_CHANNEL_ID=`.
+  3. `scripts/discord-invite-url` prints the invite link (scope `bot`, View Channel + Send Messages + Embed Links + Attach Files). Open it, pick the server, authorize. If the channel is private, add the bot's role to it.
+  4. Check without posting: `cd services/orchestrator && uv run python -m rdf_orchestrator.job_drops discord-check` (prints the bot name and `#channel`).
+  5. Preview: `uv run python -m rdf_orchestrator.job_drops test --channel discord` (dry run: writes a SAMPLE card and prints its path).
+  6. Go live: set `RDF_DROP_MODE=live` in `.env`, run the same `test --channel discord` once (posts one card labelled "Sample post, no task behind it"), then restart the orchestrator so real tasks post. Back to `dry_run` to stop.
+  - Webhook alternative: `RDF_DROP_DISCORD_WEBHOOK=<channel webhook URL>` (no bot, no button on the post).
+- **Bluesky:** a handle + an **app password** (Settings -> Privacy and security -> App passwords): `RDF_DROP_BSKY_HANDLE`, `RDF_DROP_BSKY_APP_PASSWORD`. Free.
+- **X:** developer account on pay-per-use (no free tier since Feb 2026; the Developer Console shows current rates; docs list Post create $0.015, with a URL $0.200). App with **Read and write** permission, OAuth 1.0a keys: `RDF_DROP_X_API_KEY`, `RDF_DROP_X_API_SECRET`, plus the posting account's `RDF_DROP_X_ACCESS_TOKEN`, `RDF_DROP_X_ACCESS_SECRET`. The link stays in the card (QR + short link) so each post bills at the plain rate; `RDF_DROP_X_INCLUDE_LINK=1` puts it in the text. The estimate is logged as `cost_estimate` on `job_drop.posted`.
+- **Telegram:** @BotFather -> /newbot -> `RDF_DROP_TELEGRAM_BOT_TOKEN`; add the bot to the channel as an admin; `RDF_DROP_TELEGRAM_CHAT_ID=@channelname` (or the -100... id).
+- **Instagram:** not built. It needs a professional account and Meta app review.
+- **Phones on `make demo-public`:** links use `RDF_WEB_PUBLIC_URL` (set by demo-public) or `$TMPDIR/rdf-demo-public/public.json`. Someone without the access code is sent to `/join` and back to the task. `RDF_DROP_SHOW_ACCESS_CODE=1` prints the code on the card and post and pre-fills it on `/join` (they still tap Continue). Tradeoff: anyone who sees the post can then get past the code. Off by default. A quick-tunnel URL changes every run, so old posts' links die with it.
+
 ## Phone access (`make demo-public`)
 Judges' phones open the local demo over HTTPS through Cloudflare. Nothing listens on the venue Wi-Fi: every process binds 127.0.0.1 and one outbound tunnel reaches a local edge.
 - **Run it:** `make demo-public` boots `make demo` (without its dev web), a production web build, the edge and one cloudflared **quick tunnel**. It prints the public link, a terminal QR code for `/join` and the **access code**. Stop it with Ctrl-C or `make demo-public-down` (the tunnel goes first); `make demo-public-status` shows the URL and code again. The first run builds the web app (1–3 min); later runs reuse the build. Other ports: `ARGS="--port 3461 --stdb-port ... --demo-args '--sim-state-port ... --policy-port ...'"`.

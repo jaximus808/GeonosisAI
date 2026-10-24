@@ -17,6 +17,8 @@ dependencies = [
     "rdf-factory",  # TDM-27 resume bridge -> TDM-30 FactoryClient.resume
     "pywebpush>=2.0",  # TDM-65 web push (VAPID) paging
     "rdf-training",  # TDM-42 checkpoint registry + Modal cost (rdf_training.registry / cost)
+    "pillow>=10.3",  # TDM-108 job-drop share cards
+    "qrcode>=7.4",  # TDM-108 QR code on the card
 ]
 
 [project.scripts]

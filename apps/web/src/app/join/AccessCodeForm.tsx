@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 // make demo-public: the public link asks for the short code shown next to the QR, once per browser.
 // The edge (scripts/demo/public_guard.py) checks it at POST /_rdf/access and sets an HttpOnly cookie;
@@ -14,10 +14,30 @@ function safeNext(next: string | undefined): string | null {
   return next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : null;
 }
 
+/** TDM-108: a job-drop link with RDF_DROP_SHOW_ACCESS_CODE=1 carries ?code= (on /join itself or inside
+ * next=/j/N/src?code=...). It only pre-fills the box; the person still taps Continue (never auto-submitted,
+ * so another site cannot post it for them). */
+function prefillCode(next: string | undefined): string {
+  const ok = (v: string | null) => (v && /^[A-Za-z0-9]{4,12}$/.test(v) ? v.toUpperCase() : '');
+  try {
+    const top = ok(new URLSearchParams(window.location.search).get('code'));
+    if (top) return top;
+    const n = safeNext(next);
+    return n ? ok(new URL(n, window.location.origin).searchParams.get('code')) : '';
+  } catch {
+    return '';
+  }
+}
+
 export function AccessCodeForm({ next }: { next?: string }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const c = prefillCode(next);
+    if (c) setCode((cur) => cur || c);
+  }, [next]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();

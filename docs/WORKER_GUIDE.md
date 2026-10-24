@@ -100,3 +100,10 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - In Python, use `services/orchestrator/src/rdf_orchestrator/storage.py`: `get_backend()` → `signed_put(key, content_type)`, `signed_get(uri_or_key)`, `put(key, bytes|Path)`, `list(prefix)`. Build keys with `episode_key(ticket, episode, filename)`, which gives `tickets/{t}/episodes/{e}/{file}`. URIs look like `modal-vol://rdf-media/<key>`.
 - Over HTTP, through the orchestrator: `POST /uploads/sign`, `POST /uploads/sign-batch`, `GET /media/sign?uri=`, `GET /media/list?ticket_id=&episode_id=`.
 - The Modal app must not use `from __future__ import annotations`, because FastAPI then misreads `Request`.
+
+## Full-loop test harness (TDM-28): use it to prove your work end to end
+- `make test-loop` runs a scripted driver. `make test-loop DRIVER=orchestrator` runs the real orchestrator, and skips until the TDM-22 flywheel is registered in `rdf_orchestrator.handlers`.
+- `make fake-stack ARGS="-- --success-prob 0.5"` boots everything and leaves it running for manual testing. It prints the `SPACETIME_*` lines to point your service at.
+- Everything runs on a throwaway local SpacetimeDB at 127.0.0.1:3028 (db `tdm28loop`), with data under `$TMPDIR/tdm-28/`. It's wiped on every boot and never touches maincloud.
+- The fake robot is `rdf-robot-client --fake`. Every fake output is tagged `[FAKE]` / `fake: true`, and its payload keys are documented in the `fake.py` docstring.
+- The orchestrator driver makes **real** Anthropic calls on fake data (diagnose and planner). That's fine for tests, but run it on purpose, not in a loop.

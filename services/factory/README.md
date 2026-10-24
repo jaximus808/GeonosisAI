@@ -106,6 +106,59 @@ Each event has the same JSON shape everywhere:
 - Subscribe to `event_log` and keep rows whose `type` starts with `droid.`, grouped by `payload.agent_session_id`, for the step history.
 - Credits per session come from `turn_completed.data.credits_total`.
 - The reducer-side rows (`agent.session_created`, `agent.step`, `agent.waiting_for`, `agent.resumed`) are logged under the caller's actor (`factory`).
+- Or use the TDM-35 feed below, which does all of this already.
+
+## Agents panel feed (TDM-35): AgentFeed v1
+
+One normalised, ordered stream per agent. It merges `agent_session` rows, the `droid.*` rows above (reused unchanged), the `agent.*` reducer echoes, the resume bridge's `agent.resume_*` rows, and the orchestrator's own agents, which exist only as event_log rows. There are two implementations of the same normaliser, and a golden test keeps them identical (`services/orchestrator/tests/test_tdm35_agents_feed.py` runs the TS file under Node):
+
+| Where | Use | Code |
+|---|---|---|
+| Browser (live, SpacetimeDB subscriptions only) | `const { feed, ready, mode, error } = useAgentFeed({ ticketId?, limit = 20, replay?: true \| 'auto', replaySpeed? })` | `apps/web/src/lib/agentfeed/useAgentFeed.ts`, pure part in `normalize.ts` |
+| Orchestrator HTTP | `GET /agents?ticket_id=&limit=20&replay=0\|1\|auto` | `services/orchestrator/src/rdf_orchestrator/agents_feed.py`, `agents_api.py` |
+| Raw recording | `GET /agents/replay/source` → `{sessions, events}` that the hook plays back | same |
+
+```ts
+AgentFeed = { v: 1, replay: boolean, generated_at_us, agents: AgentView[], replay_source?, replay_reason? }
+AgentView = { key: 'session:<id>' | 'service:<name>', kind: 'droid' | 'session' | 'service', label, role,
+  agent_session_id | null, ticket_id | null, status, current_step, last_update_us,
+  factory_session_id | null, factory_session_ids: string[], waiting_for,
+  usage: { credits_total, turns, input_tokens, output_tokens, seconds } | null,
+  replay: boolean, event_count, events: FeedEvent[] /* oldest -> newest, last `limit` */ }
+FeedEvent = { id: 'ev:<event_log id>' | 'rec:<agent_session_id>:<line>', agent_key, ts_us,
+  kind: 'started'|'step'|'tool_call'|'tool_result'|'message'|'waiting'|'resumed'|'done'|'failed'|'error'|'info',
+  type /* source type, e.g. droid.tool_call */, actor, text /* one line, <=300 chars */, tool, ticket_id, turn,
+  is_error, replay, data /* droid: DroidEvent.data + droid_kind, role, seq, mode, factory_session_id; else the payload */ }
+```
+
+- **Agent order:** droids first, then other agent_sessions, then services. Within each group, the most recently active comes first.
+- **Event order:** `(ts_us, id)`. Droid events use the droid's own `ts_us`, because `seq` restarts in each client process.
+- **Droid kinds:**
+  - `session_started` and `session_restarted` map to `started`.
+  - `turn_started` maps to `step`.
+  - `assistant_text` maps to `message`.
+  - `permission_denied` and `error` map to `error`.
+  - `waiting_for` maps to `waiting`.
+  - `turn_completed` maps to `done` or `failed` from its status, and to `info` otherwise.
+  - `thinking`, `state` and `usage` are dropped.
+- **Duplicates:** for a droid session, `agent.step`, `agent.waiting_for` and `agent.session_updated` repeat the droid.* rows, so they are dropped. `agent.resumed` and `agent.session_created` stay.
+- **Service agents** are matched by type prefix first, then by actor:
+  - `clustering`: `diagnose.*` and `planner.failure_cluster`.
+  - `planner`: `planner.*`.
+  - `reviewer`: `review.*`.
+  - `qa`: `qa.*`.
+  - `dispatcher`: `dispatch.*`.
+  - `eval`: `eval.*`.
+  - `flywheel`: `flywheel.*`.
+  - Rows from `human:*`, `robot:*` and `contributor:*` are skipped, as are `test.`, `infra.`, `spike.` and `probe.` rows.
+  - A type ending `.error`, `.blocked`, `_failed` or `_error` is an error.
+  - Service status is `error` if its last row is an error, `active` if it logged something in the last 5 min, and `idle` otherwise.
+- **Usage** comes from `droid.turn_completed`: credits are the max of `credits_total` and the sum of `credits` (cloud runs report `factoryCredits`), plus the summed tokens and seconds. No jsonl file is needed.
+- **Replay:** every agent and event is flagged `replay: true`, as is `feed.replay`, and the panel must show a "replay" label.
+  - The recording comes from `services/orchestrator/fixtures/tdm35_replay/*.events.jsonl` (TDM-30's proof run), or from `RDF_AGENTS_REPLAY_DIR`. For example, set it to `services/factory/work/state` to replay tonight's local runs.
+  - `replay=auto` (HTTP) or `replay: 'auto'` (hook) uses the live feed, and switches to the recording while SpacetimeDB is unreachable.
+  - `replaySpeed: 4` plays the recording back at 4x and loops, with timestamps rebased to now.
+- **Live proof** (throwaway local SpacetimeDB, no credits): `cd services/orchestrator && uv run python ../../spikes/tdm-35/live_proof.py`. It replays the recording through `Mirror`, and a Node subscriber (`spikes/tdm-35/subscribe_feed.mjs`, using the real bindings and `normalize.ts`) builds the feed from subscriptions. The script checks that this feed matches `GET /agents`.
 
 ## Config (`.env`)
 

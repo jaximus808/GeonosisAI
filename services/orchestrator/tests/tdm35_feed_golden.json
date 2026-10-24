@@ -1,0 +1,2341 @@
+{
+ "all": {
+  "v": 1,
+  "replay": false,
+  "generated_at_us": 1792828046386517,
+  "agents": [
+   {
+    "key": "session:1",
+    "kind": "droid",
+    "label": "data droid #1",
+    "role": "data_droid",
+    "agent_session_id": 1,
+    "ticket_id": 1,
+    "status": "done",
+    "current_step": "turn 3 done (6s, 1158 credits)",
+    "last_update_us": 1792828061179732,
+    "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71",
+    "factory_session_ids": [
+     "63583e50-59b4-4305-b908-dd80bf7c8d71"
+    ],
+    "waiting_for": null,
+    "usage": {
+     "credits_total": 10891.0,
+     "turns": 3,
+     "input_tokens": 15413,
+     "output_tokens": 1837,
+     "seconds": 35.4
+    },
+    "replay": false,
+    "event_count": 44,
+    "events": [
+     {
+      "id": "ev:137",
+      "ts_us": 1792827990448210,
+      "type": "droid.tool_call",
+      "actor": "droid:data",
+      "tool": "TodoWrite",
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_call",
+      "text": "TodoWrite",
+      "data": {
+       "tool_use_id": "call_TOFS2Ca0f76IdQM9NcYTK7bg",
+       "input": {
+        "todos": "1. [completed] Read pyproject.toml for common, factory, orchestrator, payments, robot-client, and training\n2. [completed] Write services_inventory.md in the session workspace\n3. [completed] Write resume_payload.json with the required waiting state\n4. [completed] Return the required WAITING_FOR status line"
+       },
+       "droid_kind": "tool_call",
+       "role": "data_droid",
+       "seq": 24,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:139",
+      "ts_us": 1792827990449938,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "I’ve finished the files. I’m marking the plan complete, then I’ll return the required waiting status.",
+      "data": {
+       "chars": 101,
+       "message_id": "8191dd1e-1019-4a03-a534-f47cc2d15962",
+       "full_text": "I’ve finished the files. I’m marking the plan complete, then I’ll return the required waiting status.",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 25,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:141",
+      "ts_us": 1792827990457440,
+      "type": "droid.tool_result",
+      "actor": "droid:data",
+      "tool": "TodoWrite",
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_result",
+      "text": "TodoWrite ok: TODO List Updated",
+      "data": {
+       "tool_use_id": "call_TOFS2Ca0f76IdQM9NcYTK7bg",
+       "is_error": false,
+       "preview": "TODO List Updated",
+       "droid_kind": "tool_result",
+       "role": "data_droid",
+       "seq": 26,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:142",
+      "ts_us": 1792827992042374,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "WAITING_FOR dataset:accepted_count>=5",
+      "data": {
+       "chars": 37,
+       "message_id": "4df9e8d1-0a72-4ef8-aee3-7c42801a561f",
+       "full_text": "WAITING_FOR dataset:accepted_count>=5",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 27,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:144",
+      "ts_us": 1792827993621665,
+      "type": "droid.waiting_for",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "waiting",
+      "text": "waiting for dataset:accepted_count>=5",
+      "data": {
+       "predicate": {
+        "table": "dataset",
+        "field": "accepted_count",
+        "op": ">=",
+        "value": 5,
+        "raw": "dataset:accepted_count>=5",
+        "ticket_id": 1
+       },
+       "resume_payload": {
+        "done": "Wrote services_inventory.md with the requested table for existing Python services under services/.",
+        "next": "Wait for human-collected episodes, then continue from this session state when [resume-bridge] arrives."
+       },
+       "droid_kind": "waiting_for",
+       "role": "data_droid",
+       "seq": 28,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:146",
+      "ts_us": 1792827993646090,
+      "type": "droid.turn_completed",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "info",
+      "text": "turn 1 waiting_for (22s, 8068 credits)",
+      "data": {
+       "subtype": "success",
+       "success": true,
+       "status": "waiting_for",
+       "credits": 8068.0,
+       "credits_total": 8068.0,
+       "seconds": 21.5,
+       "input_tokens": 13231,
+       "output_tokens": 1385,
+       "final_text": "WAITING_FOR dataset:accepted_count>=5",
+       "error": null,
+       "droid_kind": "turn_completed",
+       "role": "data_droid",
+       "seq": 29,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:148",
+      "ts_us": 1792828023685467,
+      "type": "agent.resume_delivering",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 1,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "info",
+      "text": "resume bridge: delivering wake-up",
+      "data": {
+       "session_id": 1,
+       "ticket_id": 1,
+       "bridge": "b1"
+      }
+     },
+     {
+      "id": "ev:149",
+      "ts_us": 1792828023686467,
+      "type": "agent.resumed",
+      "actor": "factory",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 1,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "resumed",
+      "text": "resumed (native): dataset accepted_count>=5",
+      "data": {
+       "session_id": 1,
+       "role": "data_droid",
+       "ticket_id": 1,
+       "from": "waiting_for",
+       "mode": "native",
+       "reason": "dataset accepted_count>=5"
+      }
+     },
+     {
+      "id": "ev:147",
+      "ts_us": 1792828023688467,
+      "type": "droid.turn_started",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 2,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "step",
+      "text": "turn 2 (native_resume): [resume-bridge] predicate satisfied: dataset for ticket 1 now has accepted_count=5. Without re-reading the manifests, append a section '## Episode consumers' to services_inventory.md naming which of …",
+      "data": {
+       "protocol": "native_resume",
+       "prompt_preview": "[resume-bridge] predicate satisfied: dataset for ticket 1 now has accepted_count=5. Without re-reading the manifests, append a section '## Episode consumers' to services_inventory.md naming which of the services in your table read recorded episodes (one line each, with why), then finish.",
+       "droid_kind": "turn_started",
+       "role": "data_droid",
+       "seq": 1,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:150",
+      "ts_us": 1792828029713998,
+      "type": "droid.tool_call",
+      "actor": "droid:data",
+      "tool": "ApplyPatch",
+      "turn": 2,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_call",
+      "text": "ApplyPatch update services/factory/work/sessions/1/services_inventory.md",
+      "data": {
+       "tool_use_id": "call_FRPdi2gbQf1eSEbN6cfrstKJ",
+       "input": {
+        "input": "*** Begin Patch\n*** Update File: /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/1/services_inventory.md\n@@\n | payments | rdf-payments | Stripe Connect test-mode payouts (contributors and dataset sellers). TEST MODE ONLY. | rdf-common; stripe==16.0.0; python-dotenv>=1.0 |\n | robot-client | rdf-robot-client | Robot PC bridge: YAM arm control, cameras, recording, takeover/teleop, rollouts and eval trials | rdf-common; numpy>=1.26; pyyaml>=6; opencv-python-headless>=4.10,<5 |\n | training | rdf-training | Episode conversion to LeRobot format, pi0.5 fine-tune, checkpoin… (+430 chars)"
+       },
+       "droid_kind": "tool_call",
+       "role": "data_droid",
+       "seq": 2,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:152",
+      "ts_us": 1792828029745628,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 2,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "I’m appending the episode-consumer section to the inventory file now, using the service info already gathered.",
+      "data": {
+       "chars": 110,
+       "message_id": "33b476ec-6e04-420f-bc85-db15f3d4a1b0",
+       "full_text": "I’m appending the episode-consumer section to the inventory file now, using the service info already gathered.",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 3,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:154",
+      "ts_us": 1792828029895510,
+      "type": "droid.tool_result",
+      "actor": "droid:data",
+      "tool": "ApplyPatch",
+      "turn": 2,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_result",
+      "text": "ApplyPatch ok: {\"success\":true,\"files\":[{\"file_path\":\"/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/1/se",
+      "data": {
+       "tool_use_id": "call_FRPdi2gbQf1eSEbN6cfrstKJ",
+       "is_error": false,
+       "preview": "{\"success\":true,\"files\":[{\"file_path\":\"/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/1/services_inventory.md\",\"display_operation\":\"update\",\"diff\":\"--- previous\\t\\n+++ current\\t\\n@@ -8,3 +8,9 @@\\n | payments | rdf-payments | Stripe Connect test-mode payouts (contributors and dataset sellers). TEST MODE ONLY. | rdf-common; stripe==16.0.0; python-dotenv>=1.0 |\\n | robot-client | rdf-robot-client | Robot PC bridge: YAM arm control, cameras, recording, takeover/teleop, rollouts and eval trials | rdf-common; numpy>=1.26; pyyaml>=6; opencv-python-headless>=4.10,<5 |\\n …",
+       "droid_kind": "tool_result",
+       "role": "data_droid",
+       "seq": 4,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:166",
+      "ts_us": 1792828031178732,
+      "type": "agent.resume_delivered",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 1,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "resumed",
+      "text": "resume bridge: delivered (native_resume)",
+      "data": {
+       "session_id": 1,
+       "ticket_id": 1,
+       "protocol": "native_resume"
+      }
+     },
+     {
+      "id": "ev:155",
+      "ts_us": 1792828033756176,
+      "type": "droid.turn_completed",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 2,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "info",
+      "text": "turn 2 paused (8s, 1665 credits)",
+      "data": {
+       "subtype": "success",
+       "success": true,
+       "status": "paused",
+       "credits": 1665.0,
+       "credits_total": 9733.0,
+       "seconds": 7.9,
+       "input_tokens": 1130,
+       "output_tokens": 369,
+       "final_text": "I’m appending the episode-consumer section to the inventory file now, using the service info already gathered.",
+       "error": null,
+       "droid_kind": "turn_completed",
+       "role": "data_droid",
+       "seq": 5,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:156",
+      "ts_us": 1792828053204550,
+      "type": "droid.turn_started",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "step",
+      "text": "turn 3 (send): Read services_inventory.md once to check it has both the table and the Episode consumers section; if so the task is finished. (End your reply with the final status line from the rdf-factory contract:…",
+      "data": {
+       "protocol": "send",
+       "prompt_preview": "Read services_inventory.md once to check it has both the table and the Episode consumers section; if so the task is finished.\n\n(End your reply with the final status line from the rdf-factory contract: DONE or WAITING_FOR <table>:<field><op><value>.)",
+       "droid_kind": "turn_started",
+       "role": "data_droid",
+       "seq": 1,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:157",
+      "ts_us": 1792828057957777,
+      "type": "droid.tool_call",
+      "actor": "droid:data",
+      "tool": "Read",
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_call",
+      "text": "Read services/factory/work/sessions/1/services_inventory.md",
+      "data": {
+       "tool_use_id": "call_HIF0QTb7CH0pnqaJsQQxnNm7",
+       "input": {
+        "file_path": "/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/1/services_inventory.md",
+        "line_numbers": true
+       },
+       "droid_kind": "tool_call",
+       "role": "data_droid",
+       "seq": 2,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:159",
+      "ts_us": 1792828057959973,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "I’m checking the inventory file once, then I’ll confirm completion.",
+      "data": {
+       "chars": 67,
+       "message_id": "f331a84b-38a0-4614-a853-80bc5a456804",
+       "full_text": "I’m checking the inventory file once, then I’ll confirm completion.",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 3,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:161",
+      "ts_us": 1792828057978196,
+      "type": "droid.tool_result",
+      "actor": "droid:data",
+      "tool": "Read",
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_result",
+      "text": "Read ok: 1→# Python Services Inventory 2→ 3→| service | package name | description | direct dependencies | 4→|---|---|---|---| 5→",
+      "data": {
+       "tool_use_id": "call_HIF0QTb7CH0pnqaJsQQxnNm7",
+       "is_error": false,
+       "preview": "1→# Python Services Inventory\n2→\n3→| service | package name | description | direct dependencies |\n4→|---|---|---|---|\n5→| common | rdf-common | Shared code for the Python services: fail-fast settings loaders, SpacetimeDB client | pydantic-settings>=2.4; httpx>=0.27; websockets>=13; numpy>=1.26; pyarrow>=16; pyyaml>=6 |\n6→| factory | rdf-factory | Factory Droid session management (onboarding, data, training Droids) | rdf-common; droid-sdk>=0.5,<0.6 |\n7→| orchestrator | rdf-orchestrator | Planner and reviewer loops, dispatcher; writes decisions to the event log | rdf-common; fastapi>=0.115; uvi…",
+       "droid_kind": "tool_result",
+       "role": "data_droid",
+       "seq": 4,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:162",
+      "ts_us": 1792828059616732,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "DONE",
+      "data": {
+       "chars": 4,
+       "message_id": "b2069491-71f0-4c33-b862-d2cc42478f24",
+       "full_text": "DONE",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 5,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:164",
+      "ts_us": 1792828061178732,
+      "type": "droid.turn_completed",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "done",
+      "text": "turn 3 done (6s, 1158 credits)",
+      "data": {
+       "subtype": "success",
+       "success": true,
+       "status": "done",
+       "credits": 1158.0,
+       "credits_total": 10891.0,
+       "seconds": 6.0,
+       "input_tokens": 1052,
+       "output_tokens": 83,
+       "final_text": "DONE",
+       "error": null,
+       "droid_kind": "turn_completed",
+       "role": "data_droid",
+       "seq": 6,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     }
+    ]
+   },
+   {
+    "key": "session:9",
+    "kind": "droid",
+    "label": "training droid #9",
+    "role": "training_droid",
+    "agent_session_id": 9,
+    "ticket_id": null,
+    "status": "failed",
+    "current_step": "turn 1 failed",
+    "last_update_us": 1792827976386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": {
+     "credits_total": 1200.5,
+     "turns": 1,
+     "input_tokens": 10,
+     "output_tokens": 5,
+     "seconds": 3.25
+    },
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:170",
+      "ts_us": 1792827974386517,
+      "type": "droid.session_started",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "started",
+      "text": "Factory session f9 started (cloud)",
+      "data": {
+       "model": "m",
+       "droid_kind": "session_started",
+       "role": "training_droid",
+       "seq": 1,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     },
+     {
+      "id": "ev:171",
+      "ts_us": 1792827975386517,
+      "type": "droid.error",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "error",
+      "text": "SessionGone: computer error",
+      "data": {
+       "error_type": "SessionGone",
+       "detail": "x",
+       "droid_kind": "error",
+       "role": "training_droid",
+       "seq": 2,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     },
+     {
+      "id": "ev:172",
+      "ts_us": 1792827976386517,
+      "type": "droid.turn_completed",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "failed",
+      "text": "turn 1 failed",
+      "data": {
+       "status": "failed",
+       "credits": 1200.5,
+       "credits_total": null,
+       "seconds": 3.25,
+       "tokens": {
+        "input_tokens": 10,
+        "output_tokens": 5
+       },
+       "droid_kind": "turn_completed",
+       "role": "training_droid",
+       "seq": 3,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     }
+    ]
+   },
+   {
+    "key": "session:3",
+    "kind": "droid",
+    "label": "onb (onboarding droid #3)",
+    "role": "onboarding_droid",
+    "agent_session_id": 3,
+    "ticket_id": 2,
+    "status": "starting",
+    "current_step": "starting: brief",
+    "last_update_us": 1792827970386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 0,
+    "events": []
+   },
+   {
+    "key": "session:2",
+    "kind": "session",
+    "label": "planner-loop (planner #2)",
+    "role": "planner",
+    "agent_session_id": 2,
+    "ticket_id": 2,
+    "status": "waiting_for",
+    "current_step": "waiting",
+    "last_update_us": 1792827973386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": {
+     "table": "dataset",
+     "field": "accepted_count",
+     "op": ">=",
+     "value": 5
+    },
+    "usage": null,
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:167",
+      "ts_us": 1792827971386517,
+      "type": "agent.session_created",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "info",
+      "text": "session created (planner) planner-loop",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "name": "planner-loop",
+       "ticket_id": 2,
+       "status": "starting"
+      }
+     },
+     {
+      "id": "ev:168",
+      "ts_us": 1792827972386517,
+      "type": "agent.step",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "step",
+      "text": "diagnosing eval 4",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "step": "diagnosing eval 4",
+       "from": "starting",
+       "to": "running"
+      }
+     },
+     {
+      "id": "ev:169",
+      "ts_us": 1792827973386517,
+      "type": "agent.waiting_for",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "waiting",
+      "text": "waiting for dataset:accepted_count>=5",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "from": "running",
+       "predicate": {
+        "table": "dataset",
+        "field": "accepted_count",
+        "op": ">=",
+        "value": 5,
+        "raw": "dataset:accepted_count>=5"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:flywheel",
+    "kind": "service",
+    "label": "Flywheel",
+    "role": "flywheel",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "flywheel.transition: below target",
+    "last_update_us": 1792827986386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:183",
+      "ts_us": 1792827986386517,
+      "type": "flywheel.transition",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:flywheel",
+      "kind": "step",
+      "text": "flywheel.transition: below target",
+      "data": {
+       "ticket_id": 2,
+       "from": "evaluating",
+       "to": "planning",
+       "reason": "below target"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:planner",
+    "kind": "service",
+    "label": "Planner",
+    "role": "planner",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "data plan: ? × ? (iteration ?, est $0.00) —",
+    "last_update_us": 1792827986286517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:175",
+      "ts_us": 1792827981386517,
+      "type": "planner.data_plan",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "step",
+      "text": "data plan: 5 × recovery (iteration 1, est $15.00) — grasp failures dominate",
+      "data": {
+       "data_plan_id": 3,
+       "ticket_id": 2,
+       "iteration": 1,
+       "data_type": "recovery",
+       "amount": 5,
+       "unit_price_cents": 300,
+       "est_cost_cents": 1500,
+       "reasoning": "grasp  failures\ndominate",
+       "evidence": {}
+      }
+     },
+     {
+      "id": "ev:176",
+      "ts_us": 1792827981886517,
+      "type": "planner.blocked",
+      "actor": "planner",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "error",
+      "text": "planner.blocked: budget exhausted",
+      "data": {
+       "ticket_id": 2,
+       "iteration": 1,
+       "reason": "budget exhausted"
+      }
+     },
+     {
+      "id": "ev:188",
+      "ts_us": 1792827986286517,
+      "type": "planner.data_plan",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "step",
+      "text": "data plan: ? × ? (iteration ?, est $0.00) —",
+      "data": {}
+     }
+    ]
+   },
+   {
+    "key": "service:eval",
+    "kind": "service",
+    "label": "Eval runner",
+    "role": "eval",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+    "last_update_us": 1792827985386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:182",
+      "ts_us": 1792827985386517,
+      "type": "eval.dispatched",
+      "actor": "orchestrator:eval",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:eval",
+      "kind": "step",
+      "text": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 5,
+       "trials": 10
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:dispatcher",
+    "kind": "service",
+    "label": "Dispatcher",
+    "role": "dispatcher",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+    "last_update_us": 1792827984386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:181",
+      "ts_us": 1792827984386517,
+      "type": "dispatch.plan_dispatched",
+      "actor": "orchestrator:dispatcher",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:dispatcher",
+      "kind": "step",
+      "text": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+      "data": {
+       "ticket_id": 2,
+       "data_plan_id": 3,
+       "tasks": 5
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:qa",
+    "kind": "service",
+    "label": "Dataset QA",
+    "role": "qa",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "error",
+    "current_step": "qa.error: anthropic 529",
+    "last_update_us": 1792827983886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:179",
+      "ts_us": 1792827983386517,
+      "type": "qa.dataset_checked",
+      "actor": "orchestrator.dataset_qa",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:qa",
+      "kind": "step",
+      "text": "qa.dataset_checked (episode_id=13, ticket_id=2, passed=true, score=0.5)",
+      "data": {
+       "episode_id": 13,
+       "ticket_id": 2,
+       "passed": true,
+       "score": 0.5,
+       "note": "ünïcode ok"
+      }
+     },
+     {
+      "id": "ev:180",
+      "ts_us": 1792827983886517,
+      "type": "qa.error",
+      "actor": "orchestrator.llm_qa",
+      "tool": null,
+      "turn": null,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "service:qa",
+      "kind": "error",
+      "text": "qa.error: anthropic 529",
+      "data": {
+       "stage": "llm_qa",
+       "episode_id": 14,
+       "error": "anthropic 529"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:reviewer",
+    "kind": "service",
+    "label": "Reviewer",
+    "role": "reviewer",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "episode 12 rejected: gripper never closed",
+    "last_update_us": 1792827982886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:177",
+      "ts_us": 1792827982386517,
+      "type": "review.accepted",
+      "actor": "reviewer",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:reviewer",
+      "kind": "step",
+      "text": "episode 11 accepted",
+      "data": {
+       "review_id": 1,
+       "episode_id": 11,
+       "ticket_id": 2,
+       "kind": "recovery",
+       "reason": "",
+       "metrics": {
+        "jerk": 0.1
+       }
+      }
+     },
+     {
+      "id": "ev:178",
+      "ts_us": 1792827982886517,
+      "type": "review.rejected",
+      "actor": "reviewer",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 3,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:reviewer",
+      "kind": "step",
+      "text": "episode 12 rejected: gripper never closed",
+      "data": {
+       "review_id": 2,
+       "episode_id": 12,
+       "ticket_id": 3,
+       "reason": "gripper never closed"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:clustering",
+    "kind": "service",
+    "label": "Failure clustering",
+    "role": "clustering",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+    "last_update_us": 1792827980886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:173",
+      "ts_us": 1792827980386517,
+      "type": "diagnose.clusters",
+      "actor": "orchestrator.diagnose",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "2 failure clusters from eval 4",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 4,
+       "clusters": [
+        {
+         "label": "missed grasp"
+        },
+        {
+         "label": "drop"
+        }
+       ]
+      }
+     },
+     {
+      "id": "ev:174",
+      "ts_us": 1792827980886517,
+      "type": "planner.failure_cluster",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+      "data": {
+       "failure_cluster_id": 7,
+       "ticket_id": 2,
+       "iteration": 1,
+       "label": "missed grasp",
+       "count": 3,
+       "example_episode_ids": [
+        1,
+        2
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "ticket2": {
+  "v": 1,
+  "replay": false,
+  "generated_at_us": 1792828046386517,
+  "agents": [
+   {
+    "key": "session:3",
+    "kind": "droid",
+    "label": "onb (onboarding droid #3)",
+    "role": "onboarding_droid",
+    "agent_session_id": 3,
+    "ticket_id": 2,
+    "status": "starting",
+    "current_step": "starting: brief",
+    "last_update_us": 1792827970386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 0,
+    "events": []
+   },
+   {
+    "key": "session:2",
+    "kind": "session",
+    "label": "planner-loop (planner #2)",
+    "role": "planner",
+    "agent_session_id": 2,
+    "ticket_id": 2,
+    "status": "waiting_for",
+    "current_step": "waiting",
+    "last_update_us": 1792827973386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": {
+     "table": "dataset",
+     "field": "accepted_count",
+     "op": ">=",
+     "value": 5
+    },
+    "usage": null,
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:167",
+      "ts_us": 1792827971386517,
+      "type": "agent.session_created",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "info",
+      "text": "session created (planner) planner-loop",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "name": "planner-loop",
+       "ticket_id": 2,
+       "status": "starting"
+      }
+     },
+     {
+      "id": "ev:168",
+      "ts_us": 1792827972386517,
+      "type": "agent.step",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "step",
+      "text": "diagnosing eval 4",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "step": "diagnosing eval 4",
+       "from": "starting",
+       "to": "running"
+      }
+     },
+     {
+      "id": "ev:169",
+      "ts_us": 1792827973386517,
+      "type": "agent.waiting_for",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "waiting",
+      "text": "waiting for dataset:accepted_count>=5",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "from": "running",
+       "predicate": {
+        "table": "dataset",
+        "field": "accepted_count",
+        "op": ">=",
+        "value": 5,
+        "raw": "dataset:accepted_count>=5"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:flywheel",
+    "kind": "service",
+    "label": "Flywheel",
+    "role": "flywheel",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "flywheel.transition: below target",
+    "last_update_us": 1792827986386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:183",
+      "ts_us": 1792827986386517,
+      "type": "flywheel.transition",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:flywheel",
+      "kind": "step",
+      "text": "flywheel.transition: below target",
+      "data": {
+       "ticket_id": 2,
+       "from": "evaluating",
+       "to": "planning",
+       "reason": "below target"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:eval",
+    "kind": "service",
+    "label": "Eval runner",
+    "role": "eval",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+    "last_update_us": 1792827985386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:182",
+      "ts_us": 1792827985386517,
+      "type": "eval.dispatched",
+      "actor": "orchestrator:eval",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:eval",
+      "kind": "step",
+      "text": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 5,
+       "trials": 10
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:dispatcher",
+    "kind": "service",
+    "label": "Dispatcher",
+    "role": "dispatcher",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+    "last_update_us": 1792827984386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:181",
+      "ts_us": 1792827984386517,
+      "type": "dispatch.plan_dispatched",
+      "actor": "orchestrator:dispatcher",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:dispatcher",
+      "kind": "step",
+      "text": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+      "data": {
+       "ticket_id": 2,
+       "data_plan_id": 3,
+       "tasks": 5
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:qa",
+    "kind": "service",
+    "label": "Dataset QA",
+    "role": "qa",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "qa.dataset_checked (episode_id=13, ticket_id=2, passed=true, score=0.5)",
+    "last_update_us": 1792827983386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:179",
+      "ts_us": 1792827983386517,
+      "type": "qa.dataset_checked",
+      "actor": "orchestrator.dataset_qa",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:qa",
+      "kind": "step",
+      "text": "qa.dataset_checked (episode_id=13, ticket_id=2, passed=true, score=0.5)",
+      "data": {
+       "episode_id": 13,
+       "ticket_id": 2,
+       "passed": true,
+       "score": 0.5,
+       "note": "ünïcode ok"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:reviewer",
+    "kind": "service",
+    "label": "Reviewer",
+    "role": "reviewer",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "episode 11 accepted",
+    "last_update_us": 1792827982386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:177",
+      "ts_us": 1792827982386517,
+      "type": "review.accepted",
+      "actor": "reviewer",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:reviewer",
+      "kind": "step",
+      "text": "episode 11 accepted",
+      "data": {
+       "review_id": 1,
+       "episode_id": 11,
+       "ticket_id": 2,
+       "kind": "recovery",
+       "reason": "",
+       "metrics": {
+        "jerk": 0.1
+       }
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:planner",
+    "kind": "service",
+    "label": "Planner",
+    "role": "planner",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "error",
+    "current_step": "planner.blocked: budget exhausted",
+    "last_update_us": 1792827981886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:175",
+      "ts_us": 1792827981386517,
+      "type": "planner.data_plan",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "step",
+      "text": "data plan: 5 × recovery (iteration 1, est $15.00) — grasp failures dominate",
+      "data": {
+       "data_plan_id": 3,
+       "ticket_id": 2,
+       "iteration": 1,
+       "data_type": "recovery",
+       "amount": 5,
+       "unit_price_cents": 300,
+       "est_cost_cents": 1500,
+       "reasoning": "grasp  failures\ndominate",
+       "evidence": {}
+      }
+     },
+     {
+      "id": "ev:176",
+      "ts_us": 1792827981886517,
+      "type": "planner.blocked",
+      "actor": "planner",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "error",
+      "text": "planner.blocked: budget exhausted",
+      "data": {
+       "ticket_id": 2,
+       "iteration": 1,
+       "reason": "budget exhausted"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:clustering",
+    "kind": "service",
+    "label": "Failure clustering",
+    "role": "clustering",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+    "last_update_us": 1792827980886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:173",
+      "ts_us": 1792827980386517,
+      "type": "diagnose.clusters",
+      "actor": "orchestrator.diagnose",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "2 failure clusters from eval 4",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 4,
+       "clusters": [
+        {
+         "label": "missed grasp"
+        },
+        {
+         "label": "drop"
+        }
+       ]
+      }
+     },
+     {
+      "id": "ev:174",
+      "ts_us": 1792827980886517,
+      "type": "planner.failure_cluster",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+      "data": {
+       "failure_cluster_id": 7,
+       "ticket_id": 2,
+       "iteration": 1,
+       "label": "missed grasp",
+       "count": 3,
+       "example_episode_ids": [
+        1,
+        2
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "limit5": {
+  "v": 1,
+  "replay": false,
+  "generated_at_us": 1792828046386517,
+  "agents": [
+   {
+    "key": "session:1",
+    "kind": "droid",
+    "label": "data droid #1",
+    "role": "data_droid",
+    "agent_session_id": 1,
+    "ticket_id": 1,
+    "status": "done",
+    "current_step": "turn 3 done (6s, 1158 credits)",
+    "last_update_us": 1792828061179732,
+    "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71",
+    "factory_session_ids": [
+     "63583e50-59b4-4305-b908-dd80bf7c8d71"
+    ],
+    "waiting_for": null,
+    "usage": {
+     "credits_total": 10891.0,
+     "turns": 3,
+     "input_tokens": 15413,
+     "output_tokens": 1837,
+     "seconds": 35.4
+    },
+    "replay": false,
+    "event_count": 44,
+    "events": [
+     {
+      "id": "ev:157",
+      "ts_us": 1792828057957777,
+      "type": "droid.tool_call",
+      "actor": "droid:data",
+      "tool": "Read",
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_call",
+      "text": "Read services/factory/work/sessions/1/services_inventory.md",
+      "data": {
+       "tool_use_id": "call_HIF0QTb7CH0pnqaJsQQxnNm7",
+       "input": {
+        "file_path": "/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/1/services_inventory.md",
+        "line_numbers": true
+       },
+       "droid_kind": "tool_call",
+       "role": "data_droid",
+       "seq": 2,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:159",
+      "ts_us": 1792828057959973,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "I’m checking the inventory file once, then I’ll confirm completion.",
+      "data": {
+       "chars": 67,
+       "message_id": "f331a84b-38a0-4614-a853-80bc5a456804",
+       "full_text": "I’m checking the inventory file once, then I’ll confirm completion.",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 3,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:161",
+      "ts_us": 1792828057978196,
+      "type": "droid.tool_result",
+      "actor": "droid:data",
+      "tool": "Read",
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "tool_result",
+      "text": "Read ok: 1→# Python Services Inventory 2→ 3→| service | package name | description | direct dependencies | 4→|---|---|---|---| 5→",
+      "data": {
+       "tool_use_id": "call_HIF0QTb7CH0pnqaJsQQxnNm7",
+       "is_error": false,
+       "preview": "1→# Python Services Inventory\n2→\n3→| service | package name | description | direct dependencies |\n4→|---|---|---|---|\n5→| common | rdf-common | Shared code for the Python services: fail-fast settings loaders, SpacetimeDB client | pydantic-settings>=2.4; httpx>=0.27; websockets>=13; numpy>=1.26; pyarrow>=16; pyyaml>=6 |\n6→| factory | rdf-factory | Factory Droid session management (onboarding, data, training Droids) | rdf-common; droid-sdk>=0.5,<0.6 |\n7→| orchestrator | rdf-orchestrator | Planner and reviewer loops, dispatcher; writes decisions to the event log | rdf-common; fastapi>=0.115; uvi…",
+       "droid_kind": "tool_result",
+       "role": "data_droid",
+       "seq": 4,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:162",
+      "ts_us": 1792828059616732,
+      "type": "droid.assistant_text",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "message",
+      "text": "DONE",
+      "data": {
+       "chars": 4,
+       "message_id": "b2069491-71f0-4c33-b862-d2cc42478f24",
+       "full_text": "DONE",
+       "droid_kind": "assistant_text",
+       "role": "data_droid",
+       "seq": 5,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     },
+     {
+      "id": "ev:164",
+      "ts_us": 1792828061178732,
+      "type": "droid.turn_completed",
+      "actor": "droid:data",
+      "tool": null,
+      "turn": 3,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:1",
+      "kind": "done",
+      "text": "turn 3 done (6s, 1158 credits)",
+      "data": {
+       "subtype": "success",
+       "success": true,
+       "status": "done",
+       "credits": 1158.0,
+       "credits_total": 10891.0,
+       "seconds": 6.0,
+       "input_tokens": 1052,
+       "output_tokens": 83,
+       "final_text": "DONE",
+       "error": null,
+       "droid_kind": "turn_completed",
+       "role": "data_droid",
+       "seq": 6,
+       "mode": "local",
+       "factory_session_id": "63583e50-59b4-4305-b908-dd80bf7c8d71"
+      }
+     }
+    ]
+   },
+   {
+    "key": "session:9",
+    "kind": "droid",
+    "label": "training droid #9",
+    "role": "training_droid",
+    "agent_session_id": 9,
+    "ticket_id": null,
+    "status": "failed",
+    "current_step": "turn 1 failed",
+    "last_update_us": 1792827976386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": {
+     "credits_total": 1200.5,
+     "turns": 1,
+     "input_tokens": 10,
+     "output_tokens": 5,
+     "seconds": 3.25
+    },
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:170",
+      "ts_us": 1792827974386517,
+      "type": "droid.session_started",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "started",
+      "text": "Factory session f9 started (cloud)",
+      "data": {
+       "model": "m",
+       "droid_kind": "session_started",
+       "role": "training_droid",
+       "seq": 1,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     },
+     {
+      "id": "ev:171",
+      "ts_us": 1792827975386517,
+      "type": "droid.error",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "error",
+      "text": "SessionGone: computer error",
+      "data": {
+       "error_type": "SessionGone",
+       "detail": "x",
+       "droid_kind": "error",
+       "role": "training_droid",
+       "seq": 2,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     },
+     {
+      "id": "ev:172",
+      "ts_us": 1792827976386517,
+      "type": "droid.turn_completed",
+      "actor": "droid:training",
+      "tool": null,
+      "turn": 1,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "session:9",
+      "kind": "failed",
+      "text": "turn 1 failed",
+      "data": {
+       "status": "failed",
+       "credits": 1200.5,
+       "credits_total": null,
+       "seconds": 3.25,
+       "tokens": {
+        "input_tokens": 10,
+        "output_tokens": 5
+       },
+       "droid_kind": "turn_completed",
+       "role": "training_droid",
+       "seq": 3,
+       "mode": "cloud",
+       "factory_session_id": "f9"
+      }
+     }
+    ]
+   },
+   {
+    "key": "session:3",
+    "kind": "droid",
+    "label": "onb (onboarding droid #3)",
+    "role": "onboarding_droid",
+    "agent_session_id": 3,
+    "ticket_id": 2,
+    "status": "starting",
+    "current_step": "starting: brief",
+    "last_update_us": 1792827970386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 0,
+    "events": []
+   },
+   {
+    "key": "session:2",
+    "kind": "session",
+    "label": "planner-loop (planner #2)",
+    "role": "planner",
+    "agent_session_id": 2,
+    "ticket_id": 2,
+    "status": "waiting_for",
+    "current_step": "waiting",
+    "last_update_us": 1792827973386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": {
+     "table": "dataset",
+     "field": "accepted_count",
+     "op": ">=",
+     "value": 5
+    },
+    "usage": null,
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:167",
+      "ts_us": 1792827971386517,
+      "type": "agent.session_created",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "info",
+      "text": "session created (planner) planner-loop",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "name": "planner-loop",
+       "ticket_id": 2,
+       "status": "starting"
+      }
+     },
+     {
+      "id": "ev:168",
+      "ts_us": 1792827972386517,
+      "type": "agent.step",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "step",
+      "text": "diagnosing eval 4",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "step": "diagnosing eval 4",
+       "from": "starting",
+       "to": "running"
+      }
+     },
+     {
+      "id": "ev:169",
+      "ts_us": 1792827973386517,
+      "type": "agent.waiting_for",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "session:2",
+      "kind": "waiting",
+      "text": "waiting for dataset:accepted_count>=5",
+      "data": {
+       "session_id": 2,
+       "role": "planner",
+       "ticket_id": 2,
+       "from": "running",
+       "predicate": {
+        "table": "dataset",
+        "field": "accepted_count",
+        "op": ">=",
+        "value": 5,
+        "raw": "dataset:accepted_count>=5"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:flywheel",
+    "kind": "service",
+    "label": "Flywheel",
+    "role": "flywheel",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "flywheel.transition: below target",
+    "last_update_us": 1792827986386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:183",
+      "ts_us": 1792827986386517,
+      "type": "flywheel.transition",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:flywheel",
+      "kind": "step",
+      "text": "flywheel.transition: below target",
+      "data": {
+       "ticket_id": 2,
+       "from": "evaluating",
+       "to": "planning",
+       "reason": "below target"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:planner",
+    "kind": "service",
+    "label": "Planner",
+    "role": "planner",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "data plan: ? × ? (iteration ?, est $0.00) —",
+    "last_update_us": 1792827986286517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 3,
+    "events": [
+     {
+      "id": "ev:175",
+      "ts_us": 1792827981386517,
+      "type": "planner.data_plan",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "step",
+      "text": "data plan: 5 × recovery (iteration 1, est $15.00) — grasp failures dominate",
+      "data": {
+       "data_plan_id": 3,
+       "ticket_id": 2,
+       "iteration": 1,
+       "data_type": "recovery",
+       "amount": 5,
+       "unit_price_cents": 300,
+       "est_cost_cents": 1500,
+       "reasoning": "grasp  failures\ndominate",
+       "evidence": {}
+      }
+     },
+     {
+      "id": "ev:176",
+      "ts_us": 1792827981886517,
+      "type": "planner.blocked",
+      "actor": "planner",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "error",
+      "text": "planner.blocked: budget exhausted",
+      "data": {
+       "ticket_id": 2,
+       "iteration": 1,
+       "reason": "budget exhausted"
+      }
+     },
+     {
+      "id": "ev:188",
+      "ts_us": 1792827986286517,
+      "type": "planner.data_plan",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": null,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:planner",
+      "kind": "step",
+      "text": "data plan: ? × ? (iteration ?, est $0.00) —",
+      "data": {}
+     }
+    ]
+   },
+   {
+    "key": "service:eval",
+    "kind": "service",
+    "label": "Eval runner",
+    "role": "eval",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+    "last_update_us": 1792827985386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:182",
+      "ts_us": 1792827985386517,
+      "type": "eval.dispatched",
+      "actor": "orchestrator:eval",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:eval",
+      "kind": "step",
+      "text": "eval.dispatched (ticket_id=2, eval_run_id=5, trials=10)",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 5,
+       "trials": 10
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:dispatcher",
+    "kind": "service",
+    "label": "Dispatcher",
+    "role": "dispatcher",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+    "last_update_us": 1792827984386517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 1,
+    "events": [
+     {
+      "id": "ev:181",
+      "ts_us": 1792827984386517,
+      "type": "dispatch.plan_dispatched",
+      "actor": "orchestrator:dispatcher",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:dispatcher",
+      "kind": "step",
+      "text": "dispatch.plan_dispatched (ticket_id=2, data_plan_id=3, tasks=5)",
+      "data": {
+       "ticket_id": 2,
+       "data_plan_id": 3,
+       "tasks": 5
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:qa",
+    "kind": "service",
+    "label": "Dataset QA",
+    "role": "qa",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "error",
+    "current_step": "qa.error: anthropic 529",
+    "last_update_us": 1792827983886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:179",
+      "ts_us": 1792827983386517,
+      "type": "qa.dataset_checked",
+      "actor": "orchestrator.dataset_qa",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:qa",
+      "kind": "step",
+      "text": "qa.dataset_checked (episode_id=13, ticket_id=2, passed=true, score=0.5)",
+      "data": {
+       "episode_id": 13,
+       "ticket_id": 2,
+       "passed": true,
+       "score": 0.5,
+       "note": "ünïcode ok"
+      }
+     },
+     {
+      "id": "ev:180",
+      "ts_us": 1792827983886517,
+      "type": "qa.error",
+      "actor": "orchestrator.llm_qa",
+      "tool": null,
+      "turn": null,
+      "ticket_id": null,
+      "is_error": true,
+      "replay": false,
+      "agent_key": "service:qa",
+      "kind": "error",
+      "text": "qa.error: anthropic 529",
+      "data": {
+       "stage": "llm_qa",
+       "episode_id": 14,
+       "error": "anthropic 529"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:reviewer",
+    "kind": "service",
+    "label": "Reviewer",
+    "role": "reviewer",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "episode 12 rejected: gripper never closed",
+    "last_update_us": 1792827982886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:177",
+      "ts_us": 1792827982386517,
+      "type": "review.accepted",
+      "actor": "reviewer",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:reviewer",
+      "kind": "step",
+      "text": "episode 11 accepted",
+      "data": {
+       "review_id": 1,
+       "episode_id": 11,
+       "ticket_id": 2,
+       "kind": "recovery",
+       "reason": "",
+       "metrics": {
+        "jerk": 0.1
+       }
+      }
+     },
+     {
+      "id": "ev:178",
+      "ts_us": 1792827982886517,
+      "type": "review.rejected",
+      "actor": "reviewer",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 3,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:reviewer",
+      "kind": "step",
+      "text": "episode 12 rejected: gripper never closed",
+      "data": {
+       "review_id": 2,
+       "episode_id": 12,
+       "ticket_id": 3,
+       "reason": "gripper never closed"
+      }
+     }
+    ]
+   },
+   {
+    "key": "service:clustering",
+    "kind": "service",
+    "label": "Failure clustering",
+    "role": "clustering",
+    "agent_session_id": null,
+    "ticket_id": null,
+    "status": "active",
+    "current_step": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+    "last_update_us": 1792827980886517,
+    "factory_session_id": null,
+    "factory_session_ids": [],
+    "waiting_for": null,
+    "usage": null,
+    "replay": false,
+    "event_count": 2,
+    "events": [
+     {
+      "id": "ev:173",
+      "ts_us": 1792827980386517,
+      "type": "diagnose.clusters",
+      "actor": "orchestrator.diagnose",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "2 failure clusters from eval 4",
+      "data": {
+       "ticket_id": 2,
+       "eval_run_id": 4,
+       "clusters": [
+        {
+         "label": "missed grasp"
+        },
+        {
+         "label": "drop"
+        }
+       ]
+      }
+     },
+     {
+      "id": "ev:174",
+      "ts_us": 1792827980886517,
+      "type": "planner.failure_cluster",
+      "actor": "orchestrator",
+      "tool": null,
+      "turn": null,
+      "ticket_id": 2,
+      "is_error": false,
+      "replay": false,
+      "agent_key": "service:clustering",
+      "kind": "step",
+      "text": "failure cluster \"missed grasp\" (3 trials, iteration 1)",
+      "data": {
+       "failure_cluster_id": 7,
+       "ticket_id": 2,
+       "iteration": 1,
+       "label": "missed grasp",
+       "count": 3,
+       "example_episode_ids": [
+        1,
+        2
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

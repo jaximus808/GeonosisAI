@@ -1,5 +1,5 @@
 """TDM-97 screenshot pair, twin side + fps. Renders /dev/twin at the poses in pair_poses.json with the
-`front` preset (= the sim's exo camera "top") and the `wrist` preset (= the sim's "wrist" camera), as
+`top` camera (= the sim's camera "top") and the `wrist` camera (= the sim's "wrist" camera), as
 640x480 frames next to mujoco_pair.py's, reads the rendered grasp_site back from the scene graph, and
 measures fps on the scripted motion at a desktop and a 390 px phone viewport.
 
@@ -48,8 +48,8 @@ def main() -> None:
         page = ctx.new_page()
         for name, pose in POSES.items():
             q = ",".join(str(v) for v in pose["q"] + [pose.get("gripper", 1.0)])
-            for preset, cam in (("front", "top"), ("wrist", "wrist")):
-                page.goto(f"{base}/dev/twin?q={q}&preset={preset}&ghost=0&w=640")
+            for cam in ("top", "wrist"):
+                page.goto(f"{base}/dev/twin?q={q}&camera={cam}&ghost=0&w=640&spec=sim")
                 wait_ready(page)
                 page.locator('[data-testid="twin-frame"]').screenshot(path=str(out / f"tdm97_{name}_{cam}_twin.png"))
             report["poses"][name] = {"ee_rendered": page.evaluate("() => window.__rdfTwin.ee()")}
@@ -72,10 +72,21 @@ def main() -> None:
         wait_ready(page, 2500)
         report["fps"]["phone_390@3x"] = fps(page)
         page.screenshot(path=str(out / "tdm97_motion_phone390.png"))
-        for preset in ("top", "wrist"):
-            page.goto(f"{base}/dev/twin?preset={preset}")
+        for cam in ("side", "front", "wrist"):
+            page.goto(f"{base}/dev/twin?camera={cam}")
             wait_ready(page, 2500)
-            page.screenshot(path=str(out / f"tdm97_motion_phone390_{preset}.png"))
+            page.screenshot(path=str(out / f"tdm97_motion_phone390_{cam}.png"))
+        ctx.close()
+
+        # four views of one scene at once (four canvases), for each scene spec
+        ctx = browser.new_context(viewport={"width": 1440, "height": 1300}, device_scale_factor=2)
+        page = ctx.new_page()
+        for spec in ("sim", "stack"):
+            page.goto(f"{base}/dev/twin?views=1&spec={spec}")
+            wait_ready(page, 3000)
+            if spec == "sim":
+                report["fps"]["desktop_4views@2x"] = fps(page)
+            page.locator('[data-testid="twin-views"]').screenshot(path=str(out / f"tdm97_views_{spec}.png"))
         ctx.close()
         browser.close()
     print(json.dumps(report, indent=1))

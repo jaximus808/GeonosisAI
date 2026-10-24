@@ -5,7 +5,8 @@
 //   /dev/twin?src=fixture             TDM-96's recorded sim state (SimArm kinematics, not the YAM's)
 //   /dev/twin?q=0,0.98,0.93,-0.73,0,0 hold one pose (the FK / screenshot-pair check)
 //   /dev/twin?ws=<ws url>&token=<t>   a real /ws/state feed (e.g. the MuJoCo sim robot)
-//   &preset=front|top|wrist  &sim=0  &ghost=0  &w=640 (frame width in px, 4:3)
+//   &camera=top|side|front|wrist  &views=1 (all four at once)  &spec=sim|stack (scene spec v1)
+//   &sim=0  &ghost=0  &w=640 (frame width in px, 4:3)
 // In dev, window.__rdfTwin.ee() returns the rendered grasp_site position (robot frame, m).
 
 import dynamic from 'next/dynamic';
@@ -14,10 +15,29 @@ import type { RobotLiveState, Vec3 } from '@/lib/robotview/types';
 import { useRobotLive } from '@/lib/robotview/useRobotLive';
 import { createYamKinematics, YAM_READY } from '@/components/robotview/yamFk';
 import { YAM_MODEL } from '@/components/robotview/yamModel';
-import type { TwinPreset } from '@/components/robotview/RobotTwin3D';
+import type { TwinCamera } from '@/components/robotview/RobotTwin3D';
+import { SIM_DEFAULT_SCENE, type SceneSpecV1 } from '@/lib/robotview/scene';
 
 const RobotTwin3D = dynamic(() => import('@/components/robotview/RobotTwin3D').then((m) => m.RobotTwin3D), { ssr: false });
 const KIN = createYamKinematics(YAM_MODEL);
+const CAMERAS: TwinCamera[] = ['top', 'side', 'front', 'wrist'];
+
+// A second scene, to show the twin draws whatever the spec says (no live poses: sim spec poses).
+const STACK_SCENE: SceneSpecV1 = {
+  version: 1,
+  task: 'Stack the red block on the blue block.',
+  robot: { mount: { pos: [0, 0, 0], quat: [1, 0, 0, 0] } },
+  table: { size: [0.9, 0.8], center: [0.3, 0], top_z: 0, thickness: 0.04, color: '#b9b2a4' },
+  objects: [
+    { id: 'red_block', type: 'box', size: [0.02, 0.02, 0.02], color: '#d42a1f', pose: { pos: [0.28, -0.16, 0.02], quat: [0.97, 0, 0, 0.24] } },
+    { id: 'blue_block', type: 'box', size: [0.025, 0.025, 0.025], color: '#2f5fd0', pose: { pos: [0.34, 0.14, 0.025] } },
+    { id: 'ball', type: 'sphere', size: [0.02], color: '#2fa36b', pose: { pos: [0.44, -0.02, 0.02] } },
+    { id: 'can', type: 'cylinder', size: [0.03, 0.05], color: '#e0e0dc', pose: { pos: [0.18, 0.24, 0.05] } },
+  ],
+  regions: [{ id: 'goal', type: 'box', size: [0.04, 0.04], pos: [0.34, 0.14, 0], color: '#8cc2ff' }],
+  cameras: [{ id: 'top', pos: [0.95, -0.55, 0.62], target: [0.3, 0, 0.05], fovy: 50 }],
+  success: 'on_top(red_block, blue_block)',
+};
 
 // Joint waypoints solved with yam_kinematics IK (PoE): tool pitched down over the cube / plate of the
 // MuJoCo scene. [q(6), gripper, seconds to get there, carrying cube]
@@ -83,7 +103,9 @@ function scriptedState(tSec: number, withGhost: boolean): RobotLiveState {
 interface Opts {
   src: 'script' | 'fixture' | 'pose' | 'ws';
   q: number[] | null;
-  preset: TwinPreset;
+  camera: TwinCamera;
+  views: boolean;
+  spec: SceneSpecV1 | null;
   sim: boolean;
   ghost: boolean;
   width: number | null;
@@ -96,12 +118,15 @@ export default function TwinDevPage() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const q = p.get('q')?.split(',').map(Number) ?? null;
-    const preset = p.get('preset');
+    const cam = p.get('camera') ?? p.get('preset');
+    const spec = p.get('spec');
     const ws = p.get('ws') ?? undefined;
     setO({
       src: ws ? 'ws' : q ? 'pose' : p.get('src') === 'fixture' ? 'fixture' : 'script',
       q: q && q.length >= 6 && q.every(Number.isFinite) ? q : null,
-      preset: preset === 'top' || preset === 'wrist' ? preset : 'front',
+      camera: CAMERAS.includes(cam as TwinCamera) ? (cam as TwinCamera) : 'top',
+      views: p.get('views') === '1',
+      spec: spec === 'sim' ? SIM_DEFAULT_SCENE : spec === 'stack' ? STACK_SCENE : null,
       sim: p.get('sim') !== '0',
       ghost: p.get('ghost') !== '0',
       width: Number(p.get('w')) > 0 ? Number(p.get('w')) : null,
@@ -114,7 +139,7 @@ export default function TwinDevPage() {
 }
 
 function Harness({ o }: { o: Opts }) {
-  const [preset, setPreset] = useState<TwinPreset>(o.preset);
+  const [camera, setCamera] = useState<TwinCamera>(o.camera);
   const live = useRobotLive(null, { enabled: o.src === 'ws' || o.src === 'fixture', fixture: o.src === 'fixture', url: o.ws, token: o.token });
   const [scripted, setScripted] = useState<RobotLiveState | null>(null);
   const t0 = useRef(performance.now());
@@ -146,13 +171,13 @@ function Harness({ o }: { o: Opts }) {
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">YAM digital twin</h1>
       <p className="mb-4 max-w-prose text-sm text-zinc-500">{note}</p>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        {(['front', 'top', 'wrist'] as const).map((p) => (
+        {!o.views && CAMERAS.map((p) => (
           <button
             key={p}
             type="button"
-            aria-pressed={preset === p}
-            onClick={() => setPreset(p)}
-            className={`rounded-md px-3 py-1 capitalize ring-1 ring-zinc-300 dark:ring-zinc-700 ${preset === p ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900' : ''}`}
+            aria-pressed={camera === p}
+            onClick={() => setCamera(p)}
+            className={`rounded-md px-3 py-1 capitalize ring-1 ring-zinc-300 dark:ring-zinc-700 ${camera === p ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900' : ''}`}
           >
             {p}
           </button>
@@ -161,13 +186,25 @@ function Harness({ o }: { o: Opts }) {
           {fps} fps{ee ? `, tool (${ee.map((v) => v.toFixed(3)).join(', ')}) m` : ''}
         </span>
       </div>
-      <div
-        className={`relative aspect-[4/3] overflow-hidden rounded-xl bg-zinc-950 ring-1 ring-zinc-800 ${o.width ? '' : 'w-full max-w-5xl'}`}
-        style={o.width ? { width: o.width, borderRadius: 0 } : undefined}
-        data-testid="twin-frame"
-      >
-        <RobotTwin3D state={state} preset={preset} sim={o.sim} ghost={o.ghost ? state?.chunk_preview : undefined} />
-      </div>
+      {o.spec && <p className="mb-3 text-sm text-zinc-500">Scene spec: {o.spec.task}</p>}
+      {o.views ? (
+        <div className="grid max-w-5xl grid-cols-1 gap-2 sm:grid-cols-2" data-testid="twin-views">
+          {CAMERAS.map((c) => (
+            <figure key={c} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-zinc-950 ring-1 ring-zinc-800">
+              <RobotTwin3D state={state} camera={c} spec={o.spec} sim={o.sim} ghost={o.ghost ? state?.chunk_preview : undefined} />
+              <figcaption className="pointer-events-none absolute left-2 top-2 rounded bg-black/45 px-2 py-0.5 text-xs font-medium capitalize text-white/90">{c}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <div
+          className={`relative aspect-[4/3] overflow-hidden rounded-xl bg-zinc-950 ring-1 ring-zinc-800 ${o.width ? '' : 'w-full max-w-5xl'}`}
+          style={o.width ? { width: o.width, borderRadius: 0 } : undefined}
+          data-testid="twin-frame"
+        >
+          <RobotTwin3D state={state} camera={camera} spec={o.spec} sim={o.sim} ghost={o.ghost ? state?.chunk_preview : undefined} />
+        </div>
+      )}
     </>
   );
 }

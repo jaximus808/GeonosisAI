@@ -42,3 +42,8 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Never fake** eval numbers, success rates or planner decisions. Label any mock as mocked in the UI.
 - Never edit `event_log` rows. It is append-only.
 - No real money: Stripe stays in test mode.
+
+## Python ↔ SpacetimeDB (TDM-7 decision)
+- Python talks straight to the database over the WebSocket JSON protocol (`v1.json.spacetimedb`), with no sidecar. The reference client is `spikes/tdm-7-spacetime/stdb_ws.py` (only dependency: `websockets`), and TDM-16 turns it into the shared helper.
+- Reuse one keep-alive `httpx.Client` for HTTP reducer calls (~120 ms), or call reducers over the open socket. One-off requests cost 1–3 s in TLS handshakes.
+- Rows from other clients come in as positional arrays. The helper maps them to snake_case dicts using `/schema`.

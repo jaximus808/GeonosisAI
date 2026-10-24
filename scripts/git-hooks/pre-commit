@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Refuse commits that look like a stale-index revert.
+
+Several workers share one checkout; a stale index has repeatedly deleted or
+rolled back other tickets' files. Blocks (override with RDF_ALLOW_REVERT=1):
+  - deleting a tracked file
+  - staging a blob that equals an *older* version of that path from recent history
+"""
+import os
+import subprocess
+import sys
+
+if os.environ.get("RDF_ALLOW_REVERT") == "1":
+    sys.exit(0)
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+
+
+if not git("rev-parse", "--verify", "-q", "HEAD").strip():
+    sys.exit(0)
+
+problems = []
+for line in git("diff", "--cached", "--name-status", "--no-renames", "HEAD").splitlines():
+    status, _, path = line.partition("\t")
+    if status.startswith("D"):
+        problems.append(f"deletes {path}")
+        continue
+    if not status.startswith("M"):
+        continue
+    staged = git("rev-parse", f":{path}").strip()
+    head = git("rev-parse", f"HEAD:{path}").strip()
+    for rev in git("log", "-n", "20", "--format=%H", "HEAD~1", "--", path).split():
+        old = git("rev-parse", f"{rev}:{path}").strip()
+        if old and old == staged and old != head:
+            problems.append(f"rolls {path} back to {rev[:8]}")
+            break
+
+if problems:
+    print("pre-commit: this looks like a stale-index revert:", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+    print("Rebuild your index from current HEAD and commit only your paths "
+          "(see docs/WORKER_GUIDE.md). If this is intentional, rerun with RDF_ALLOW_REVERT=1.",
+          file=sys.stderr)
+    sys.exit(1)

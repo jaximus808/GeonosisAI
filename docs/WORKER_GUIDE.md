@@ -157,3 +157,8 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - A trivial turn costs ~1–3.5k credits.
   - **Don't use Missions for waits.**
 - **Tonight, droids run LOCALLY via `droid-sdk` (`Session.resume(id)` works) against this repo**, because the repo has no GitHub remote, so cloud computers can't clone it. Switch to cloud computers once the repo is pushed and added to the Factory Environment (default env id `173ec531-…` in `spikes/tdm-29-factory/spike_factory.py`).
+
+## Pre-commit guard (installed: `core.hooksPath=scripts/git-hooks`)
+- Commits that **delete a tracked file** or **roll a file back to an older version** are refused. Stale indexes have reverted other tickets' work three times tonight.
+- After a temp-`GIT_INDEX_FILE` commit, always run `git reset -q HEAD -- <your paths>`, so the shared index doesn't go stale for the next person.
+- If the refusal is wrong (you really are deleting or reverting on purpose), rerun with `RDF_ALLOW_REVERT=1` and say why in the commit message.

@@ -66,7 +66,7 @@ Robot payload contract (``run_eval`` / ``run_baseline`` key ``interventions``) a
 commands are documented in ``services/robot-client/src/rdf_robot_client/interventions.py``.
 
 Env (all optional): INTERVENTION_CLAIM_TIMEOUT_S 90, INTERVENTION_TAKEOVER_MAX_S 300,
-INTERVENTION_VERDICT_WAIT_S 15, INTERVENTION_NO_PROGRESS_S 20, INTERVENTION_ROLLOUT_TIMEOUT_S 120,
+INTERVENTION_VERDICT_WAIT_S 15, INTERVENTION_NO_PROGRESS_S 20, INTERVENTION_ROLLOUT_TIMEOUT_S 90,
 INTERVENTION_TIMEOUT_GRACE_S 30, INTERVENTION_WATCHDOG_S 2 (0 = off), INTERVENTION_COLLECT 1,
 INTERVENTION_COLLECT_MAX_ROLLOUTS 40 (per plan).
 """
@@ -146,7 +146,7 @@ class InterventionConfig:
             takeover_max_s=_env_float("INTERVENTION_TAKEOVER_MAX_S", 300.0),
             verdict_wait_s=_env_float("INTERVENTION_VERDICT_WAIT_S", 15.0),
             no_progress_s=_env_float("INTERVENTION_NO_PROGRESS_S", 20.0),
-            rollout_timeout_s=_env_float("INTERVENTION_ROLLOUT_TIMEOUT_S", _env_float("EVAL_TRIAL_TIMEOUT_S", 120.0)),
+            rollout_timeout_s=_env_float("INTERVENTION_ROLLOUT_TIMEOUT_S", 90.0),  # < reviewer max 120 s so a timed-out recovery episode can still pass
             timeout_grace_s=_env_float("INTERVENTION_TIMEOUT_GRACE_S", 30.0),
             watchdog_s=_env_float("INTERVENTION_WATCHDOG_S", 2.0),
             collect=os.environ.get("INTERVENTION_COLLECT", "1") != "0",

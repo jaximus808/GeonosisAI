@@ -67,3 +67,7 @@ logs/
 
 # Per-ticket scratch
 tmp/
+.gstack/
+
+# pywebpush debug artifact
+encrypted.data

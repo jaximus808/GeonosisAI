@@ -117,7 +117,7 @@ class FailureDetector:
     It fires at most once per trial.
     """
 
-    def __init__(self, trial_timeout_s: float = 120.0, no_progress_s: float = 20.0, min_progress: float = 0.01,
+    def __init__(self, trial_timeout_s: float = 90.0, no_progress_s: float = 20.0, min_progress: float = 0.01,
                  verdict_wait_s: float = 15.0) -> None:
         self.trial_timeout_s = float(trial_timeout_s)
         self.no_progress_s = float(no_progress_s)
@@ -133,7 +133,7 @@ class FailureDetector:
         """None when interventions are off for this rollout."""
         if not cfg or not cfg.get("enabled"):
             return None
-        return cls(trial_timeout_s=float(cfg.get("trial_timeout_s") or 120.0),
+        return cls(trial_timeout_s=float(cfg.get("trial_timeout_s") or 90.0),
                    no_progress_s=float(cfg.get("no_progress_s") or 20.0),
                    min_progress=float(cfg.get("min_progress") or 0.01),
                    verdict_wait_s=float(cfg.get("verdict_wait_s") or 15.0))

@@ -94,7 +94,7 @@ def register(reg: Registry, fw: Flywheel | None = None) -> Registry:
     reg.on_update("robot", name="eval_on_robot")(eval_on_robot)
     reg.on_insert("event_log", where=lambda r: r.type == "eval.rerun_requested", name="eval_on_rerun_request")(
         eval_on_rerun_request)
-    reg.on_enter("task", where=lambda r: r.type == "reset" and r.status == "open", include_existing=False,
+    reg.on_enter("task", where=lambda r: r.type == "reset" and r.status == "open", include_existing=True,
                  name="eval_solo_reset")(eval_solo_reset)
     if fw is not None:
         for stage in evl.EVAL_STAGES:

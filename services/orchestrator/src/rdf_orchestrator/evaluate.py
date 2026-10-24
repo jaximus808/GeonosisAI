@@ -48,6 +48,8 @@ Env (all optional):
   EVAL_ROBOT_STALE_S             30    no heartbeat for this long = robot lost
   EVAL_WATCHDOG_S                5     watchdog tick (0 = off; handlers still react to row changes)
   EVAL_SOLO_MODE                 0     1 = auto-complete reset tasks (unattended testing)
+  EVAL_SIM_AUTO_RESET            1     sim robots (camera_config_json.sim) reset their own scene, so their
+                                       reset tasks are auto-completed like solo mode; real robots still wait
   EVAL_SOLO_RESET_DELAY_S        5
   EVAL_SOLO_CONTRIBUTOR_ID       0     >0: claim+complete resets as this contributor (paid, Stripe
                                        test mode); 0: cancel the reset task and resume the robot
@@ -116,6 +118,7 @@ class EvalConfig:
     solo_mode: bool = False
     solo_reset_delay_s: float = 5.0
     solo_contributor_id: int = 0
+    sim_auto_reset: bool = True
     rerun_after_estop: bool = False
     max_aborts: int = 3  # aborted evals in a row (per stage) before a re-run waits for a human
     retry_backoff_s: float = 60.0  # after a policy-activate / start failure
@@ -132,6 +135,7 @@ class EvalConfig:
             solo_mode=os.environ.get("EVAL_SOLO_MODE", "") == "1",
             solo_reset_delay_s=_env_float("EVAL_SOLO_RESET_DELAY_S", 5.0),
             solo_contributor_id=int(_env_float("EVAL_SOLO_CONTRIBUTOR_ID", 0)),
+            sim_auto_reset=os.environ.get("EVAL_SIM_AUTO_RESET", "1") != "0",
             rerun_after_estop=os.environ.get("EVAL_RERUN_AFTER_ESTOP", "") == "1",
             max_aborts=int(_env_float("EVAL_MAX_ABORTS", 3)),
         )
@@ -559,12 +563,17 @@ class EvalOrchestrator:
                 self.ensure_eval(_i(t["id"]), why=why)
 
     # ------------------------------------------------------------------ solo mode resets
+    def _robot_is_sim(self, robot_id: int) -> bool:
+        from .robot_mode import robot_is_sim
+        return robot_is_sim(self.m.get("robot", robot_id))
+
     def solo_reset(self, task: dict) -> None:
         """EVAL_SOLO_MODE: after the delay, complete an open reset task nobody claimed, so an unattended
         eval keeps going. With EVAL_SOLO_CONTRIBUTOR_ID the task is claimed + completed as that
         contributor (the dispatcher then pays it and issues resume_policy); otherwise it is cancelled
-        (nobody is paid) and this module issues the resume_policy itself."""
-        if not self.cfg.solo_mode:
+        (nobody is paid) and this module issues the resume_policy itself. A sim robot resets its own
+        scene, so with EVAL_SIM_AUTO_RESET its reset tasks go the same way even outside solo mode."""
+        if not (self.cfg.solo_mode or (self.cfg.sim_auto_reset and self._robot_is_sim(_i(task.get("robot_id"))))):
             return
         task_id = _i(task["id"])
         if task_id in self._solo_seen:

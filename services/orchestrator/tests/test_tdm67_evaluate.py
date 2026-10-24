@@ -339,3 +339,24 @@ def test_solo_off_does_nothing(db):
     e.solo_reset(task)
     time.sleep(0.05)
     assert db.t["task"][task["id"]]["status"] == "open"
+
+
+def test_sim_robot_reset_is_automatic_without_solo_mode(db):
+    db.t["robot"][1]["camera_config_json"] = json.dumps({"sim": True})
+    e = make(db, solo_reset_delay_s=0.01)  # solo_mode off; sim_auto_reset defaults on
+    task = _reset_task(db)
+    e.solo_reset(task)
+    deadline = time.time() + 2
+    while db.t["task"][task["id"]]["status"] == "open" and time.time() < deadline:
+        time.sleep(0.01)
+    assert db.t["task"][task["id"]]["status"] == "cancelled"
+    assert [c for c in db.rows("robot_command") if c["type"] == "resume_policy"]
+
+
+def test_sim_auto_reset_off_leaves_sim_reset_open(db):
+    db.t["robot"][1]["camera_config_json"] = json.dumps({"sim": True})
+    e = make(db, solo_reset_delay_s=0.01, sim_auto_reset=False)
+    task = _reset_task(db)
+    e.solo_reset(task)
+    time.sleep(0.05)
+    assert db.t["task"][task["id"]]["status"] == "open"

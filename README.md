@@ -1,6 +1,37 @@
 # Robot Deployment Factory
 
-"Plug in your robot, tell it the job, and the factory gets it deployed." Built at Cal Hacks 13.0.
+**Plug in your robot, tell it the job, and the factory gets it deployed.** Built at Cal Hacks 13.0.
+
+You give it a robot and a ticket ("put the cup in the bin, 80% reliable, $50 budget"). It runs a baseline, clusters the failures, decides *which kind of data* fixes them (recovery takeovers vs clean demos), buys exactly that from people on their phones, reviews and pays for it, fine-tunes π0.5, evaluates the new checkpoint and ships a report. SpacetimeDB is the source of truth; Claude does the diagnosis, the data decision and the review; Factory Droids do the engineering and sleep on database predicates until the world changes.
+
+## Quickstart
+
+```sh
+cp .env.example .env     # fill in keys; make env-check shows which are set
+make install             # pnpm install + uv sync in each Python service
+make dev                 # orchestrator :8000, web :3737, mcp :3002 against Maincloud SpacetimeDB
+make test-loop           # full loop on a throwaway local SpacetimeDB + fake robot, no arm, no maincloud
+```
+
+Key pages (web on `http://localhost:3737`):
+
+| Page | What |
+|---|---|
+| `/tickets/new`, `/tickets/[id]` | Create a ticket; live status, before/after evals with Wilson CI, planner decision trail, tasks, payouts, episodes with video, training runs |
+| `/tickets/[id]/report` | Printable deployment report: what was bought, why, cost, before vs after |
+| `/agents` | Factory Droid sessions, steps and resume-bridge wake-ups |
+| `/events` | Append-only event log with the chain-hash seal |
+| `/marketplace`, `/join`, `/earnings` | Paid tasks (atomic claim), contributor join QR + push opt-in, test-mode earnings |
+| `/teleop/[taskId]`, `/reset/[taskId]` | Phone pages: drive the arm behind the task lease; do a paid reset |
+| `/robots/[id]` | Operator console: state, cameras, command queue, soft e-stop (login at `/ops/login`) |
+
+## Submission docs
+
+- [docs/submission/devpost-draft.md](docs/submission/devpost-draft.md): Devpost write-up (honest about sim vs real; `[TODO after real run]` placeholders).
+- [docs/submission/pitch-script.md](docs/submission/pitch-script.md): 3-minute pitch with stage cues, plus Q&A crib.
+- [docs/submission/architecture.md](docs/submission/architecture.md): components, data flow, the resume bridge, what is real vs simulated.
+- [docs/submission/demo-runbook-draft.md](docs/submission/demo-runbook-draft.md): Sunday-morning sequence, live A/B, judge's phone, fallbacks.
+- Also: [CONTEXT.md](CONTEXT.md) (build spec), [docs/decisions.md](docs/decisions.md), [docs/pre-run-checklist.md](docs/pre-run-checklist.md), [docs/morning-questions.md](docs/morning-questions.md), [services/factory/README.md](services/factory/README.md) (Droid client, wait-for protocol, proofs).
 
 - **Build spec:** [CONTEXT.md](CONTEXT.md). Read it before writing code.
 - **Task board:** Tandem canvas "Robot Deployment Factory — Cal Hacks 13" (code `HL4RZKEQ`). Architecture overview is on its Architecture tab.
@@ -46,7 +77,7 @@ make dev                 # docker compose up (see below); `make dev-host` runs o
 - MinIO is optional. Nothing in the apps depends on it. Credentials default to dev-only values. You can override them with `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` and `EPISODES_BUCKET`. The image is the `pgsty/minio` community build, because `minio/minio` is no longer on Docker Hub.
 - In `make dev-local`, server-side code uses `http://spacetimedb:3000`, and the browser uses `NEXT_PUBLIC_SPACETIME_HOST=http://localhost:3300`. `SPACETIME_TOKEN` is blank, so services connect anonymously.
 
-`make seed` and `make deploy` are stubs for now.
+`make seed` seeds a **local** SpacetimeDB only (it refuses Maincloud). `make deploy` is a stub for now.
 
 ## CI (TDM-6)
 

@@ -374,3 +374,18 @@ def test_handler_skips_when_plan_exists_and_logs_blocked():
     calls = asyncio.run(go(broke))
     assert [r for r, _ in calls] == ["append_event"] and calls[0][1][1] == "planner.blocked"
     assert not fake.calls
+
+
+def test_run_settings_column_override_beats_event_and_rule():
+    """TDM-79: the dashboard's "Data type" (run_settings.data_type_override, TDM-20 PATCH /settings)
+    is read first; an override event only applies while the column is empty."""
+    ov = {"type": P.OVERRIDE_EVENT, "payload": {"ticket_id": 7, "data_type": "recovery_takeover"}}
+    tbl = tables(DROPS_MID_GRASP, successes=3, extra_events=[ov])
+    tbl["run_settings"][0]["data_type_override"] = "clean_teleop"
+    inp = inputs_for(tbl)
+    assert inp.data_type_override == "clean_teleop"
+    assert P.guardrail(inp).rule == "override"
+    tbl["run_settings"][0]["data_type_override"] = ""  # cleared -> falls back to the event
+    assert inputs_for(tbl).data_type_override == "recovery_takeover"
+    tbl["run_settings"][0]["data_type_override"] = "bogus"  # not a data type -> ignored
+    assert inputs_for(tbl).data_type_override == "recovery_takeover"

@@ -143,6 +143,25 @@ class FakeDB:
         self.log("orchestrator", "ticket.status_changed",
                  {"ticket_id": ticket_id, "from": frm, "to": status, "note": note, "iteration": it})
 
+    def r_mark_checkpoint_deployed(self, ticket_id, training_run_id, eval_run_id, note):  # TDM-70 (reducers/ship.ts)
+        t = self.ticket(ticket_id)
+        if t["status"] != "shipped":
+            raise ReducerError(f"ticket {ticket_id} is {t['status']}; only a shipped ticket deploys a checkpoint")
+        run = self.t["training_run"].get(training_run_id)
+        if run is None or run["ticket_id"] != ticket_id or run["status"] != "done" or not run["checkpoint_uri"]:
+            raise ReducerError(f"training run {training_run_id} has no deployable checkpoint")
+        ev = self.t["eval_run"].get(eval_run_id)
+        if (ev is None or ev["ticket_id"] != ticket_id or ev["kind"] == "baseline" or ev["status"] != "done"
+                or ev["training_run_id"] != training_run_id):
+            raise ReducerError(f"eval run {eval_run_id} is not a finished candidate eval of run {training_run_id}")
+        prev = t["deployed_checkpoint_uri"]
+        if prev == run["checkpoint_uri"]:
+            return
+        self.update("ticket", t, deployed_checkpoint_uri=run["checkpoint_uri"], updated_at=self.now())
+        self.log("orchestrator", "ticket.checkpoint_deployed",
+                 {"ticket_id": ticket_id, "checkpoint_uri": run["checkpoint_uri"], "training_run_id": training_run_id,
+                  "eval_run_id": eval_run_id, "previous_checkpoint_uri": prev, "note": note})
+
     def r_queue_training_run(self, ticket_id, episode_ids_json, hyperparams_json):
         t = self.ticket(ticket_id)
         ids = json.loads(episode_ids_json)

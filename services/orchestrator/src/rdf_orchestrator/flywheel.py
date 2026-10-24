@@ -34,17 +34,26 @@ Two halves, both restart-safe:
   call reducers). Or keep a plain bus handler and add its name to that stage's ``BusHandlerStep``.
 
 Wired here: ``train`` (``QueueTrainingStep`` queues the fine-tune on every accepted episode; the
-Modal client picks the queued row up) and ``shipped`` (``ShipStep`` appends the before/after
-summary). TDM-67 registers ``EvalStep`` for ``baseline``/``eval`` (handlers/evaluate.py).
+Modal client picks the queued row up) and ``shipped`` (``ShipStep``: before/after summary, then
+TDM-70's ship: ``mark_checkpoint_deployed`` sets ``ticket.deployed_checkpoint_uri``, the policy
+server is activated on it, and the TDM-71 report is saved). TDM-67 registers ``EvalStep`` for
+``baseline``/``eval`` (handlers/evaluate.py).
+
+TDM-70 loop rule: after a finalized candidate eval, ship if it meets the threshold; else, if
+``iteration + 1 < max_iterations`` and budget remains, loop to ``diagnose`` (the new checkpoint
+fails differently, so its failures are re-clustered before the planner picks the next data);
+else ``failed`` with the stop reason. ``flywheel.wait`` is logged when a ticket starts waiting in
+a stage and then at most every ``wait_log_s`` while only the reason (e.g. a count) changes.
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
 import json
+import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 from .log import get_logger, ticket_id_var
 from .stats import explain_threshold, format_ci, meets_threshold
@@ -519,27 +528,159 @@ class QueueTrainingStep:
         await ctx.call("queue_training_run", [ctx.ticket_id, json.dumps(ids), ""])
 
 
+PolicyActivator = Callable[[str, dict, float], None]  # (url, body, timeout) -> raises on failure
+ShipReporter = Callable[[Any, int], Awaitable[dict]]  # (bus, ticket_id) -> report.saved payload; raises
+
+
+_TDM70_NOT_SERVABLE = ("fake://", "sim://", "stub://")
+
+
+def _tdm70_http_activate(url: str, body: dict, timeout: float) -> None:
+    """POST /policy/activate on the TDM-41 policy server (bearer POLICY_SERVER_TOKEN when set)."""
+    import httpx
+
+    tok = os.environ.get("POLICY_SERVER_TOKEN", "").strip()
+    r = httpx.post(url, json=body, timeout=timeout, headers={"Authorization": f"Bearer {tok}"} if tok else {})
+    if r.status_code >= 300:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+
+
+async def _tdm70_save_report(bus, ticket_id: int) -> dict:
+    """In-process POST /tickets/{id}/report/save (TDM-71): .md + .json to the media store, ``report.saved``.
+    Reads the same database the bus is subscribed to (never a different one from the env)."""
+    from rdf_common.spacetime_client import AsyncSpacetimeClient
+
+    from .report_api import get_report_storage, save_report
+
+    c = getattr(bus, "client", None)
+    host, db = getattr(c, "host", None), getattr(c, "db", None)
+    if not host or not db:
+        raise LookupError("the bus client has no SpacetimeDB host/db to read the report from")
+    async with AsyncSpacetimeClient(host, db, getattr(c, "token", None) or "") as stdb:
+        return await save_report(ticket_id, stdb=stdb, store=get_report_storage())
+
+
 @dataclass
 class ShipStep:
-    """shipped: append the before/after summary the report reads. (No reducer sets
-    ticket.deployed_checkpoint_uri yet; the checkpoint is in the transition note and here.)"""
+    """shipped (TDM-22, TDM-70). Each part is idempotent on its own, so a restart redoes only
+    what is missing:
+
+    1. ``flywheel.shipped``: the before/after summary (once per ticket).
+    2. ``mark_checkpoint_deployed``: sets ``ticket.deployed_checkpoint_uri`` from this
+       iteration's done training run and its finished candidate eval (the reducer checks both).
+    3. ``POST {POLICY_SERVER_URL}/policy/activate`` so the policy server serves the deployed
+       checkpoint (``flywheel.policy_activated`` / ``_failed``; ``_skipped`` without a URL).
+    4. The TDM-71 report is saved (``report.saved``; ``flywheel.report_failed`` on error).
+       ``FLYWHEEL_SHIP_REPORT=off`` turns this off.
+    """
 
     stage: str = "shipped"
-    owner: str = "TDM-22"
+    owner: str = "TDM-22/TDM-70"
+    activate: PolicyActivator = _tdm70_http_activate
+    reporter: ShipReporter | None = _tdm70_save_report
+    policy_server_url: str | None = None  # None: POLICY_SERVER_URL from the env
+    activate_timeout_s: float = 300.0
+    confirm_s: float = 30.0
+
+    @staticmethod
+    def _events(ctx: StepContext, type_: str) -> list[tuple[dict, dict]]:
+        out = []
+        for r in ctx.bus.rows("event_log"):
+            if r.get("type") == type_:
+                p = _payload(r)
+                if p.get("ticket_id") == ctx.ticket_id:
+                    out.append((r, p))
+        return sorted(out, key=lambda x: x[0].get("id") or 0)
 
     async def run(self, ctx: StepContext) -> None:
         v = ctx.view
-        for r in ctx.bus.rows("event_log"):  # once per ticket, also across restarts
-            if r.get("type") == "flywheel.shipped" and _payload(r).get("ticket_id") == ctx.ticket_id:
-                ctx.log("step.skip", reason=f"already summarised in event {r.get('id')}")
-                return
         run, e, b = v.done_training_run, v.candidate_eval, v.baseline_eval
-        await ctx.event("flywheel.shipped", {
-            "iteration": v.iteration, "checkpoint_uri": run.get("checkpoint_uri") if run else None,
-            "training_run_id": run["id"] if run else None,
-            "baseline": _eval_ev(b) if b else None, "final": _eval_ev(e) if e else None,
-            "accepted_episodes": len(v.accepted_episode_ids), **v.money(),
-        })
+        shipped = self._events(ctx, "flywheel.shipped")
+        if shipped:
+            ctx.log("step.skip", reason=f"already summarised in event {shipped[-1][0].get('id')}")
+        else:
+            await ctx.event("flywheel.shipped", {
+                "iteration": v.iteration, "checkpoint_uri": run.get("checkpoint_uri") if run else None,
+                "training_run_id": run["id"] if run else None, "eval_run_id": e["id"] if e else None,
+                "baseline": _eval_ev(b) if b else None, "final": _eval_ev(e) if e else None,
+                "accepted_episodes": len(v.accepted_episode_ids), **v.money(),
+            })
+        uri = (run or {}).get("checkpoint_uri")
+        if run is None or e is None or not uri:
+            if not self._events(ctx, "flywheel.ship_blocked"):
+                await ctx.event("flywheel.ship_blocked", {
+                    "reason": "no done training run with a checkpoint and a finished candidate eval in iteration "
+                              f"{v.iteration}; nothing to deploy", "training_run_id": (run or {}).get("id"),
+                    "eval_run_id": (e or {}).get("id")})
+            log.warning("ship.blocked", extra={"fields": {"ticket_id": ctx.ticket_id, "iteration": v.iteration}})
+            return
+        if not await self._deploy(ctx, v, run, e, uri):
+            return
+        await self._activate_policy(ctx, run, e, uri)
+        await self._report(ctx)
+
+    async def _deploy(self, ctx: StepContext, v: TicketView, run: dict, e: dict, uri: str) -> bool:
+        if v.ticket.get("deployed_checkpoint_uri") == uri:
+            return True
+        await ctx.call("mark_checkpoint_deployed", [ctx.ticket_id, run["id"], e["id"],
+                                                    f"flywheel: eval {e['id']} {format_ci(e['successes'], e['trials'])}"])
+        try:
+            await ctx.wait_for(lambda: ctx.view.ticket.get("deployed_checkpoint_uri") == uri, timeout=self.confirm_s)
+        except TimeoutError:
+            log.warning("ship.deploy_unconfirmed", extra={"fields": {
+                "ticket_id": ctx.ticket_id, "checkpoint_uri": uri,
+                "hint": "mark_checkpoint_deployed refused or not published? see /healthz last_error"}})
+            return False
+        ctx.log("ship.deployed", checkpoint_uri=uri, training_run_id=run["id"], eval_run_id=e["id"])
+        return True
+
+    async def _activate_policy(self, ctx: StepContext, run: dict, e: dict, uri: str) -> None:
+        done = [p for _, p in self._events(ctx, "flywheel.policy_activated") + self._events(ctx, "flywheel.policy_activate_skipped")
+                if p.get("checkpoint_uri") == uri]
+        if done:
+            return
+        base = {"checkpoint_uri": uri, "training_run_id": run["id"], "eval_run_id": e["id"]}
+        url = self.policy_server_url
+        if url is None:
+            url = os.environ.get("POLICY_SERVER_URL", "")
+        url = url.strip().rstrip("/")
+        if not url:
+            await ctx.event("flywheel.policy_activate_skipped", {**base, "note": "POLICY_SERVER_URL not set"})
+            return
+        if uri.startswith(_TDM70_NOT_SERVABLE):  # harness / simulation checkpoints: never wake a real GPU for them
+            await ctx.event("flywheel.policy_activate_skipped", {**base, "note": "fake/simulated checkpoint; "
+                                                                               "not sent to the policy server"})
+            return
+        body = {"checkpoint_uri": uri, "ticket_id": ctx.ticket_id, "robot_id": ctx.view.ticket.get("robot_id"),
+                "kind": "deployed"}
+        t0 = time.monotonic()
+        try:
+            await asyncio.to_thread(self.activate, f"{url}/policy/activate", body, self.activate_timeout_s)
+        except Exception as ex:  # noqa: BLE001 - the ticket stays shipped; the next boot retries
+            await ctx.event("flywheel.policy_activate_failed", {**base, "url": url, "error": str(ex)[:500]})
+            return
+        await ctx.event("flywheel.policy_activated", {**base, "url": url, "ms": int((time.monotonic() - t0) * 1000)})
+
+    async def _report(self, ctx: StepContext) -> None:
+        if self.reporter is None or os.environ.get("FLYWHEEL_SHIP_REPORT", "").strip().lower() == "off":
+            return
+        shipped = self._events(ctx, "flywheel.shipped")
+        since = (shipped[-1][0].get("id") or 0) if shipped else 0
+        if any((r.get("id") or 0) > since for r, _ in self._events(ctx, "report.saved")):
+            return
+        # The report reads the database directly: let this step's own events land first.
+        try:
+            await ctx.wait_for(lambda: any(self._events(ctx, t) for t in (
+                "flywheel.policy_activated", "flywheel.policy_activate_skipped", "flywheel.policy_activate_failed")),
+                timeout=self.confirm_s)
+        except TimeoutError:
+            pass
+        try:
+            saved = await self.reporter(ctx.bus, ctx.ticket_id)
+        except (Exception, SystemExit) as ex:  # noqa: BLE001 - get_backend() exits on missing media env
+            await ctx.event("flywheel.report_failed", {"error": f"{type(ex).__name__}: {ex}"[:500]})
+            return
+        ctx.log("ship.report_saved", uri=(saved or {}).get("uri"), json_uri=(saved or {}).get("json_uri"))
 
 
 def _payload(event_row) -> dict:
@@ -580,22 +721,31 @@ class _Pending:
     at: float
 
 
+@dataclass
+class _Wait:
+    stage: tuple
+    reason: str
+    at: float
+    suppressed: int = 0
+
+
 class Flywheel:
     """Owns the step table and runs decisions. One instance per process; all state that matters
     lives in SpacetimeDB. In-memory fields only de-duplicate work within this process."""
 
     def __init__(self, steps: dict[str, Step] | None = None, *, actor: str = "orchestrator",
-                 auto_approve_max_cents: int = 0, reconcile_s: float = 15.0, pending_ttl_s: float = 20.0) -> None:
+                 auto_approve_max_cents: int = 0, reconcile_s: float = 15.0, pending_ttl_s: float = 20.0,
+                 wait_log_s: float = 60.0) -> None:
         self.steps: dict[str, Step] = default_steps()
         if steps:
             self.steps.update(steps)
         self.actor = actor
         self.auto_approve_max_cents = auto_approve_max_cents
-        self.reconcile_s, self.pending_ttl_s = reconcile_s, pending_ttl_s
+        self.reconcile_s, self.pending_ttl_s, self.wait_log_s = reconcile_s, pending_ttl_s, wait_log_s
         self._pending: dict[int, _Pending] = {}
         self._approving: dict[int, float] = {}  # data_plan_id -> at
         self._entered: set[tuple] = set()  # (ticket_id, status, iteration, updated_at) whose step ran
-        self._last_wait: dict[int, str] = {}
+        self._last_wait: dict[int, _Wait] = {}
         self._bus = None
         self._tick: asyncio.Task | None = None
         self.step_runs: dict[str, int] = {}
@@ -695,10 +845,7 @@ class Flywheel:
         tok = ticket_id_var.set(ticket_id)
         try:
             if d.to is None:
-                if self._last_wait.get(ticket_id) != d.reason:
-                    self._last_wait[ticket_id] = d.reason
-                    log.info("flywheel.wait", extra={"fields": {"status": v.status, "iteration": v.iteration,
-                                                                "reason": d.reason, "cause": cause}})
+                self._log_wait(v, d, cause)
                 if d.retry_step:
                     await self._retry(bus, v, d)
                 if d.approve_plan is not None:
@@ -708,6 +855,27 @@ class Flywheel:
             return d
         finally:
             ticket_id_var.reset(tok)
+
+    def _log_wait(self, v: TicketView, d: Decision, cause: str) -> None:
+        """TDM-70: log ``flywheel.wait`` when the ticket starts waiting in a stage (status or
+        iteration changed), then at most every ``wait_log_s`` while only the reason text changes
+        (collecting 1/3 -> 2/3, reviewing ...). Changes in between go to debug and are counted."""
+        now = time.monotonic()
+        w = self._last_wait.get(v.id)
+        stage = (v.status, v.iteration)
+        if w is not None and w.stage == stage:
+            if w.reason == d.reason:
+                return
+            if now - w.at < self.wait_log_s:
+                w.reason, w.suppressed = d.reason, w.suppressed + 1
+                log.debug("flywheel.wait", extra={"fields": {"status": v.status, "iteration": v.iteration,
+                                                             "reason": d.reason, "cause": cause}})
+                return
+        fields = {"status": v.status, "iteration": v.iteration, "reason": d.reason, "cause": cause}
+        if w is not None and w.stage == stage and w.suppressed:
+            fields["changes_since_last_log"] = w.suppressed
+        log.info("flywheel.wait", extra={"fields": fields})
+        self._last_wait[v.id] = _Wait(stage, d.reason, now)
 
     async def _retry(self, bus, v: TicketView, d: Decision) -> None:
         key = (v.id, v.status, v.iteration, "retry", len(v.training_runs) + len(v.eval_runs))
@@ -777,6 +945,58 @@ class Flywheel:
                                actor=who, cause="manual", manual=True)
         return {"ticket_id": ticket_id, "from": v.status, "to": to, "iteration": v.iteration, "note": text,
                 "machine_would": {"to": d.to, "reason": d.reason}}
+
+    def timeline(self, bus, ticket_id: int, max_events: int = 500) -> dict | None:
+        """TDM-70 ``GET /tickets/{id}/timeline``: the loop per iteration (eval before, plan,
+        collection, training run, eval after, verdict), the ship record, and the ticket's
+        event_log entries in order (type/actor/ts, plus the note on status changes)."""
+        v = self.view(bus, ticket_id)
+        if v is None:
+            return None
+        d = decide(v)
+        ts = v.threshold_settings
+
+        def cand(it: int):
+            ids = {r["id"] for r in v.training_runs if int(r.get("iteration") or 0) == it and r.get("status") == "done"}
+            return _latest([r for r in v.evals(status="done") if r.get("kind") != "baseline"
+                            and r.get("training_run_id") in ids])
+
+        last_it = max([v.iteration] + [int(r.get("iteration") or 0) for r in v.plans + v.training_runs])
+        iterations = []
+        for it in range(last_it + 1):
+            before = v.baseline_eval if it == 0 else cand(it - 1)
+            after = cand(it)
+            plans = [p for p in v.plans if int(p.get("iteration") or 0) == it]
+            plan = _latest([p for p in plans if p.get("status") != "rejected"]) or _latest(plans)
+            runs = [r for r in v.training_runs if int(r.get("iteration") or 0) == it]
+            run = _latest([r for r in runs if r.get("status") == "done"]) or _latest(runs)
+            iterations.append({
+                "iteration": it,
+                "eval_before": _eval_ev(before) if before else None,
+                "failure_clusters": [{"id": c["id"], "label": c.get("label"), "count": c.get("count")}
+                                     for c in v.clusters if int(c.get("iteration") or 0) == it],
+                "data_plan": None if plan is None else {
+                    k: plan.get(k) for k in ("id", "data_type", "amount", "status", "est_cost_cents", "approved_cents")},
+                "training_run": None if run is None else {
+                    k: run.get(k) for k in ("id", "status", "checkpoint_uri", "gpu_cost_cents", "error")},
+                "eval_after": _eval_ev(after) if after else None,
+                "verdict": explain_threshold(after, ts) if after else None,
+                "met_threshold": meets_threshold(after, ts) if after else None,
+            })
+        events = []
+        for r in sorted(bus.rows("event_log"), key=lambda r: r.get("id") or 0):
+            p = _payload(r)
+            if p.get("ticket_id") != ticket_id:
+                continue
+            e = {"id": r.get("id"), "ts": r.get("ts"), "actor": r.get("actor"), "type": r.get("type")}
+            if r.get("type") == "ticket.status_changed":
+                e.update({k: p.get(k) for k in ("from", "to", "iteration", "note")})
+            events.append(e)
+        return {"ticket_id": ticket_id, "status": v.status, "iteration": v.iteration,
+                "max_iterations": v.max_iterations, **ts,
+                "decision": {"to": d.to, "reason": d.reason}, "money": v.money(),
+                "deployed_checkpoint_uri": v.ticket.get("deployed_checkpoint_uri"),
+                "iterations": iterations, "events": events[-max_events:], "events_total": len(events)}
 
     def describe(self, bus, ticket_id: int) -> dict | None:
         v = self.view(bus, ticket_id)

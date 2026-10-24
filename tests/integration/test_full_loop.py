@@ -83,6 +83,15 @@ def test_ticket_reaches_shipped(stack, robot_id, event_watch):
         trials = st.sql(f"SELECT * FROM eval_trial WHERE eval_run_id = {r['id']}")
         assert len(trials) == r["trials"] and all(t["failure_note"].startswith("[FAKE]") for t in trials)
     assert not trainer.errors, trainer.errors
+    if driver == "orchestrator":  # TDM-70: two iterations (fake schedule 0,1), then ship = deploy + report
+        assert ticket["iteration"] >= 1 and len(trains) >= 2, (ticket, trains)
+        final = max(trains, key=lambda r: r["id"])
+        wait_for(lambda: st.sql(f"SELECT * FROM ticket WHERE id = {tid}")[0]["deployed_checkpoint_uri"]
+                 == final["checkpoint_uri"], 30, "ticket.deployed_checkpoint_uri set to the final checkpoint", every=0.5)
+        wait_for(lambda: [e for e in st.events() if e["type"] in ("report.saved", "flywheel.report_failed")
+                          and f'"ticket_id":{tid}' in e["payload_json"].replace(" ", "")],
+                 60, "ship step saved (or logged a failure for) the report", every=0.5)
+        print(f"[tdm70] ticket {tid} deployed {final['checkpoint_uri']} after iteration {ticket['iteration']}")
 
     ev = assert_event_log_unbroken(st, event_watch)
     statuses = [e for e in ev if e["type"] == "ticket.status_changed" and f'"ticket_id":{tid}' in e["payload_json"].replace(" ", "")]

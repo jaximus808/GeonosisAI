@@ -77,6 +77,10 @@ Callers: agent reducers need the `orchestrator` or `factory` role (owner always 
 - **`abort_eval_run(eval_run_id, status, reason)`:** orchestrator only. Moves a `queued`/`running` eval_run to `cancelled` (the robot was lost: offline, stale heartbeat, estop/preempted, timeout, run_eval completed with missing trial rows) or `failed` (the robot reported `fail_robot_command`), sets `finished_at`, and logs `eval.aborted` {eval_run_id, ticket_id, robot_id, kind, from, to, completed, successes, trials, reason}. Trial rows stay. An aborted run can never take more trials or be finalized; the re-run is a new eval_run. A reason starting `estop:` makes the orchestrator wait for an `eval.rerun_requested` event before re-running. Caller: `services/orchestrator/src/rdf_orchestrator/evaluate.py`.
 - **run_eval payload** (orchestrator → robot): `{eval_run_id, checkpoint_uri, trials, timeout_s (per trial), kind, reset_between_trials, solo_mode}`. The robot records each trial with `record_eval_trial` and, after each one, waits for `resume_policy` (issued when the TDM-26 reset task completes).
 
+## Ship (TDM-70, `src/reducers/ship.ts`)
+
+- **`mark_checkpoint_deployed(ticket_id, training_run_id, eval_run_id, note)`:** orchestrator only. The ticket must be `shipped`; the training run must be the ticket's, `done`, with a checkpoint; the eval run must be the ticket's finished (`done`) candidate eval of that same training run. Sets `ticket.deployed_checkpoint_uri` to the run's `checkpoint_uri` (never a caller-supplied URI) and logs `ticket.checkpoint_deployed` {ticket_id, checkpoint_uri, training_run_id, eval_run_id, iteration, successes, trials, ci_low, ci_high, previous_checkpoint_uri, note}. Same run again = no-op (no event); a different run re-points it (rollback) and logs the previous URI. Caller: `ShipStep` in `services/orchestrator/src/rdf_orchestrator/flywheel.py`, which then activates the policy server on it and saves the TDM-71 report.
+
 ## Auth hooks (`auth.ts`)
 
 - `requireService(ctx)`: the caller must be on the allow-list.

@@ -19,8 +19,9 @@ the decision and a paragraph of reasoning. Code sits around the model as guardra
 
 Inputs also include TDM-23's ``diagnose.clusters`` event (per-cluster phase, recoverability,
 description), the eval's successes/trials + Wilson CI, previous plans and open dataset offers.
-``data_type_override`` comes from ``run_settings.hyperparams_json["data_type_override"]`` or, since
-update_run_settings rejects unknown hyperparams, from the latest ``append_event`` of type
+``data_type_override`` comes from the ``run_settings.data_type_override`` column (TDM-20, set by
+PATCH /tickets/{id}/settings) when it is non-empty; otherwise from
+``run_settings.hyperparams_json["data_type_override"]`` or the latest ``append_event`` of type
 ``planner.data_type_override`` with payload ``{"ticket_id": N, "data_type": "clean_teleop" |
 "recovery_takeover" | null}`` (null clears it).
 
@@ -247,6 +248,10 @@ Each cluster carries stage_hint (no_approach, late or unknown), computed by code
 step's phase when there is one, otherwise from keywords in the label. phase and recoverable_mid_episode \
 come from the diagnosis step, which looked at the failed episodes' camera frames. Use your own judgment of \
 the label, description and example trial notes when the hint is unknown.
+From the second iteration on, previous_plans lists this ticket's earlier plans with their effect: the \
+eval that plan answered (before) and the eval of the checkpoint trained with its data (after). When the \
+rules above leave the choice to you and an earlier plan of one type did not raise the success rate, say \
+so, and consider switching to the other type.
 
 Amount:
 - Every episode also needs a scene reset (about $2), so the cost of one episode is its unit price plus a \
@@ -540,6 +545,25 @@ def _same(a: Any, b: Any) -> bool:
         return False
 
 
+def _tdm70_plan_effect(iteration: int, evals: list, runs: list, summ: Callable[[Any], Any]) -> dict | None:
+    """TDM-70: what a plan of ``iteration`` did. ``before`` is the eval that plan answered (the
+    baseline for iteration 0, else the previous iteration's candidate eval); ``after`` is the
+    candidate eval of the checkpoint trained in that iteration (None while it is not finished)."""
+    def cand(it: int):
+        ids = {int(_g(r, "id")) for r in runs if int(_g(r, "iteration", 0)) == it and _g(r, "status") == "done"}
+        return next((r for r in reversed(evals) if _g(r, "kind") != "baseline"
+                     and int(_g(r, "training_run_id", 0) or 0) in ids), None)
+    before = next((r for r in evals if _g(r, "kind") == "baseline"), None) if iteration == 0 else cand(iteration - 1)
+    after = cand(iteration)
+    if before is None and after is None:
+        return None
+    b, a = summ(before), summ(after)
+    out = {"before": _eval_dict(b), "after": _eval_dict(a)}
+    if b is not None and a is not None:
+        out["success_rate_change"] = round(a.success_rate - b.success_rate, 3)
+    return out
+
+
 def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
     """Build PlannerInputs for a ticket from table rows (the bus mirror, or SQL results)."""
     tid, it = int(_g(ticket, "id")), int(_g(ticket, "iteration", 0))
@@ -609,19 +633,26 @@ def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
     plans = sorted(mine("data_plan"), key=lambda r: int(_g(r, "id")))
     prev = [{"id": int(_g(p, "id")), "iteration": int(_g(p, "iteration", 0)), "data_type": _g(p, "data_type"),
              "amount": int(_g(p, "amount", 0)), "status": _g(p, "status"),
-             "approved_cents": int(_g(p, "approved_cents", 0))} for p in plans]
+             "approved_cents": int(_g(p, "approved_cents", 0)),
+             "effect": _tdm70_plan_effect(int(_g(p, "iteration", 0)), evals, mine("training_run"), summ)}
+            for p in plans]
     offers = [{"id": int(_g(o, "id")), "seller_id": int(_g(o, "seller_id", 0)),
                "price_per_episode_cents": int(_g(o, "price_per_episode_cents", 0)),
                "needed_count": int(_g(o, "needed_count", 0)), "status": _g(o, "status")}
               for o in mine("dataset_offer") if _g(o, "status") not in ("rejected", "cancelled", "done")]
     sellers = sum(1 for c in rows("contributor") if _g(c, "kind") == "dataset_seller")
 
-    # Override: hyperparams.data_type_override, or the latest planner.data_type_override event.
+    # Override: the run_settings.data_type_override column (TDM-20 PATCH /settings, the dashboard's
+    # "Data type" choice) when set; else hyperparams.data_type_override, or the latest
+    # planner.data_type_override event.
+    col = str(_g(rs, "data_type_override", "") or "").strip() if rs is not None else ""
     override = hp.get("data_type_override") if hp.get("data_type_override") in DATA_TYPES else None
     for e in sorted(rows("event_log"), key=lambda r: int(_g(r, "id"))):
         p = _payload(e) if _g(e, "type") == OVERRIDE_EVENT else {}
         if p and _same(p.get("ticket_id"), tid):
             override = p.get("data_type") if p.get("data_type") in DATA_TYPES else None
+    if col in DATA_TYPES:
+        override = col
     note = str(diag.get("reasoning"))[:4000] if diag and diag.get("reasoning") else None
 
     return PlannerInputs(

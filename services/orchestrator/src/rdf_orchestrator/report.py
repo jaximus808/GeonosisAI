@@ -461,7 +461,8 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
         deployed["fake"] = bool(fake_markers({"uri": deployed["uri"]})) or bool(
             tr_id and fake_markers(runs_by_id.get(tr_id, {})))
         if ticket.get("status") == "shipped" and not ticket.get("deployed_checkpoint_uri"):
-            deployed["note"] = "ticket.deployed_checkpoint_uri is not set by any reducer yet; taken from " + deployed["source"]
+            deployed["note"] = ("ticket.deployed_checkpoint_uri is empty (TDM-70 mark_checkpoint_deployed has not "
+                                "run for this ticket); taken from " + deployed["source"])
     else:
         if ticket.get("status") == "shipped":
             missing.append("ticket is shipped but no checkpoint can be traced")

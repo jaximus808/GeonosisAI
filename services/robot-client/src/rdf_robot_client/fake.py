@@ -125,6 +125,9 @@ class FakeConfig:
     name: str = "fake-yam-1"
     success_prob: float = 0.3  # baseline / unknown checkpoints
     candidate_success_prob: float = 0.9  # eval_run.kind == candidate (a fine-tuned checkpoint)
+    # TDM-70: per-ticket schedule for candidate evals: the k-th distinct candidate checkpoint of a
+    # ticket succeeds with probability schedule[k] (the last value repeats). Empty: candidate_success_prob.
+    candidate_success_schedule: tuple[float, ...] = ()
     trial_ms: tuple[int, int] = (15_000, 40_000)  # simulated trial length reported in duration_ms
     reset_ms: tuple[int, int] = (5_000, 15_000)
     time_scale: float = 40.0  # wall clock = simulated / time_scale
@@ -475,6 +478,16 @@ class FakeRobot:
                    reset_by="fake-auto", **ctx)
 
     # ---- per-type handlers
+    def _tdm70_scheduled_prob(self, run: dict | None, ckpt: str | None) -> float:
+        """candidate_success_schedule[k], k = distinct candidate checkpoints of this ticket evaluated
+        before this one (eval_run rows with a lower id), so iteration 0 can fail and iteration 1 pass."""
+        sched = self.cfg.candidate_success_schedule
+        tid, rid = int((run or {}).get("ticket_id") or 0), int((run or {}).get("id") or 0)
+        rows = self.sub.rows("eval_run") if self.sub else self.http.sql(f"SELECT * FROM eval_run WHERE ticket_id = {tid}")
+        seen = {r.get("checkpoint_uri") for r in rows if int(r.get("ticket_id") or 0) == tid
+                and r.get("kind") == "candidate" and int(r["id"]) < rid and r.get("checkpoint_uri") != ckpt}
+        return float(sched[min(len(seen), len(sched) - 1)])
+
     def _find_eval_run(self, row: dict, payload: dict) -> dict | None:
         rid = payload.get("eval_run_id")
         runs = self.sub.rows("eval_run") if self.sub else []
@@ -494,6 +507,8 @@ class FakeRobot:
         kind = (run or {}).get("kind") or ("baseline" if row["type"] == "run_baseline" else "candidate")
         trials = int(payload.get("trials") or (run or {}).get("trials") or 10)
         p = payload.get("fake_success_prob")
+        if p is None and kind == "candidate" and self.cfg.candidate_success_schedule:
+            p = self._tdm70_scheduled_prob(run, ckpt)
         if p is None:
             p = self.cfg.candidate_success_prob if kind == "candidate" else self.cfg.success_prob
         p = float(p)
@@ -597,6 +612,9 @@ def parse_args(argv: list[str] | None = None) -> FakeConfig:
     p.add_argument("--name", default="fake-yam-1")
     p.add_argument("--success-prob", type=float, default=0.3, help="baseline / unknown checkpoints")
     p.add_argument("--candidate-success-prob", type=float, default=0.9, help="eval_run.kind == candidate")
+    p.add_argument("--candidate-success-schedule", default="",
+                   help="TDM-70: comma list, k-th distinct candidate checkpoint of a ticket uses value k "
+                        "(last repeats), e.g. 0,1 = first fine-tune fails, second passes")
     p.add_argument("--trial-ms", type=_range, default=(15_000, 40_000), help="simulated trial length lo:hi")
     p.add_argument("--reset-ms", type=_range, default=(5_000, 15_000))
     p.add_argument("--teleop-ms", type=_range, default=(20_000, 60_000))
@@ -622,7 +640,9 @@ def parse_args(argv: list[str] | None = None) -> FakeConfig:
         p.error("need a robot_client token: --token-file or RDF_FAKE_ROBOT_TOKEN (tests/integration/harness.py makes one)")
     return FakeConfig(
         host=a.host, db=a.db, token=token, name=a.name, success_prob=a.success_prob,
-        candidate_success_prob=a.candidate_success_prob, trial_ms=a.trial_ms, reset_ms=a.reset_ms,
+        candidate_success_prob=a.candidate_success_prob,
+        candidate_success_schedule=tuple(float(x) for x in a.candidate_success_schedule.split(",") if x.strip()),
+        trial_ms=a.trial_ms, reset_ms=a.reset_ms,
         teleop_ms=a.teleop_ms, time_scale=a.time_scale, estop_clear_seconds=a.estop_clear_seconds,
         command_fail_prob=a.command_fail_prob, heartbeat_seconds=a.heartbeat_seconds,
         media_dir=a.media_dir, seed=a.seed, episodes=not a.no_episodes,

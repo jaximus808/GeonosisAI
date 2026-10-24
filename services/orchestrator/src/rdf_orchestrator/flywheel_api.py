@@ -8,6 +8,8 @@
         202 with the observed status once the row changed (or "pending" after 5 s).
     GET  /flywheel/tickets/{id}  what the machine sees: status, its decision and why, money, step.
     GET  /flywheel/steps         stage -> step, owner, wired or not.
+    GET  /tickets/{id}/timeline  (TDM-70) the loop per iteration (eval before -> plan -> training ->
+        eval after -> verdict), the deployed checkpoint, and the ticket's events in order.
 """
 from __future__ import annotations
 
@@ -61,3 +63,11 @@ def describe(ticket_id: int, request: Request) -> dict:
 @router.get("/flywheel/steps")
 def steps(request: Request) -> list[dict]:
     return _fw(request).step_table(request.app.state.bus)
+
+
+@router.get("/tickets/{ticket_id}/timeline")
+def timeline(ticket_id: int, request: Request) -> dict:
+    t = _fw(request).timeline(request.app.state.bus, ticket_id)
+    if t is None:
+        raise HTTPException(404, f"unknown ticket {ticket_id}")
+    return t

@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from harness import LocalStack  # noqa: E402
 
 FAKE_ROBOT_ARGS = ("--time-scale", "400", "--seed", "28", "--estop-clear-seconds", "1",
-                   "--heartbeat-seconds", "2", "--success-prob", "0.3", "--candidate-success-prob", "0.95")
+                   "--heartbeat-seconds", "2", "--success-prob", "0.3", "--candidate-success-prob", "0.95",
+                   # TDM-70: a ticket's first fine-tune fails its eval, the second passes -> two iterations
+                   "--candidate-success-schedule", "0,1")
 
 
 @pytest.fixture(scope="session")

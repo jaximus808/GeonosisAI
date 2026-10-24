@@ -456,6 +456,12 @@ class RobotClient:
             return {}
         return {"noop": True}
 
+    def _ctl_trial_outcome(self, c: Command, job: JobContext | None) -> dict[str, Any]:
+        """TDM-51: operator verdict for the open eval trial (dashboard). ValueError fails the command."""
+        from .eval_trials import deliver_outcome
+
+        return deliver_outcome(self, c.payload, source=f"command #{c.id} by {c.issued_by or '?'}")
+
     def _ctl_stop(self, c: Command, job: JobContext | None) -> dict[str, Any]:
         self.arm.hold()
         if job is not None:
@@ -607,6 +613,7 @@ _CONTROLS = {
     "handback": RobotClient._ctl_resume,
     "stop_teleop": RobotClient._ctl_stop_teleop,
     "stop": RobotClient._ctl_stop,
+    "trial_outcome": RobotClient._ctl_trial_outcome,  # TDM-51
 }
 assert SOFT_ESTOP not in _CONTROLS
 

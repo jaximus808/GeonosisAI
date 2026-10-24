@@ -15,6 +15,7 @@ Payload keys the real client reads (same contract as the TDM-28 fake, see fake.p
   reset_request            {"task_id": int?, "reason": str?, "ref": str?}   (TDM-26 dispatcher)
   resume_policy            {"reason": "reset_done"?, "task_id": int?}       (TDM-26 dispatcher)
   load_checkpoint / home   {"checkpoint_uri": str?} / {"speed_fraction": float?}
+  trial_outcome            {"success": bool, "note": str?, "eval_run_id": int?, "index": int?}  (TDM-51 operator verdict)
 """
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 JOB_TYPES = frozenset({"run_baseline", "run_eval", "start_teleop", "reset_request", "home", "load_checkpoint"})
-CONTROL_TYPES = frozenset({"stop_teleop", "pause_for_takeover", "resume_policy", "handback", "stop"})
+CONTROL_TYPES = frozenset({"stop_teleop", "pause_for_takeover", "resume_policy", "handback", "stop",
+                           "trial_outcome"})  # trial_outcome: TDM-51 operator verdict
 SOFT_ESTOP = "soft_estop"
 OPEN_STATUSES = frozenset({"issued", "acked"})
 

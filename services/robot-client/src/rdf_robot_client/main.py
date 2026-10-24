@@ -7,6 +7,7 @@
 
 Clearing a soft e-stop (robot ``locked`` / status ``estop``) is LOCAL ONLY, by a human at the
 arm: type ``clear`` (or ``unlock``) + Enter in this terminal, or ``pkill -USR1 -f rdf-robot-client``.
+TDM-51 eval trials on stdin: ``pass`` / ``fail <note>`` gives the operator verdict for the open trial.
 TDM-45 safety layer (safety.py) on stdin: ``speed <0..1>`` sets the speed scale (capped by
 config/safety.yaml), ``slow on`` / ``slow off`` toggles slow mode, ``safety`` prints the counters, ``pose`` the EE pose.
 """
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import rollout as _rollout  # noqa: F401 - TDM-50: registers load_checkpoint + run_baseline (policy rollout)
+from . import eval_trials as _eval_trials  # TDM-51: run_eval + run_baseline(eval_run_id) trial runner (after rollout)
 from .adapters import ArmAdapter, make_adapter
 from .handlers import load_checkpoint as pointer_load_checkpoint
 from .handlers import sim_demo_rollout
@@ -64,7 +66,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--cameras", choices=["off", "synthetic", "config"], default=None,
                    help="TDM-47 CameraRig: off (default with --sim) | synthetic | config (default on the Jetson)")
     p.add_argument("--sim-policy", action="store_true",
-                   help="with --sim: run_baseline uses the real TDM-50 policy rollout ($POLICY_BACKEND) instead of the demo")
+                   help="with --sim: run_baseline/run_eval use the real TDM-50 rollout + TDM-51 trial runner "
+                        "($POLICY_BACKEND) instead of the demo")
     p.add_argument("--unsafe-no-safety-layer", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     a.adapter = "sim" if a.sim else (a.adapter or "yam")
@@ -116,6 +119,7 @@ def run(argv: list[str] | None = None) -> None:
     if sim and a.sim_policy:  # TDM-50: the real rollout + policy endpoint, on the sim arm
         handlers.pop("run_baseline")
         handlers.pop("load_checkpoint")
+        handlers.pop("run_eval")  # TDM-51 trial runner
     client = RobotClient(
         arm, name=name, stdb=cfg, camera_config={**cams, **({"sim": True} if sim else {})},
         heartbeat_s=a.heartbeat_s, handlers=handlers, services=services,
@@ -134,6 +138,8 @@ def run(argv: list[str] | None = None) -> None:
         def _stdin() -> None:
             for line in sys.stdin:
                 cmd = line.strip().lower()
+                if _eval_trials.terminal_outcome(client, line):  # TDM-51: 'pass' / 'fail <note>' for the open trial
+                    continue
                 if cmd in ("clear", "unlock"):
                     if not client.clear_estop(by="terminal"):
                         print("not locked", file=sys.stderr)

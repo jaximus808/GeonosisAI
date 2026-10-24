@@ -111,6 +111,7 @@ export const ROBOT_COMMAND_TYPES = [
   'resume_policy',
   'home',
   'soft_estop', // always accepted; preempts every open command on the robot
+  'trial_outcome', // TDM-51: operator verdict {success, note?, eval_run_id?, index?} for the open eval trial
 ] as const;
 // preempted (TDM-13): closed by a soft_estop before it finished; never run it.
 export const ROBOT_COMMAND_STATUSES = ['issued', 'acked', 'done', 'failed', 'preempted'] as const;

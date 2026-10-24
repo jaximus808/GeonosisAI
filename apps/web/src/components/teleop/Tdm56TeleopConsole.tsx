@@ -357,7 +357,7 @@ function ConsoleInner({
 
             {/* TDM-106: the controls are always on screen: the keycap legend lights up as you press, the
                 sticks / hold-to-drive / gripper button work with a mouse or a thumb */}
-            <div className="mt-3 grid gap-3">
+            <div className={`mt-3 grid gap-3 ${touch ? '' : 'xl:grid-cols-2'}`}>
               {!touch && <Tdm106KeyLegend drive={drive} testPrefix="tdm56" />}
               <Tdm106OnScreenControls drive={drive} stickSize={stickSize} testPrefix="tdm56" />
               {touch && <Tdm106KeyLegend drive={drive} testPrefix="tdm56" />}

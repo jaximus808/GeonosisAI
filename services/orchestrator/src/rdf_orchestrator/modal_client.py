@@ -24,6 +24,16 @@ finetune is spawned then. The one gap: a crash in the ~100 ms between ``spawn()`
 row write leaves an orphan Modal call (a queued run spawns convert again; a running convert spawns
 finetune again).
 
+Idempotency (the poller thread, direct ``poll_once`` calls and bus resyncs can all reach one run):
+* Every side effect on a finished call (cancel the Modal call, write done/failed, spawn the finetune) is
+  done only by the caller that takes the run out of ``_tracked`` (one atomic pop under the lock); any
+  other caller sees ``untracked`` and does nothing. ``poll_once`` on an untracked run is a no-op.
+* The bus mirror lags our own writes (one websocket round trip; a whole reconnect if the socket is
+  down). The runner remembers the call id it last wrote per run (``_expect``) and skips a poll while
+  the mirror still shows the older one, so a convert that already spawned a finetune is never polled
+  again (no second finetune), and a run it moved out of ``queued`` is not launched twice. A run it set
+  done/failed is never tracked again.
+
 GPU cost (TDM-42, ``rdf_training.cost``): ``gpu_cost_cents`` = the run's Modal compute cost, runtime x
 Modal's own rates (``services/training/config/modal_rates.json``, a snapshot of ``modal billing rates``;
 ``RDF_GPU_RATES_JSON`` e.g. ``{"H100": 395}`` still overrides GPU cents/h) for the GPU plus the finetune
@@ -222,6 +232,8 @@ class TrainingRunner:
         self._launching: set[int] = set()
         self._tracked: dict[int, int] = {}  # run id -> consecutive transient errors
         self._busy: set[int] = set()
+        self._expect: dict[int, str] = {}  # run id -> modal_call_id we last wrote (mirror may lag it)
+        self._finished: set[int] = set()  # runs this runner set done/failed
         self._get_row: Callable[[int], dict | None] | None = None
         self._rows: Callable[[str], list] | None = None
         self._thread: threading.Thread | None = None
@@ -252,13 +264,19 @@ class TrainingRunner:
              metrics: dict | None = None, cost: int | None = None) -> None:
         self.writer.call_reducer("set_training_status", rid, status, call_id, ckpt,
                                  json.dumps(metrics, default=str) if metrics is not None else None, cost)
+        with self._lock:
+            if status == "running" and call_id:
+                self._expect[rid] = call_id
+            elif status in ("done", "failed", "cancelled"):
+                self._expect.pop(rid, None)
+                self._finished.add(rid)
 
     # ---- queued -> running
     def launch(self, row: dict) -> None:
         rid = int(row["id"])
         with self._lock:
-            if rid in self._launching:
-                return
+            if rid in self._launching or rid in self._expect or rid in self._finished:
+                return  # already launching, or we already moved it out of queued (the mirror lags)
             self._launching.add(rid)
         try:
             cur = self._row(rid, row)
@@ -325,6 +343,8 @@ class TrainingRunner:
         if not call_id or call_id.startswith(STUB_PREFIX):
             return  # stub runs are finished by the TDM-28 StubTrainer
         with self._lock:
+            if int(row["id"]) in self._finished:
+                return  # a late/stale running event for a run we already finished
             new = int(row["id"]) not in self._tracked
             self._tracked.setdefault(int(row["id"]), 0)
             self._ensure_thread()
@@ -351,8 +371,10 @@ class TrainingRunner:
                     log.exception("training.poll_error", extra={"fields": {"training_run_id": rid}})
 
     def poll_once(self, rid: int) -> str:
-        """One poll of one run. Returns what happened (for tests and logs)."""
+        """One poll of one run. Returns what happened (for tests and logs). No-op for an untracked run."""
         with self._lock:
+            if rid not in self._tracked:
+                return "untracked"
             if rid in self._busy:
                 return "busy"
             self._busy.add(rid)
@@ -362,9 +384,10 @@ class TrainingRunner:
             with self._lock:
                 self._busy.discard(rid)
 
-    def _untrack(self, rid: int) -> None:
+    def _untrack(self, rid: int) -> bool:
+        """Stop tracking. True only for the one caller that actually removed it (it owns the side effects)."""
         with self._lock:
-            self._tracked.pop(rid, None)
+            return self._tracked.pop(rid, None) is not None
 
     def _poll(self, rid: int) -> str:
         run = self._row(rid)
@@ -374,7 +397,8 @@ class TrainingRunner:
         call_id = str(run.get("modal_call_id") or "")
         m = _json(run.get("metrics_json"))
         if run.get("status") != "running" or not call_id or call_id.startswith(STUB_PREFIX):
-            self._untrack(rid)
+            if not self._untrack(rid):
+                return "untracked"  # someone else already handled it
             if run.get("status") == "cancelled" and call_id and not call_id.startswith(STUB_PREFIX):
                 try:
                     self.modal.cancel(call_id)
@@ -382,6 +406,12 @@ class TrainingRunner:
                 except Exception as e:  # noqa: BLE001
                     log.warning("training.cancel_failed", extra={"fields": {"training_run_id": rid, "error": str(e)}})
             return "untracked"
+        with self._lock:
+            expected = self._expect.get(rid)
+            if expected is not None and expected == call_id:
+                self._expect.pop(rid, None)  # the mirror has caught up with our write
+        if expected is not None and expected != call_id:
+            return "stale"  # the mirror still shows the call we already moved past; next tick re-reads
         phase = m.get("phase") or ("convert" if m.get("convert_call_id") == call_id else "finetune")
         res = self.modal.poll(call_id)
         if res.state == "pending":
@@ -397,7 +427,13 @@ class TrainingRunner:
                 log.warning("training.poll_transient", extra={"fields": {"training_run_id": rid, "n": n, "error": res.error}})
                 return "transient"
             res = PollResult("failed", error=f"Modal unreachable for {n} polls: {res.error}")
-        self._untrack(rid)
+        if not self._untrack(rid):
+            return "untracked"  # another poller of this runner finished it while we waited on Modal
+        cur = self._row(rid)  # re-read: a cancel, or another writer, may have landed during the Modal poll
+        if cur is None or cur.get("status") != "running" or str(cur.get("modal_call_id") or "") != call_id:
+            with self._lock:
+                self._tracked.setdefault(rid, 0)  # the next tick handles whatever it is now (e.g. cancel)
+            return "raced"
         if res.state == "failed":
             c = self._cost_breakdown(m, {}) if phase == "finetune" else None  # GPU time burnt before the failure
             self._fail(run, f"{phase} failed: {res.error}", {**m, "phase": phase, "failed_call_id": call_id,

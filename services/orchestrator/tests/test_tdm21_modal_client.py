@@ -1,7 +1,9 @@
 """TDM-21 Modal client: launch, poll, done/failed, restart resume, stub mode (fake Modal + fake DB)."""
 from __future__ import annotations
 
+import copy
 import json
+import threading
 
 import pytest
 
@@ -76,11 +78,21 @@ EPS = [{"id": 11, "ticket_id": 2, "kind": "clean_teleop", "review_status": "acce
 TICKETS = [{"id": 2, "task_description": "put the cup in the bin"}]
 
 
-def make(runs=(RUN,), monkeypatch=None):
-    db, modal = FakeDB(runs, EPS, TICKETS), FakeModal()
+def runner(db, modal, *, poller=False):
+    """A TrainingRunner on the fakes. By default its background poller thread never starts, so the test's
+    own ``poll_once`` calls are the only polls: with a live 10 ms poller the thread and the test race for
+    each transition and, on a loaded machine, the thread wins some (the old flake). ``poller=True`` keeps
+    the real thread for the concurrency tests."""
     r = TrainingRunner(writer=lambda: db, modal=lambda: modal, poll_s=0.01)
+    if not poller:
+        r._ensure_thread = lambda: None
     r.bind(db)
-    return r, db, modal
+    return r
+
+
+def make(runs=(RUN,), poller=False):
+    db, modal = FakeDB(runs, EPS, TICKETS), FakeModal()
+    return runner(db, modal, poller=poller), db, modal
 
 
 def run_row(db, rid=5):
@@ -165,9 +177,9 @@ def test_restart_resumes_from_row(monkeypatch):
     r.track(run_row(db))
     r.poll_once(5)
     cid2 = modal.spawned[1][1]
+    r.stop()  # the old process is gone
 
-    r2 = TrainingRunner(writer=lambda: db, modal=lambda: modal, poll_s=0.01)  # fresh memory
-    r2.bind(db)
+    r2 = runner(db, modal)  # fresh memory
     r2.launch(dict(run_row(db)))  # boot snapshot: on_enter(queued) does not match a running row anyway
     r2.track(dict(run_row(db)))   # boot snapshot: on_enter(running)
     modal.results[cid2] = PollResult("done", value={"checkpoint_uri": "stub://rdf-checkpoints/runs/y/99",
@@ -181,8 +193,8 @@ def test_restart_during_convert_spawns_finetune_once(monkeypatch):
     r, db, modal = make()
     r.launch(dict(RUN))
     modal.results[modal.spawned[0][1]] = PollResult("done", value="modal-vol://rdf-datasets/lerobot/x")
-    r2 = TrainingRunner(writer=lambda: db, modal=lambda: modal, poll_s=0.01)
-    r2.bind(db)
+    r.stop()
+    r2 = runner(db, modal)
     r2.track(dict(run_row(db)))
     assert r2.poll_once(5) == "finetune_spawned"
     assert [s[0] for s in modal.spawned] == ["convert", "finetune"]
@@ -218,6 +230,99 @@ def test_cancelled_run_cancels_modal_call(monkeypatch):
     r.track(run_row(db))
     db.call_reducer("set_training_status", 5, "cancelled", None, None, None, None)
     assert r.poll_once(5) == "untracked" and modal.cancelled == [cid]
+    assert r.poll_once(5) == "untracked" and modal.cancelled == [cid]  # a second poll does not cancel again
+
+
+def _hammer(fn, n=8):
+    """Call fn from n threads released together; returns their results."""
+    gate, out = threading.Barrier(n), []
+
+    def go():
+        gate.wait()
+        out.append(fn())
+
+    ts = [threading.Thread(target=go) for _ in range(n)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    return out
+
+
+class SlowModal(FakeModal):
+    """Modal round trips take a while, so concurrent pollers overlap inside poll()."""
+
+    def poll(self, call_id):
+        threading.Event().wait(0.005)
+        return super().poll(call_id)
+
+
+def test_concurrent_polls_cancel_once(monkeypatch):
+    """Poller thread + direct polls of a cancelled run: exactly one Modal cancel."""
+    monkeypatch.delenv("RDF_MODAL_STUB", raising=False)
+    db, modal = FakeDB([RUN], EPS, TICKETS), SlowModal()
+    r = runner(db, modal, poller=True)
+    r.launch(dict(RUN))
+    cid = modal.spawned[0][1]
+    r.track(run_row(db))
+    db.call_reducer("set_training_status", 5, "cancelled", None, None, None, None)
+    _hammer(lambda: r.poll_once(5))
+    r.stop()
+    assert modal.cancelled == [cid] and 5 not in r._tracked
+
+
+def test_concurrent_polls_finish_once(monkeypatch):
+    """Poller thread + direct polls racing on a finished finetune: one done write (no done -> done)."""
+    monkeypatch.delenv("RDF_MODAL_STUB", raising=False)
+    run = {**RUN, "hyperparams_json": json.dumps({"dataset_uri": "modal-vol://rdf-datasets/lerobot/old"})}
+    db, modal = FakeDB([run], EPS, TICKETS), SlowModal()
+    r = runner(db, modal, poller=True)
+    r.launch(dict(run))
+    cid = modal.spawned[0][1]
+    r.track(run_row(db))
+    modal.results[cid] = PollResult("done", value={"checkpoint_uri": "modal-vol://rdf-checkpoints/runs/z/1",
+                                                   "metrics": {"gpu": None, "wall_s": 5}})
+    results = _hammer(lambda: r.poll_once(5))
+    r.stop()
+    r.track(dict(run_row(db)))  # a late running event for the finished run is ignored
+    assert [c[1] for c in db.calls] == ["running", "done"] and run_row(db)["status"] == "done"
+    assert results.count("done") <= 1 and 5 not in r._tracked
+
+
+class LaggyDB(FakeDB):
+    """Writes land in the DB; the bus mirror (get/rows) only catches up on sync(), like a slow socket."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.sync()
+
+    def sync(self):
+        self.mirror = copy.deepcopy(self.tables)
+
+    def get(self, table, key):
+        return self.mirror[table].get(key)
+
+    def rows(self, table):
+        return list(self.mirror[table].values())
+
+
+def test_stale_mirror_never_spawns_twice(monkeypatch):
+    """The mirror lags our own writes: no second convert on a re-fired launch, no second finetune."""
+    monkeypatch.delenv("RDF_MODAL_STUB", raising=False)
+    db, modal = LaggyDB([RUN], EPS, TICKETS), FakeModal()
+    r = runner(db, modal)
+    r.launch(dict(RUN))
+    r.launch(dict(RUN))  # mirror still says queued
+    assert [s[0] for s in modal.spawned] == ["convert"]
+    db.sync()
+    r.track(dict(db.get("training_run", 5)))
+    modal.results[modal.spawned[0][1]] = PollResult("done", value="modal-vol://rdf-datasets/lerobot/x")
+    assert r.poll_once(5) == "finetune_spawned"
+    for _ in range(3):  # mirror still shows the finished convert call
+        assert r.poll_once(5) == "stale"
+    assert [s[0] for s in modal.spawned] == ["convert", "finetune"]
+    db.sync()
+    assert r.poll_once(5) == "pending"
 
 
 def test_stub_mode_sets_stub_call_id_and_never_spawns(monkeypatch):

@@ -1,0 +1,139 @@
+{
+ "convert_s": 5.7,
+ "convert": {
+  "repo_id": "rdf-fixtures/tdm39-yam",
+  "total_episodes": 2,
+  "total_frames": 165,
+  "video_keys": [
+   "observation.images.top",
+   "observation.images.wrist"
+  ],
+  "fps": 30
+ },
+ "episodes": [
+  {
+   "episode_id": "fixture-clean-0",
+   "kind": "clean_teleop",
+   "src_frames": 90,
+   "frames": 90,
+   "cut_before_takeover": 0,
+   "cut_after_handback": 0
+  },
+  {
+   "episode_id": "fixture-recovery-1",
+   "kind": "recovery_takeover",
+   "src_frames": 150,
+   "frames": 75,
+   "cut_before_takeover": 60,
+   "cut_after_handback": 15
+  }
+ ],
+ "lerobot": {
+  "codebase_version": "v2.1",
+  "video_backend": "torchcodec",
+  "num_episodes": 2,
+  "num_frames": 165,
+  "fps": 30,
+  "item90_shapes": {
+   "observation.images.top": [
+    3,
+    480,
+    640
+   ],
+   "observation.images.wrist": [
+    3,
+    480,
+    640
+   ],
+   "observation.state": [
+    7
+   ],
+   "action": [
+    50,
+    7
+   ],
+   "action.ee_target": [
+    8
+   ],
+   "timestamp": [],
+   "frame_index": [],
+   "episode_index": [],
+   "index": [],
+   "task_index": [],
+   "action_is_pad": [
+    50
+   ]
+  },
+  "item90_task": "put the cup in the bin",
+  "item90_top_frame_number": 60
+ },
+ "openpi_loader_s": 3.5,
+ "openpi_batches": [
+  {
+   "images": {
+    "base_0_rgb": [
+     8,
+     224,
+     224,
+     3
+    ],
+    "left_wrist_0_rgb": [
+     8,
+     224,
+     224,
+     3
+    ],
+    "right_wrist_0_rgb": [
+     8,
+     224,
+     224,
+     3
+    ]
+   },
+   "image_masks": {
+    "base_0_rgb": [
+     true,
+     true
+    ],
+    "left_wrist_0_rgb": [
+     true,
+     true
+    ],
+    "right_wrist_0_rgb": [
+     false,
+     false
+    ]
+   },
+   "state": [
+    8,
+    32
+   ],
+   "actions": [
+    8,
+    50,
+    32
+   ],
+   "tokenized_prompt": [
+    8,
+    200
+   ],
+   "state_abs_max": 1.0,
+   "actions_abs_max": 1.221
+  }
+ ],
+ "norm_stats_max_abs_diff": {
+  "state": {
+   "mean": 0.0,
+   "std": 1e-06,
+   "q01": 0.002351,
+   "q99": 0.002864
+  },
+  "actions": {
+   "mean": 0.0,
+   "std": 0.0,
+   "q01": 0.003343,
+   "q99": 0.002753
+  }
+ },
+ "_note": "spikes/tdm-39-convert/modal_prove.py on 2026-10-24, openpi 215abfb image, CPU; labelled synthetic fixtures (not robot data), 640x480"
+}

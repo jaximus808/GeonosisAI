@@ -1,0 +1,27 @@
+{
+  "repo_id": "rdf-fixtures/tdm39-yam-modal",
+  "task": "put the cup in the bin",
+  "episodes": [
+    {
+      "episode_id": "fixture-clean-0",
+      "kind": "clean_teleop",
+      "cameras": {
+        "exo": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-clean-0/exo.mp4",
+        "wrist": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-clean-0/wrist.mp4"
+      },
+      "actions_uri": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-clean-0/actions.parquet"
+    },
+    {
+      "episode_id": "fixture-recovery-1",
+      "kind": "recovery_takeover",
+      "cameras": {
+        "exo": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-recovery-1/exo.mp4",
+        "wrist": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-recovery-1/wrist.mp4"
+      },
+      "actions_uri": "modal-vol://rdf-media/tickets/tdm39-fixture/episodes/fixture-recovery-1/actions.parquet",
+      "takeover_ts": 1761292802000000,
+      "handback_ts": 1761292804500000
+    }
+  ],
+  "allow_fixtures": true
+}

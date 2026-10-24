@@ -3,8 +3,11 @@
 // TDM-56: the teleop console mounted by /teleop/[taskId].
 //
 // Drives the arm over the TDM-55 stream server's `/control` WebSocket (lib/teleop/tdm56ControlClient.ts)
-// with clutch control: motion is sent ONLY while a clutch is held (gamepad RT, Space, the on-screen
-// clutch button, or touching an on-screen stick), as deltas from the pose at clutch-down, ~30 Hz.
+// with clutch control: motion is sent ONLY while a clutch is held, as deltas from the pose at
+// clutch-down, ~30 Hz. TDM-106: the inputs live in the shared lib/teleop/useTdm106Drive.ts (same loop
+// as practice): holding a move key is the clutch (Space / RT / the on-screen button / a stick still
+// work), translation only unless "Turn the hand" is on, slow default speed with a smooth ramp, G for
+// the gripper. The keycap legend, sticks and gripper button are always on screen.
 //
 // The clutch is forced off (and must be let go and pressed again) when any of these is true:
 //   camera feed stale or delayed past `maxLatencyMs`, control link not open, robot state silent > 1 s,
@@ -16,11 +19,13 @@
 //   recordingSlot              TDM-58 record start/stop, takeover/handback; use useTdm56Teleop().controlSocket
 //   stamp                      TDM-57 command gate (useTeleopLease().stamp): every outgoing cmd and recording op
 //                              goes through it; null = not allowed now, nothing is sent
+//   assistTarget               TDM-106 snap-to-grasp seam: {tool, obj} in the base frame when the object pose
+//                              is known (a sim robot's state.scene); without it the assist toggle is disabled
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CameraFeed, TaskCameraFeed, type FeedHealth } from '@/components/teleop/CameraFeed';
 import { TaskSimCameras } from '@/components/robotview/SimCameras';
-import { Tdm56Joystick, type Tdm56StickValue } from '@/components/teleop/Tdm56Joystick';
+import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
 import { useContributor } from '@/lib/contributor/hooks';
 import { staticStreamGrant, taskStreamGrant } from '@/lib/teleop/tdm55StreamGrant';
 import type { StreamGrant } from '@/lib/teleop/tdm55CameraClient';
@@ -32,24 +37,10 @@ import {
   type Tdm56Cmd,
   type Tdm56RobotState,
 } from '@/lib/teleop/tdm56ControlClient';
-import {
-  Tdm56ClutchIntegrator,
-  TDM56_KEYS,
-  ZERO_TWIST,
-  addTwist,
-  deadzone,
-  firstPad,
-  keyboardTwist,
-  readPad,
-  round,
-  type Tdm56Twist,
-  type V3,
-} from '@/lib/teleop/tdm56Input';
+import type { V3 } from '@/lib/teleop/tdm56Input';
+import { useTdm106Drive, type Tdm106DriveUi } from '@/lib/teleop/useTdm106Drive';
 
-const TICK_MS = 33; // ~30 Hz
 const ROBOT_SILENT_MS = 1000;
-const SLOW_CAP = 0.25;
-const GRIP_RATE = 0.9; // per second, for held gripper keys / bumpers
 
 // ------------------------------------------------------------------ context for TDM-57 / TDM-58
 
@@ -89,21 +80,11 @@ export interface Tdm56TeleopConsoleProps {
   maxLatencyMs?: number;
   /** Dev / mock robot: a fixed stream URL + token instead of the claimant grant. Shown as such in the UI. */
   dev?: { streamUrl: string; token: string; controlUrl?: string };
+  /** TDM-106 snap-to-grasp: tool + object positions (base frame), when the object pose is known (sim robots). */
+  assistTarget?: () => { tool: V3; obj: V3 } | null;
 }
 
 type Block = { code: string; text: string } | null;
-
-interface UiSnap {
-  engaged: boolean;
-  wantClutch: boolean;
-  needsRelease: boolean;
-  block: Block;
-  gripper: number;
-  dPos: V3;
-  dRot: V3;
-  pad: string | null;
-  source: string | null; // which input holds the clutch
-}
 
 const fmt = (v: number | undefined, d = 1, k = 1) => (v == null ? '--' : (v * k).toFixed(d));
 
@@ -131,6 +112,7 @@ function ConsoleInner({
   dev,
   stamp,
   getGrant,
+  assistTarget,
 }: Tdm56TeleopConsoleProps & { getGrant: () => Promise<StreamGrant> }) {
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
@@ -176,45 +158,24 @@ function ConsoleInner({
     setFeed(h);
   }, []);
 
-  const keys = useRef(new Set<string>());
-  const shift = useRef(false);
-  const spaceHeld = useRef(false);
-  const clutchBtn = useRef(false);
-  const stickL = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
-  const stickR = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
-  const [stickEngages, setStickEngages] = useState(true);
-  const stickEngagesRef = useRef(stickEngages);
-  stickEngagesRef.current = stickEngages;
-
-  const [gripper, setGripperState] = useState(1); // 1 = open
-  const gripperRef = useRef(1);
-  const setGripper = (g: number) => {
-    gripperRef.current = Math.max(0, Math.min(1, g));
-    setGripperState(gripperRef.current);
-  };
-
-  const [speed, setSpeed] = useState(0.5);
-  const [slow, setSlow] = useState(true);
-  const effSpeed = slow ? Math.min(speed, SLOW_CAP) : speed;
-  const effSpeedRef = useRef(effSpeed);
-  effSpeedRef.current = effSpeed;
-
   const canDriveRef = useRef({ canDrive, canDriveReason });
   canDriveRef.current = { canDrive, canDriveReason };
   const maxLatRef = useRef(maxLatencyMs);
   maxLatRef.current = maxLatencyMs;
+  const assistRef = useRef(assistTarget);
+  assistRef.current = assistTarget;
 
   // STOP pressed here: stays latched until the operator confirms resume.
   const [localStop, setLocalStop] = useState(false);
   const localStopRef = useRef(false);
   localStopRef.current = localStop;
 
-  const [showSticks, setShowSticks] = useState(false);
-  // two sticks + the clutch column must fit a 390 px phone (same sizes as TDM-59's practice console)
-  const [stickSize, setStickSize] = useState(124);
+  // two sticks + the middle column must fit a 390 px phone
+  const [stickSize, setStickSize] = useState(112);
+  const [touch, setTouch] = useState(false);
   useEffect(() => {
-    setShowSticks(window.matchMedia?.('(pointer: coarse)').matches ?? false);
-    const fit = () => setStickSize(window.innerWidth < 420 ? 108 : 124);
+    setTouch(window.matchMedia?.('(pointer: coarse)').matches ?? false);
+    const fit = () => setStickSize(window.innerWidth < 420 ? 100 : 112);
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
@@ -225,18 +186,6 @@ function ConsoleInner({
     setLocalStop(true);
     clientRef.current?.sendStop();
   }, []);
-
-  // ---- loop state
-  const integ = useRef(new Tdm56ClutchIntegrator());
-  const engaged = useRef(false);
-  const needsRelease = useRef(false);
-  const seq = useRef(0);
-  const lastTick = useRef(0);
-  const padPrev = useRef({ a: false, b: false });
-  const lastBlock = useRef<Block>(null);
-  const lastSource = useRef<string | null>(null);
-  const lastPad = useRef<string | null>(null);
-  const lastWant = useRef(false);
 
   const blockReason = useCallback((): Block => {
     if (localStopRef.current) return { code: 'stop', text: 'Stopped from this page. Check the arm, then resume.' };
@@ -257,183 +206,25 @@ function ConsoleInner({
     return null;
   }, []);
 
-  const release = useCallback(() => {
-    if (!engaged.current) return;
-    engaged.current = false;
-    // One final clutch:false so the robot holds at once instead of waiting for its 200 ms watchdog.
-    // Stamped when the lease allows it; otherwise sent bare (it can only make the arm hold).
-    const rel = {
-      seq: ++seq.current,
-      clutch: false,
-      d_pos: integ.current.dPos.map((v) => round(v)) as V3,
-      d_rot: integ.current.dRot.map((v) => round(v)) as V3,
-      gripper: round(gripperRef.current, 3),
-      speed_scale: round(effSpeedRef.current, 3),
-    };
-    clientRef.current?.sendCmd(gate(rel) ?? rel);
-  }, [gate]);
-
-  // ---- the 30 Hz loop
-  useEffect(() => {
-    lastTick.current = performance.now();
-    const id = window.setInterval(() => {
-      const now = performance.now();
-      const dt = Math.min(0.1, (now - lastTick.current) / 1000);
-      lastTick.current = now;
-
-      // gamepad
-      const p = firstPad();
-      const pad = p ? readPad(p) : null;
-      lastPad.current = pad?.id ?? null;
-      if (pad) {
-        if (pad.pressedB && !padPrev.current.b) pressStop();
-        if (pad.pressedA && !padPrev.current.a) setGripper(gripperRef.current > 0.5 ? 0 : 1);
-        padPrev.current = { a: pad.pressedA, b: pad.pressedB };
+  // ---- inputs: the shared TDM-106 loop (keyboard, gamepad, sticks, clutch button, gripper)
+  const drive = useTdm106Drive({
+    blockReason,
+    pressStop,
+    assistTarget: () => assistRef.current?.() ?? null,
+    send: (cmd, isRelease) => {
+      if (isRelease) {
+        // One final clutch:false so the robot holds at once instead of waiting for its 200 ms watchdog.
+        // Stamped when the lease allows it; otherwise sent bare (it can only make the arm hold).
+        clientRef.current?.sendCmd(gate(cmd) ?? cmd);
+        return true;
       }
-
-      // gripper ramps (keyboard F/R, bumpers)
-      let gRate = pad?.gripperRate ?? 0;
-      if (keys.current.has('KeyR')) gRate += 1;
-      if (keys.current.has('KeyF')) gRate -= 1;
-      if (gRate) setGripper(gripperRef.current + Math.sign(gRate) * GRIP_RATE * dt);
-
-      // twist from every source
-      let twist: Tdm56Twist = keyboardTwist(keys.current, shift.current);
-      if (pad) twist = addTwist(twist, pad.twist);
-      const L = stickL.current;
-      const R = stickR.current;
-      if (L.active || R.active) {
-        twist = addTwist(twist, { lin: [deadzone(L.y), -deadzone(L.x), deadzone(R.y)], ang: [0, 0, -deadzone(R.x)] });
-      }
-
-      const sources: string[] = [];
-      if (pad?.clutch) sources.push('gamepad');
-      if (spaceHeld.current) sources.push('keyboard');
-      if (clutchBtn.current) sources.push('clutch button');
-      if (stickEngagesRef.current && (L.active || R.active)) sources.push('stick');
-      const want = sources.length > 0;
-      lastSource.current = sources[0] ?? null;
-      lastWant.current = want;
-
-      const block = blockReason();
-      lastBlock.current = block;
-      if (block) {
-        release();
-        if (want) needsRelease.current = true;
-        return;
-      }
-      if (!want) {
-        needsRelease.current = false;
-        release();
-        return;
-      }
-      if (needsRelease.current) return; // let go first, then press again
-
-      if (!engaged.current) {
-        integ.current.reset(); // deltas are from the pose at clutch-down
-        engaged.current = true;
-      }
-      integ.current.step(twist ?? ZERO_TWIST, dt, effSpeedRef.current);
-      const cmd = gate({
-        seq: ++seq.current,
-        clutch: true,
-        d_pos: integ.current.dPos.map((v) => round(v)) as V3,
-        d_rot: integ.current.dRot.map((v) => round(v)) as V3,
-        gripper: round(gripperRef.current, 3),
-        speed_scale: round(effSpeedRef.current, 3),
-      });
-      if (!cmd) {
-        // the lease gate said no at this instant (lease running low, tab hidden): let go, press again later
-        release();
-        needsRelease.current = true;
-        return;
-      }
-      clientRef.current?.sendCmd(cmd);
-    }, TICK_MS);
-    return () => {
-      window.clearInterval(id);
-      release();
-    };
-  }, [blockReason, release, pressStop, gate]);
-
-  // ---- keyboard
-  useEffect(() => {
-    const typing = (t: EventTarget | null) =>
-      t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range') || t.isContentEditable);
-    const down = (e: KeyboardEvent) => {
-      if (typing(e.target)) return;
-      shift.current = e.shiftKey;
-      if (e.code === 'Escape') {
-        e.preventDefault();
-        pressStop();
-        return;
-      }
-      if (e.code === 'Space') {
-        e.preventDefault();
-        spaceHeld.current = true;
-        return;
-      }
-      if (TDM56_KEYS[e.code] || e.code === 'KeyF' || e.code === 'KeyR') {
-        e.preventDefault();
-        keys.current.add(e.code);
-      }
-    };
-    const up = (e: KeyboardEvent) => {
-      shift.current = e.shiftKey;
-      if (e.code === 'Space') {
-        e.preventDefault(); // a focused button would otherwise "click" on Space release
-        spaceHeld.current = false;
-      }
-      keys.current.delete(e.code);
-    };
-    const drop = () => {
-      keys.current.clear();
-      spaceHeld.current = false;
-      clutchBtn.current = false;
-      stickL.current = { x: 0, y: 0, active: false };
-      stickR.current = { x: 0, y: 0, active: false };
-    };
-    const vis = () => document.hidden && drop();
-    window.addEventListener('keydown', down, true);
-    window.addEventListener('keyup', up, true);
-    window.addEventListener('blur', drop);
-    document.addEventListener('visibilitychange', vis);
-    return () => {
-      window.removeEventListener('keydown', down, true);
-      window.removeEventListener('keyup', up, true);
-      window.removeEventListener('blur', drop);
-      document.removeEventListener('visibilitychange', vis);
-    };
-  }, [pressStop]);
-
-  // ---- UI snapshot at ~10 Hz
-  const [ui, setUi] = useState<UiSnap>({
-    engaged: false,
-    wantClutch: false,
-    needsRelease: false,
-    block: null,
-    gripper: 1,
-    dPos: [0, 0, 0],
-    dRot: [0, 0, 0],
-    pad: null,
-    source: null,
+      const out = gate(cmd);
+      if (!out) return false; // the lease gate said no at this instant: let go, press again later
+      clientRef.current?.sendCmd(out);
+      return true;
+    },
   });
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setUi({
-        engaged: engaged.current,
-        wantClutch: lastWant.current,
-        needsRelease: needsRelease.current,
-        block: lastBlock.current,
-        gripper: gripperRef.current,
-        dPos: integ.current.dPos,
-        dRot: integ.current.dRot,
-        pad: lastPad.current,
-        source: lastSource.current,
-      });
-    }, 100);
-    return () => window.clearInterval(id);
-  }, []);
+  const ui = drive.ui;
 
   const controlSocket = useMemo<ControlChannel>(
     () => ({
@@ -467,7 +258,7 @@ function ConsoleInner({
   );
 
   const robot = link.robot;
-  const status = clutchStatus(ui, showSticks);
+  const status = clutchStatus(ui, touch);
 
   return (
     <Tdm56Ctx.Provider value={api}>
@@ -564,63 +355,13 @@ function ConsoleInner({
               )}
             </div>
 
-            {/* phone / touch controls */}
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                className="rounded-md px-2 py-1 text-sm text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400"
-                onClick={() => setShowSticks((s) => !s)}
-                data-testid="tdm56-toggle-sticks"
-              >
-                {showSticks ? 'Hide on-screen controls' : 'Show on-screen controls'}
-              </button>
-              {showSticks && (
-                <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-                  <input type="checkbox" checked={stickEngages} onChange={(e) => setStickEngages(e.target.checked)} />
-                  Touching a stick holds the clutch
-                </label>
-              )}
+            {/* TDM-106: the controls are always on screen: the keycap legend lights up as you press, the
+                sticks / hold-to-drive / gripper button work with a mouse or a thumb */}
+            <div className="mt-3 grid gap-3">
+              {!touch && <Tdm106KeyLegend drive={drive} testPrefix="tdm56" />}
+              <Tdm106OnScreenControls drive={drive} stickSize={stickSize} testPrefix="tdm56" />
+              {touch && <Tdm106KeyLegend drive={drive} testPrefix="tdm56" />}
             </div>
-            {showSticks && (
-              <>
-              {/* phones: pinned to the bottom of the screen so the sticks never scroll away */}
-              <div className="h-52 sm:hidden" aria-hidden />
-              <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-zinc-50/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 sm:static sm:mt-2 sm:rounded-xl sm:border sm:px-4">
-                <div className="mx-auto flex max-w-md items-end justify-between gap-2">
-                  <Tdm56Joystick size={stickSize} label="Move" hint="forward, back, left, right" onChange={(v) => (stickL.current = v)} />
-                  <div className="flex flex-col items-center gap-2">
-                    <button
-                      type="button"
-                      className={`h-24 w-24 touch-none select-none rounded-full border-4 text-sm font-bold transition-colors ${
-                        ui.engaged
-                          ? 'border-black/20 bg-[var(--tdm56-drive)] text-black'
-                          : 'border-zinc-300 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
-                      }`}
-                      onPointerDown={(e) => {
-                        try {
-                          e.currentTarget.setPointerCapture(e.pointerId);
-                        } catch {
-                          /* synthetic or already-released pointer */
-                        }
-                        clutchBtn.current = true;
-                      }}
-                      onPointerUp={() => (clutchBtn.current = false)}
-                      onPointerCancel={() => (clutchBtn.current = false)}
-                      onLostPointerCapture={() => (clutchBtn.current = false)}
-                      onContextMenu={(e) => e.preventDefault()}
-                      data-testid="tdm56-clutch-button"
-                    >
-                      Hold to
-                      <br />
-                      drive
-                    </button>
-                    <GripperSlider value={gripper} onChange={setGripper} compact />
-                  </div>
-                  <Tdm56Joystick size={stickSize} label="Lift and turn" hint="up, down, turn" onChange={(v) => (stickR.current = v)} />
-                </div>
-              </div>
-              </>
-            )}
           </div>
 
           {/* ---------------- side panel */}
@@ -691,59 +432,17 @@ function ConsoleInner({
               </dl>
             </Panel>
 
-            <Panel title="Speed">
-              <div className="flex items-baseline justify-between">
-                <span className="text-2xl font-semibold tabular-nums" data-testid="tdm56-speed">
-                  {Math.round(effSpeed * 100)}%
-                </span>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={slow} onChange={(e) => setSlow(e.target.checked)} data-testid="tdm56-slow" />
-                  Slow mode
-                </label>
-              </div>
-              <input
-                type="range"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-                className="mt-2 w-full accent-zinc-700 dark:accent-zinc-300"
-                aria-label="Speed scale"
-              />
-              <p className="mt-1 text-xs text-zinc-500">
-                {slow ? `Slow mode caps speed at ${SLOW_CAP * 100}%. Turn it off once you are comfortable.` : 'Full range. The robot still applies its own speed limits.'}
-              </p>
+            <Panel title="Driving">
+              <Tdm106DriveSettings drive={drive} snapAvailable={!!assistTarget} testPrefix="tdm56" />
             </Panel>
 
             <Panel title="Gripper">
-              <GripperSlider value={gripper} onChange={setGripper} />
-              <p className="mt-1 text-xs text-zinc-500">The gripper moves while you hold the clutch.</p>
+              <GripperSlider value={drive.gripper} onChange={drive.setGripper} />
+              <p className="mt-1 text-xs text-zinc-500">Tap G or the grip button to open or close. The arm holds still while the gripper moves.</p>
             </Panel>
 
             {recordingSlot && <Panel title="Recording">{recordingSlot}</Panel>}
 
-            <Panel title="Controls">
-              <p className="mb-2 text-xs text-zinc-500" data-testid="tdm56-gamepad">
-                {ui.pad ? `Gamepad connected: ${ui.pad}` : 'No gamepad found. Press any button on one to connect it.'}
-              </p>
-              <KeyTable
-                rows={[
-                  ['Drive (clutch)', 'Hold Space', 'Hold RT'],
-                  ['Forward / back', 'W / S', 'Left stick'],
-                  ['Left / right', 'A / D', 'Left stick'],
-                  ['Up / down', 'Q / E', 'Right stick up/down'],
-                  ['Turn', '← / →', 'Right stick left/right'],
-                  ['Tilt', '↑ / ↓', 'D-pad up/down'],
-                  ['Roll', 'Shift + ← / →', 'D-pad left/right'],
-                  ['Gripper', 'R open, F close', 'A toggles, LB/RB'],
-                  ['Stop', 'Esc', 'B'],
-                ]}
-              />
-              <p className="mt-2 text-xs text-zinc-500">
-                Moves are relative to where the hand was when you pressed the clutch. Let go to hold still.
-              </p>
-            </Panel>
           </aside>
         </div>
         {feed && (
@@ -758,20 +457,25 @@ function ConsoleInner({
 
 // ------------------------------------------------------------------ bits
 
-function clutchStatus(ui: UiSnap, touch: boolean): { tone: 'drive' | 'blocked' | 'idle'; title: string; sub: string } {
-  if (ui.engaged) return { tone: 'drive', title: 'Driving', sub: `Clutch held (${ui.source ?? 'input'}). Let go to hold still.` };
+function clutchStatus(ui: Tdm106DriveUi, touch: boolean): { tone: 'drive' | 'blocked' | 'idle'; title: string; sub: string } {
+  if (ui.engaged)
+    return {
+      tone: 'drive',
+      title: 'Driving',
+      sub: ui.source === 'gripper' ? 'Moving the gripper. The arm holds still.' : ui.source === 'keys' ? 'Let go of the keys to hold still.' : `Clutch held (${ui.source ?? 'input'}). Let go to hold still.`,
+    };
   if (ui.block) {
     return {
-      tone: ui.wantClutch || ui.needsRelease ? 'blocked' : 'idle',
-      title: ui.wantClutch ? 'Clutch released for safety' : 'Not driving',
+      tone: ui.want || ui.needsRelease ? 'blocked' : 'idle',
+      title: ui.want ? 'Paused for safety' : 'Not driving',
       sub: ui.block.text,
     };
   }
-  if (ui.needsRelease) return { tone: 'blocked', title: 'Let go of the clutch', sub: 'Then press it again to drive.' };
+  if (ui.needsRelease) return { tone: 'blocked', title: 'Let go of the keys', sub: 'Then press them again to drive.' };
   return {
     tone: 'idle',
     title: 'Not driving',
-    sub: touch ? 'Hold the drive button or touch a stick.' : 'Hold Space (or RT on a gamepad) to drive.',
+    sub: touch ? 'Drag a stick to move the hand.' : 'Hold W A S D to move, Q / E for up and down, tap G to grip.',
   };
 }
 
@@ -851,30 +555,5 @@ function GripperSlider({ value, onChange, compact }: { value: number; onChange: 
         <span>Open</span>
       </div>
     </div>
-  );
-}
-
-function KeyTable({ rows }: { rows: [string, string, string][] }) {
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-left text-zinc-500">
-          <th className="pb-1 font-normal" />
-          <th className="pb-1 font-medium">Keyboard</th>
-          <th className="pb-1 font-medium">Gamepad</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([what, k, g]) => (
-          <tr key={what} className="border-t border-zinc-100 dark:border-zinc-800">
-            <td className="py-1 pr-2 text-zinc-600 dark:text-zinc-400">{what}</td>
-            <td className="py-1 pr-2">
-              <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1 font-sans dark:border-zinc-700 dark:bg-zinc-800">{k}</kbd>
-            </td>
-            <td className="py-1">{g}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

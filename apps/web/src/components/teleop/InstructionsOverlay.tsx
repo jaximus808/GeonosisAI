@@ -2,7 +2,7 @@
 
 // TDM-59: the short "how to drive" walkthrough for first-time operators.
 //
-// Six cards: clutch, move/lift/turn, gripper, speed, STOP, and what a good demo looks like for
+// Six cards: move, up/down/turn, gripper, speed, STOP, and what a good demo looks like for
 // THIS task. The keycaps light up as you press them (keyboard) so it is learn-by-doing, without
 // moving anything: while the overlay is open on the teleop page, <Tdm59TeleopOnboarding> swallows
 // key presses before the TDM-56 console sees them (see `useTdm59KeyShield`).
@@ -197,62 +197,57 @@ function buildCards(kind: OverlayKind, taskText: string | null | undefined, inpu
 
   return [
     {
-      title: 'Hold the clutch to drive',
+      title: 'Hold a key to move',
       diagram: touch ? (
-        <TouchLayout lit="clutch" />
+        <TouchLayout lit="sticks" />
       ) : (
         <div className="flex items-center gap-5">
-          <Key wide on={k('Space')}>Space</Key>
-          <ArmState moving={k('Space')} />
+          <KeyCluster label="Move" keys={[['', 'KeyW', ''], ['KeyA', 'KeyS', 'KeyD']]} held={held} />
+          <ArmState moving={['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'].some(k)} />
         </div>
       ),
       body: (
         <>
           <p>
-            The arm only moves while you hold the clutch:{' '}
             {touch ? (
               <>
-                press and hold <b>Hold to drive</b>, or just touch a stick.
+                Drag the <b>Move</b> stick. The arm moves only while your thumb is on a stick.
               </>
             ) : (
               <>
-                hold <b>Space</b> (or <b>RT</b> on a gamepad).
+                Hold <b>W A S D</b> to move the hand forward, left, back and right. The arm moves only while you hold a key.
               </>
             )}
           </p>
           <p>Let go and the arm holds still where it is. Let go any time you are unsure, then line up your next move.</p>
         </>
       ),
-      tryIt: 'hold Space',
+      tryIt: 'hold W',
     },
     {
-      title: 'Move, lift and turn',
+      title: 'Up, down and turning',
       diagram: touch ? (
         <TouchLayout lit="sticks" />
       ) : (
         <div className="flex flex-wrap items-end justify-center gap-6">
-          <KeyCluster label="Move" keys={[['', 'KeyW', ''], ['KeyA', 'KeyS', 'KeyD']]} held={held} />
           <KeyCluster label="Up / down" keys={[['KeyQ'], ['KeyE']]} held={held} />
-          <KeyCluster label="Turn / tilt" keys={[['', 'ArrowUp', ''], ['ArrowLeft', 'ArrowDown', 'ArrowRight']]} held={held} />
+          <KeyCluster label="Turn (when on)" keys={[['', 'ArrowUp', ''], ['ArrowLeft', 'ArrowDown', 'ArrowRight']]} held={held} />
         </div>
       ),
       body: touch ? (
         <>
-          <p>
-            The left stick moves the hand forward, back, left and right. The right stick lifts it up and down and turns it.
-          </p>
-          <p>Moves start from where the hand was when you put your thumb down. Short strokes are easier to control than long ones.</p>
+          <p>Drag the <b>Up / down</b> stick to lift or lower the hand.</p>
+          <p>The hand keeps its angle unless you switch on <b>Turn the hand</b>. Most pick-and-place jobs never need it.</p>
         </>
       ) : (
         <>
           <p>
-            <b>W A S D</b> move the hand forward, left, back and right, as seen from behind the robot. <b>Q</b> lifts it, <b>E</b> lowers it.{' '}
-            <b>← →</b> turn the hand, <b>↑ ↓</b> tilt it, and <b>Shift + ← →</b> roll it.
+            <b>Q</b> lifts the hand, <b>E</b> lowers it. The hand keeps its angle unless you switch on <b>Turn the hand</b>; then the arrow keys turn and tilt it.
           </p>
-          <p>Moves start from where the hand was when you pressed the clutch. Short strokes are easier to control than long ones.</p>
+          <p>Short moves are easier to control than long ones. Hold <b>Shift</b> for fine moves.</p>
         </>
       ),
-      tryIt: 'press W, A, S, D, Q or E',
+      tryIt: 'press Q or E',
     },
     {
       title: 'Open and close the gripper',
@@ -261,33 +256,27 @@ function buildCards(kind: OverlayKind, taskText: string | null | undefined, inpu
       ) : (
         <div className="flex items-center gap-6">
           <div className="flex flex-col items-center gap-1.5">
-            <Key on={k('KeyR')}>R</Key>
-            <span className="text-xs text-zinc-500">open</span>
+            <Key on={k('KeyG')}>G</Key>
+            <span className="text-xs text-zinc-500">open / close</span>
           </div>
-          <GripperDiagram open={k('KeyF') ? 0.15 : k('KeyR') ? 1 : 0.6} />
-          <div className="flex flex-col items-center gap-1.5">
-            <Key on={k('KeyF')}>F</Key>
-            <span className="text-xs text-zinc-500">close</span>
-          </div>
+          <GripperDiagram open={k('KeyG') ? 0.15 : 0.9} />
         </div>
       ),
       body: touch ? (
-        <p>Slide the gripper control toward Closed to grab and toward Open to let go. The gripper follows while you hold the clutch.</p>
+        <p>Tap <b>Close grip</b> to grab and <b>Open grip</b> to let go. The arm holds still while the fingers move.</p>
       ) : (
         <p>
-          Hold <b>R</b> to open and <b>F</b> to close, together with the clutch, or use the gripper slider. On a gamepad, <b>A</b> toggles and the bumpers open or close gradually.
+          Tap <b>G</b> to close the gripper, tap it again to open it. The arm holds still while the fingers move. On a gamepad, <b>A</b> does the same.
         </p>
       ),
-      tryIt: 'hold R or F',
+      tryIt: 'tap G',
     },
     {
       title: 'Start slow',
       diagram: <SpeedDiagram />,
       body: (
         <>
-          <p>
-            You start in slow mode, capped at 25% speed. Once the hand goes where you mean it to, turn slow mode off and raise the speed slider.
-          </p>
+          <p>You start at 35% speed, and every move eases in, so a quick tap is a small move. Pick Fast once the hand goes where you mean it to.</p>
           <p>The robot keeps its own speed and workspace limits whatever you set here. If the picture lags, slow down rather than speed up.</p>
         </>
       ),
@@ -446,11 +435,11 @@ function SpeedDiagram() {
   return (
     <svg viewBox="0 0 220 70" className="h-20 w-full max-w-xs">
       <rect x="10" y="30" width="200" height="8" rx="4" className="fill-zinc-300 dark:fill-zinc-700" />
-      <rect x="10" y="30" width="50" height="8" rx="4" className="fill-[#f0b400]" />
-      <circle cx="60" cy="34" r="10" className="fill-white stroke-[#a67c00] dark:fill-zinc-900" strokeWidth="3" />
-      <line x1="60" y1="12" x2="60" y2="20" className="stroke-zinc-500" strokeWidth="2" />
-      <text x="60" y="9" textAnchor="middle" className="fill-zinc-600 text-[10px] font-semibold dark:fill-zinc-300">
-        slow mode 25%
+      <rect x="10" y="30" width="70" height="8" rx="4" className="fill-[#f0b400]" />
+      <circle cx="80" cy="34" r="10" className="fill-white stroke-[#a67c00] dark:fill-zinc-900" strokeWidth="3" />
+      <line x1="80" y1="12" x2="80" y2="20" className="stroke-zinc-500" strokeWidth="2" />
+      <text x="80" y="9" textAnchor="middle" className="fill-zinc-600 text-[10px] font-semibold dark:fill-zinc-300">
+        start 35%
       </text>
       <text x="10" y="60" className="fill-zinc-500 text-[10px]">
         careful

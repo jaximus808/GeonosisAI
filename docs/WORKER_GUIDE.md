@@ -209,3 +209,13 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Teleop (TDM-52/56/57):** a recovery_takeover task named in an `intervention.started` event (or with `[ref iv:...]` in its instructions) is a takeover of a *paused rollout*: don't send `start_teleop` (the rollout holds the job lock); drive over the control socket, then `handback` (robot_command, or socket `{t:"handback"}` + the robot appends `intervention.handed_back`), then `complete_task`.
 - **Read it:** `GET /tickets/{id}/interventions` (every intervention, claim wait, takeover length, episode, review, timeouts). Trail: `intervention.*` events, actor `orchestrator:interventions`.
 - **Proof (local only, [FAKE]):** `cd services/orchestrator && uv run python ../../spikes/tdm-69-interventions/prove_interventions.py`.
+
+## E15 Robot view contract (TDM-96..103: build to this)
+- **State feed (TDM-96):** `useRobotLive(robotId)` in `apps/web/src/lib/robotview/useRobotLive.ts` returns `{ state, hz, latencyMs, source: 'sim'|'live', stale }`. Its `state` is a `RobotLiveState`, defined in `apps/web/src/lib/robotview/types.ts`, which TDM-96 owns and creates first:
+  `{ t_ms, joints: number[] /* rad, 6 */, gripper: number /* 0 closed..1 open */, ee: { pos: [x,y,z] /* m, base frame */, quat: [w,x,y,z] }, control_source: 'policy'|'human'|'idle', robot_state: string, estop: boolean, safety: { clamps_1s: Record<string,number> }, checkpoint_uri?: string, scene?: { cube?: {pos,quat}, plate?: {pos} }, chunk_preview?: number[][] /* downsampled joint targets */, workspace?: { min:[x,y,z], max:[x,y,z], table_z:number } }`.
+  - The robot side publishes it on `/ws/state` of the TDM-55 stream server.
+- **Twin (TDM-97):** `<RobotTwin3D state={RobotLiveState|null} preset?: 'front'|'top'|'wrist' sim?: boolean ghost?: number[][] />` in `apps/web/src/components/robotview/RobotTwin3D.tsx`. It's purely presentational, with no data fetching. Lazy-load it with `next/dynamic` and `ssr:false`.
+- **View (TDM-98):** `<RobotView robotId?: number defaultMode?: 'sim'|'live' compact?: boolean hud?: ReactNode />` in `apps/web/src/components/robotview/RobotView.tsx`. It composes the twin and camera panes and owns the Sim ⇄ Live switch and the source registry.
+- **HUD (TDM-99):** `<RobotHud robotId ticketId? state />`, passed into `RobotView` via `hud`.
+- **Until a dependency lands,** code against these signatures with a recorded fixture under `apps/web/src/lib/robotview/fixtures/`.
+- **The MuJoCo sim robot** (`make demo`) is being built off the board. Check `git log` for `mujoco`.

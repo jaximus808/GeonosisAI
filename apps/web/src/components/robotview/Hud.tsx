@@ -52,11 +52,11 @@ export interface RobotHudProps {
 const C = {
   intent: '#8cc2ff', // the twin's ghost / intent colour: the policy and its plan
   human: '#7fe0b0',
-  idle: '#8b929c',
+  idle: '#8f9ca5', // TDM-109 steel
   envelope: '#f0a63a', // the twin's workspace envelope: safety clamps
-  estop: '#ff4d4f',
-  pass: '#7fe0b0',
-  fail: '#ff6b6b',
+  estop: '#ff6d66', // slag
+  pass: '#79c7ff', // arc: pass is blue against red
+  fail: '#ff6d66', // slag
 };
 
 const DRIVER_COLOR: Record<ControlSource, string> = { policy: C.intent, human: C.human, idle: C.idle };
@@ -96,7 +96,7 @@ export function RobotHud({ robotId, ticketId, state, stale = false, className = 
 
   return (
     <div
-      className={`overflow-hidden rounded-lg bg-black/40 text-zinc-100 ring-1 ring-white/10 ${className}`}
+      className={`gx-foundry overflow-hidden rounded-sm bg-surface-sunken/90 text-ink ring-1 ring-line ${className}`}
       data-testid="robot-hud"
       data-estop={estop ? '1' : '0'}
     >
@@ -120,7 +120,7 @@ export default RobotHud;
 
 function Segment({ caption, children, className = '', grow = false, testid }: { caption: string; children: ReactNode; className?: string; grow?: boolean; testid?: string }) {
   return (
-    <div data-testid={testid} className={`flex min-w-0 flex-col justify-center gap-1 border-white/10 px-3 py-2 [&:not(:first-child)]:border-l ${grow ? 'flex-1 basis-56' : 'shrink-0'} ${className}`}>
+    <div data-testid={testid} className={`flex min-w-0 flex-col justify-center gap-1 border-line px-3 py-2 [&:not(:first-child)]:border-l ${grow ? 'flex-1 basis-56' : 'shrink-0'} ${className}`}>
       <span className="text-[11px] leading-none text-zinc-400">{caption}</span>
       {children}
     </div>
@@ -309,7 +309,7 @@ function Trials({ counter }: { counter: TrialCounter | null }) {
         <span className="sr-only">
           {counter.passed} passed, {counter.failed} failed of {counter.planned} planned trials
         </span>
-        {counter.simulated && <span className="text-xs text-violet-300">simulated trials</span>}
+        {counter.simulated && <span className="gx-tag gx-tag-sim">Simulated trials</span>}
       </span>
     </Segment>
   );

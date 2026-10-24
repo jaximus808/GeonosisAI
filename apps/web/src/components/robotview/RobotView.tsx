@@ -250,21 +250,21 @@ function ModeSwitch({
     const active = mode === m;
     const activeTone =
       m === 'sim'
-        ? 'bg-violet-600 text-white shadow-sm dark:bg-violet-500'
-        : 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900';
+        ? 'bg-steel text-ground'
+        : 'bg-ink text-ground';
     return (
       <button
         type="button"
         role="radio"
         aria-checked={active}
         onClick={() => onChange(m)}
-        className={`flex min-w-0 flex-1 items-baseline justify-center gap-2 rounded-md font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+        className={`flex min-w-0 flex-1 items-baseline justify-center gap-2 rounded-sm font-semibold transition-colors ${
           compact ? 'px-3 py-1 text-sm' : 'px-5 py-2 text-base'
-        } ${active ? activeTone : 'text-zinc-600 hover:bg-zinc-200/70 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}
+        } ${active ? activeTone : 'text-ink-muted hover:bg-surface'}`}
       >
         {label}
         {!compact && (
-          <span className={`text-xs font-normal tabular-nums ${active ? 'opacity-80' : 'text-zinc-500'}`}>
+          <span className={`text-xs font-normal tabular-nums ${active ? 'opacity-80' : 'text-ink-muted'}`}>
             {list.length === 0 ? 'none' : `${on} of ${list.length} online`}
           </span>
         )}
@@ -275,7 +275,7 @@ function ModeSwitch({
     <div
       role="radiogroup"
       aria-label="Robot source"
-      className={`flex rounded-lg bg-zinc-100 p-1 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800 ${compact ? 'w-44' : 'w-full sm:w-80'}`}
+      className={`flex rounded-sm bg-surface-sunken p-1 ring-1 ring-line ${compact ? 'w-44' : 'w-full sm:w-80'}`}
     >
       {seg('sim', 'Sim')}
       {seg('live', 'Live')}
@@ -295,7 +295,7 @@ function RobotPicker({ registry, source, onPick, now }: { registry: RobotRegistr
     <label className="flex min-w-0 items-center gap-2 text-sm">
       <span className="shrink-0 text-zinc-500">Robot</span>
       <select
-        className="min-w-0 max-w-full truncate rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        className="min-w-0 max-w-full truncate rounded-sm border border-line-strong bg-surface px-2 py-1.5 font-mono text-sm text-ink"
         value={source ? String(source.id) : ''}
         onChange={(e) => {
           const s = registry.byId.get(Number(e.target.value));
@@ -311,13 +311,12 @@ function RobotPicker({ registry, source, onPick, now }: { registry: RobotRegistr
 }
 
 /** The striped tape used for everything simulated: badge background and frame edge. */
-const SIM_TAPE = 'repeating-linear-gradient(135deg, rgb(139 92 246 / 0.95) 0 8px, rgb(109 40 217 / 0.95) 8px 16px)';
+const SIM_TAPE = 'repeating-linear-gradient(135deg, var(--steel) 0 8px, var(--steel-soft) 8px 16px)';
 
 function SimBadge({ name }: { name?: string }) {
   return (
     <span
-      className="inline-flex items-center gap-2 rounded px-2 py-0.5 text-xs font-bold tracking-wider text-white shadow"
-      style={{ backgroundImage: SIM_TAPE }}
+      className="gx-tag gx-tag-sim shadow-[inset_0_0_0_1px_var(--steel)]"
       title="Everything in this view comes from a simulated robot, not real hardware."
     >
       SIMULATED
@@ -331,7 +330,7 @@ function PanelNote({ title, children, tone = 'neutral', action }: { title: strin
     tone === 'warn'
       ? 'text-red-200'
       : tone === 'sim'
-        ? 'text-violet-100'
+        ? 'text-ink'
         : 'text-zinc-200';
   return (
     <div role="status" className="grid h-full place-items-center p-6 text-center">
@@ -504,12 +503,12 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
   const camNote = !block && !simSlot && access.kind === 'none' ? access : null;
   const sideColumn = showCams || (!!simSlot && !compact);
 
-  // Frame: sim is violet with the striped tape edge; live is neutral, red-edged when offline.
+  // Frame (TDM-109): sim is a steel frame with the striped steel tape edge; live is neutral, red-edged when offline.
   const frame = sim
-    ? 'ring-2 ring-violet-500/80 bg-violet-950'
+    ? 'ring-2 ring-steel bg-surface-sunken'
     : block?.tone === 'warn'
-      ? 'ring-2 ring-red-500/60 bg-zinc-950'
-      : 'ring-1 ring-zinc-700 bg-zinc-950';
+      ? 'ring-2 ring-slag/70 bg-surface-sunken'
+      : 'ring-1 ring-line bg-surface-sunken';
 
   const switchOther = block?.offerOther ? (
     <button
@@ -543,7 +542,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
             </div>
           )}
           {live.state && live.stale && (
-            <span className="absolute bottom-2 left-2 rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">
+            <span className="gx-tag gx-tag-failed absolute bottom-2 left-2">
               State stalled, last sample {ago(live.state.t_ms, now)}
             </span>
           )}
@@ -573,7 +572,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
         <div className="ml-auto shrink-0">{source?.online && !block && <QualityBars q={q} />}</div>
       </div>
 
-      <div className={`relative overflow-hidden rounded-xl p-2 ${frame}`}>
+      <div className={`gx-foundry relative overflow-hidden rounded-md p-2 ${frame}`}>
         {sim && <div aria-hidden className="absolute inset-x-0 top-0 h-1.5" style={{ backgroundImage: SIM_TAPE }} />}
         {compact ? (
           <>

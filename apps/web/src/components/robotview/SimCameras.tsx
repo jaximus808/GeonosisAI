@@ -12,7 +12,7 @@
 //   <TaskSimCameras taskId onHealth fallback={<TaskCameraFeed .../>} />   teleop video pane: sim robot -> these views,
 //                                                                           anything else -> the fallback (real video)
 //
-// Rules kept here: sim is always labelled SIMULATED with the violet frame; nothing is drawn as live;
+// Rules kept here: sim is always labelled SIMULATED with the steel frame (TDM-109 brand); nothing is drawn as live;
 // with no state yet the arm stays at rest under an explicit "waiting" note (never invented motion).
 
 import dynamic from 'next/dynamic';
@@ -27,7 +27,7 @@ import { useRows } from '@/lib/spacetime/hooks';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
-  loading: () => <div className="h-full w-full animate-pulse bg-violet-950/60" />,
+  loading: () => <div className="h-full w-full animate-pulse bg-steel-soft" />,
 });
 
 /** The panes, in order: the first is the large one. Ids resolve against the spec's cameras first. */
@@ -36,7 +36,7 @@ export const SIM_CAMERA_IDS = ['top', 'side', 'wrist'] as const;
 const CAMERA_NAMES: Record<string, string> = { top: 'Top', side: 'Side', front: 'Front', wrist: 'Wrist' };
 const cameraName = (id: string) => CAMERA_NAMES[id] ?? id.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-const SIM_TAPE = 'repeating-linear-gradient(135deg, rgb(139 92 246 / 0.95) 0 8px, rgb(109 40 217 / 0.95) 8px 16px)';
+const SIM_TAPE = 'repeating-linear-gradient(135deg, var(--steel) 0 8px, var(--steel-soft) 8px 16px)';
 
 export interface SimCamerasProps {
   state: RobotLiveState | null;
@@ -51,7 +51,7 @@ export interface SimCamerasProps {
   /** Why there is no state (useRobotLive().error), shown while waiting. */
   waitingDetail?: string | null;
   robotName?: string;
-  /** false inside a frame that already carries the SIMULATED badge and violet tape (RobotView). Default true. */
+  /** false inside a frame that already carries the SIMULATED badge and steel tape (RobotView). Default true. */
   framed?: boolean;
   className?: string;
 }
@@ -95,7 +95,7 @@ function Pane({ id, state, spec, primary, stale, className }: {
   const name = cameraName(id);
   return (
     <figure
-      className={`absolute inset-0 m-0 overflow-hidden rounded-md bg-violet-950 ring-1 ring-violet-400/40 ${className ?? ''}`}
+      className={`absolute inset-0 m-0 overflow-hidden rounded-md bg-surface-sunken ring-1 ring-steel/40 ${className ?? ''}`}
       data-sim-camera={id}
       aria-label={`${name} camera, simulated`}
     >
@@ -110,7 +110,7 @@ function Pane({ id, state, spec, primary, stale, className }: {
           className="h-full w-full"
         />
       </div>
-      {/* violet wash at the edges: reads as "not a real camera" without hiding the scene */}
+      {/* steel wash at the edges: reads as "not a real camera" without hiding the scene */}
       <div aria-hidden className="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_1px_rgb(167_139_250/0.35),inset_0_0_36px_rgb(76_29_149/0.55)]" />
       <figcaption className="pointer-events-none absolute bottom-1.5 left-1.5 flex items-center gap-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm">
         <span aria-hidden className="h-2 w-2 rounded-[2px]" style={{ backgroundImage: SIM_TAPE }} />
@@ -140,7 +140,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
   return (
     <section
       aria-label="Simulated camera views"
-      className={`@container relative rounded-lg bg-violet-950 ${framed ? 'p-1.5 ring-2 ring-violet-500/80' : ''} ${className ?? ''}`}
+      className={`gx-foundry @container relative rounded-md bg-surface-sunken ${framed ? 'p-1.5 ring-2 ring-steel' : ''} ${className ?? ''}`}
       data-sim-cameras={ids.join(',')}
       data-fps={fps}
       data-state={waiting ? 'waiting' : stale ? 'stale' : 'live'}
@@ -151,8 +151,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
           <Pane id={first} state={state} spec={scene} primary stale={stale} />
           {framed && (
           <span
-            className="absolute left-2 top-2 inline-flex items-center gap-2 rounded px-2 py-0.5 text-xs font-bold tracking-wider text-white shadow"
-            style={{ backgroundImage: SIM_TAPE }}
+            className="gx-tag gx-tag-sim absolute left-2 top-2 shadow-[inset_0_0_0_1px_var(--steel)]"
             title="These views are drawn in your browser from the simulated robot's joint state. No real camera is involved."
           >
             SIMULATED
@@ -161,15 +160,15 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
           )}
           {waiting && (
             <div className="absolute inset-0 grid place-items-center bg-black/55 p-4 text-center">
-              <div className="max-w-xs text-sm text-violet-100">
+              <div className="max-w-xs text-sm text-ink">
                 <p className="font-semibold">Waiting for the sim robot&apos;s joint state</p>
-                <p className="mt-1 text-xs text-violet-200/80">The arm is shown at rest until the first sample arrives.</p>
+                <p className="mt-1 text-xs text-ink-muted">The arm is shown at rest until the first sample arrives.</p>
                 {waitingDetail && <p className="mt-1 text-xs text-zinc-400">{waitingDetail}</p>}
               </div>
             </div>
           )}
           {!waiting && stale && (
-            <span className="absolute bottom-2 right-2 rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">State stalled</span>
+            <span className="absolute bottom-2 right-2 gx-tag gx-tag-failed">State stalled</span>
           )}
         </div>
         {rest.map((id) => (
@@ -178,7 +177,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
           </div>
         ))}
       </div>
-      <p className="mt-1.5 flex flex-wrap items-center gap-x-3 px-0.5 text-[11px] text-violet-200/80 tabular-nums">
+      <p className="mt-1.5 flex flex-wrap items-center gap-x-3 px-0.5 text-[11px] text-ink-muted font-mono tabular-nums">
         <span>Drawn from the sim robot&apos;s joint state, not a video feed.</span>
         <span className="ml-auto">
           {hz != null && `${hz.toFixed(0)} Hz state, `}

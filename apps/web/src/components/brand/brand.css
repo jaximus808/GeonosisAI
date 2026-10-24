@@ -43,6 +43,7 @@
   .gx-tag-shipped { background: var(--arc-soft); color: var(--arc); }
   .gx-tag-failed { background: var(--slag-soft); color: var(--slag); }
   .gx-tag-money { background: var(--ochre-soft); color: var(--ochre); }
+  .gx-tag-busy { background: var(--arc-soft); color: var(--arc); }
   .gx-tag-cancelled { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); }
   
   /* The line: stations as rivets on a track */
@@ -112,5 +113,14 @@
   .gx-live { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--arc); font-family: var(--font-mono); font-size: 12px; }
   .gx-live.is-connecting { color: var(--steel); }
   .gx-live.is-down { color: var(--slag); }
+  /* Always-Foundry scope for instrument surfaces drawn over a 3D scene or video (robot view, HUD). */
+  .gx-foundry {
+    color-scheme: dark;
+    --ground: #13110f; --surface: #1c1916; --surface-sunken: #0d0b0a; --line: #3b332d; --line-strong: #7a6b5f;
+    --ink: #f1e9e1; --ink-muted: #b3a59a; --melt: #ff7a1f; --melt-soft: #3b1d0a; --on-melt: #1a0d04;
+    --ochre: #d39457; --ochre-soft: #33220f; --arc: #79c7ff; --arc-soft: #0e2738; --on-arc: #04131d;
+    --slag: #ff6d66; --slag-soft: #3a1513; --steel: #8f9ca5; --steel-soft: #222a2f;
+    color: var(--ink);
+  }
   .gx-phone { max-width: 390px; margin: 0 auto; display: grid; gap: var(--space-4); }
 }

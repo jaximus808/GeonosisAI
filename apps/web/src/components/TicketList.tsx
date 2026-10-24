@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 import { useRows } from '@/lib/spacetime/hooks';
 import { fmtCents, fmtTs } from '@/lib/format';
+import { StatusTag } from '@/components/brand/StatusTag';
 
 /** Live ticket list, newest first. New tickets appear without a refresh. */
 export function TicketList() {
@@ -12,18 +13,18 @@ export function TicketList() {
   const robotName = useMemo(() => new Map(robots.map((r) => [r.id, r.name])), [robots]);
   const sorted = useMemo(() => [...tickets].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)), [tickets]);
 
-  if (!ready) return <p className="text-sm text-zinc-500">Subscribing to ticket…</p>;
+  if (!ready) return <p className="gx-small">Subscribing to tickets…</p>;
   if (sorted.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
-        No tickets yet. They show up here live as soon as one is created.
+      <p className="rounded-sm border border-dashed border-line-strong p-4 text-sm text-ink-muted">
+        No tickets yet. File one to put a robot on the line.
       </p>
     );
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+    <div className="overflow-x-auto rounded-sm border border-line bg-surface">
       <table className="w-full text-left text-sm">
-        <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900">
+        <thead className="gx-label text-ink-muted">
           <tr>
             <th className="px-3 py-2">#</th>
             <th className="px-3 py-2">Task</th>
@@ -34,20 +35,20 @@ export function TicketList() {
             <th className="px-3 py-2">Created</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-line border-t border-line">
           {sorted.map((t) => (
-            <tr key={t.id.toString()} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
-              <td className="px-3 py-2 font-mono text-xs text-zinc-400">{t.id.toString()}</td>
+            <tr key={t.id.toString()} className="transition-colors hover:bg-surface-sunken">
+              <td className="gx-id px-3 py-2">TKT-{t.id.toString().padStart(4, '0')}</td>
               <td className="px-3 py-2">
                 <Link href={`/tickets/${t.id}`} className="hover:underline">{t.taskDescription}</Link>
               </td>
-              <td className="px-3 py-2 text-xs">
+              <td className="px-3 py-2 font-mono text-xs">
                 <Link href={`/robots/${t.robotId}`} className="hover:underline">{robotName.get(t.robotId) ?? `#${t.robotId}`}</Link>
               </td>
-              <td className="px-3 py-2 font-mono text-xs">{t.status}</td>
-              <td className="px-3 py-2 text-xs">{Math.round(t.targetSuccess * 100)}%</td>
-              <td className="px-3 py-2 text-xs">{fmtCents(t.spentCents)} / {fmtCents(t.budgetCents)}</td>
-              <td className="whitespace-nowrap px-3 py-2 text-xs text-zinc-500">{fmtTs(t.createdAt)}</td>
+              <td className="px-3 py-2"><StatusTag status={t.status} /></td>
+              <td className="gx-data px-3 py-2">{Math.round(t.targetSuccess * 100)}%</td>
+              <td className="gx-data px-3 py-2"><span className="text-ochre">{fmtCents(t.spentCents)}</span> of {fmtCents(t.budgetCents)}</td>
+              <td className="gx-small whitespace-nowrap px-3 py-2">{fmtTs(t.createdAt)}</td>
             </tr>
           ))}
         </tbody>

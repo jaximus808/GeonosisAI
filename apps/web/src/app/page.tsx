@@ -8,8 +8,8 @@ import { JoinQr } from '@/components/JoinQr';
 export default function Home() {
   return (
     <>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Tickets</h1>
-      <Section title="Tickets (live)" aside={<Link href="/tickets/new" className="text-xs text-blue-600 hover:underline">New ticket</Link>}>
+      <h1 className="gx-display-l mb-6">Tickets</h1>
+      <Section title="Tickets (live)" aside={<Link href="/tickets/new" className="gx-btn gx-btn-primary gx-btn-sm ml-auto">File a ticket</Link>}>
         <TicketList />
       </Section>
       <Section title="Contributors (live)">
@@ -18,7 +18,7 @@ export default function Home() {
           <div className="min-w-0 flex-1"><ContributorsPanel limit={10} /></div>
         </div>
       </Section>
-      <Section title="Latest events (live)" aside={<Link href="/events" className="text-xs text-blue-600 hover:underline">All events</Link>}>
+      <Section title="Latest events (live)" aside={<Link href="/events" className="text-xs text-arc hover:underline">All events</Link>}>
         <EventLogList limit={10} />
       </Section>
     </>

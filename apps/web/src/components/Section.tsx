@@ -4,7 +4,7 @@ export function Section({ title, aside, children }: { title: string; aside?: Rea
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">{title}</h2>
+        <h2 className="gx-station-label m-0 text-ink-muted">{title}</h2>
         {aside}
       </div>
       {children}
@@ -14,8 +14,8 @@ export function Section({ title, aside, children }: { title: string; aside?: Rea
 
 export function Placeholder({ owner, children }: { owner: string; children?: ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700">
-      {children ?? 'Not built yet.'} <span className="text-zinc-400">Owner: {owner}.</span>
+    <div className="rounded-sm border border-dashed border-line-strong p-6 text-sm text-ink-muted">
+      {children ?? 'Not built yet.'} <span className="gx-id">Owner: {owner}.</span>
     </div>
   );
 }

@@ -39,6 +39,7 @@ import {
 } from '@/lib/marketplace/tdm61';
 import { Tdm59ClaimGate } from '@/components/teleop/Tdm59ClaimGate'; // TDM-59 practice unlocks arm-control claims
 import { resetHref } from '@/lib/tdm62/reset'; // TDM-62 reset task page
+import { ShareTask } from '@/components/tdm108/ShareTask'; // TDM-108 share card + link
 
 type Ticket = RowOf<'ticket'>;
 type Robot = RowOf<'robot'>;
@@ -49,27 +50,20 @@ type Filter = 'all' | TaskType;
 type Tab = 'open' | 'mine';
 type Toast = { id: number; text: string; tone: 'bad' | 'good' };
 
-// Per-type accent, used on the ticket rail and the type label.
+// TDM-109: every task kind is money (ochre) on the brand; the kind is told apart by its label, not colour.
+const BRAND_TYPE_STYLE = {
+  rail: 'bg-ochre',
+  text: 'text-ochre',
+  chip: 'data-[on=true]:bg-ink data-[on=true]:text-ground data-[on=true]:border-ink',
+};
 const TYPE_STYLE: Record<string, { rail: string; text: string; chip: string }> = {
-  clean_teleop: {
-    rail: 'bg-[#2a52be]',
-    text: 'text-[#2a52be] dark:text-[#8ea8ff]',
-    chip: 'data-[on=true]:bg-[#2a52be] data-[on=true]:text-white data-[on=true]:border-[#2a52be]',
-  },
-  recovery_takeover: {
-    rail: 'bg-[#b4235a]',
-    text: 'text-[#b4235a] dark:text-[#ff86b0]',
-    chip: 'data-[on=true]:bg-[#b4235a] data-[on=true]:text-white data-[on=true]:border-[#b4235a]',
-  },
-  reset: {
-    rail: 'bg-[#0e7c6b]',
-    text: 'text-[#0e7c6b] dark:text-[#5fd8bd]',
-    chip: 'data-[on=true]:bg-[#0e7c6b] data-[on=true]:text-white data-[on=true]:border-[#0e7c6b]',
-  },
+  clean_teleop: BRAND_TYPE_STYLE,
+  recovery_takeover: BRAND_TYPE_STYLE,
+  reset: BRAND_TYPE_STYLE,
 };
 const styleOf = (type: string) => TYPE_STYLE[type] ?? TYPE_STYLE.reset;
 
-const HAZARD = 'repeating-linear-gradient(-45deg, #f5b301 0 6px, #1f2937 6px 12px)';
+const HAZARD = 'repeating-linear-gradient(-45deg, var(--ochre) 0 6px, var(--surface-sunken) 6px 12px)';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -82,7 +76,7 @@ function TestStripe({ className = '' }: { className?: string }) {
   return (
     <span
       title="Stripe test mode. No real money moves."
-      className={`inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300 ${className}`}
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold text-ochre ${className}`}
     >
       <span aria-hidden className="h-2.5 w-4 rounded-[2px]" style={{ backgroundImage: HAZARD }} />
       Test mode
@@ -219,31 +213,34 @@ export function MarketplaceView() {
   return (
     <div className="mx-auto max-w-xl">
       <style>{`
-        @keyframes tdm61-arrive { from { box-shadow: 0 0 0 3px #f5b301; } to { box-shadow: 0 0 0 0 transparent; } }
+        @keyframes tdm61-arrive { from { box-shadow: 0 0 0 3px var(--ochre); } to { box-shadow: 0 0 0 0 transparent; } }
         @keyframes tdm61-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
         @media (prefers-reduced-motion: reduce) { .tdm61-motion { animation: none !important; } }
       `}</style>
 
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[1.75rem] font-semibold leading-tight tracking-tight">Paid robot tasks</h1>
-          <p className="mt-1 text-[0.95rem] text-zinc-600 dark:text-zinc-400">
-            Claim one, do it, and get paid once it passes review.
-          </p>
+      {/* TDM-109: PhoneTask layout. Earnings in ochre mono are the only big number on the screen. */}
+      {contributor && (
+        <div className="mb-4 flex items-baseline justify-between" data-testid="gx-earned">
+          <span className="gx-label">Paid so far</span>
+          <strong className="font-mono text-[28px] leading-8 font-medium tabular-nums text-ochre">{fmtPrice(paidTotalOf(mine, payments, episodes))}</strong>
         </div>
+      )}
+      <div className="mb-4">
+        <h1 className="font-display text-xl leading-6 font-bold">Open tasks</h1>
+        <p className="gx-small mt-1 mb-0">Claim one, do it, and get paid once it passes review.</p>
       </div>
 
-      <p className="mb-4 flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
-        <span aria-hidden className="h-4 w-5 shrink-0 rounded-[2px]" style={{ backgroundImage: HAZARD }} />
+      <p className="mb-4 flex items-center gap-2 rounded-sm bg-ochre-soft px-3 py-2 text-sm text-ink">
+        <span aria-hidden className="h-4 w-5 shrink-0" style={{ backgroundImage: HAZARD }} />
         <span>
-          <span className="font-semibold">Test mode.</span> Prices are paid as Stripe test transfers. No real money moves.
+          <span className="font-semibold text-ochre">Test mode.</span> Prices are paid as Stripe test transfers. No real money moves.
         </span>
       </p>
 
-      {!ready && <p className="py-8 text-center text-sm text-zinc-500">{isActive ? 'Loading tasks…' : 'Connecting to the factory…'}</p>}
+      {!ready && <p className="gx-small py-8 text-center">{isActive ? 'Loading tasks…' : 'Connecting to the factory…'}</p>}
 
       {ready && contributor && !canClaim && (
-        <p className="mb-4 rounded-md bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+        <p className="mb-4 rounded-sm bg-surface-sunken px-3 py-2 text-sm text-ink-muted">
           You joined as a dataset seller, so you can watch tasks here but not claim them.
         </p>
       )}
@@ -262,7 +259,7 @@ export function MarketplaceView() {
 
       {ready && (
         <>
-          <div role="tablist" aria-label="Task lists" className="mb-3 grid grid-cols-2 rounded-lg bg-zinc-200/70 p-1 text-sm font-medium dark:bg-zinc-800/70">
+          <div role="tablist" aria-label="Task lists" className="mb-3 grid grid-cols-2 rounded-sm border border-line bg-surface-sunken p-1 text-sm font-medium">
             {(['open', 'mine'] as Tab[]).map((id) => (
               <button
                 key={id}
@@ -270,7 +267,7 @@ export function MarketplaceView() {
                 type="button"
                 aria-selected={tab === id}
                 onClick={() => setTab(id)}
-                className="rounded-md px-3 py-2 text-zinc-600 outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 aria-selected:bg-white aria-selected:text-zinc-900 aria-selected:shadow-sm dark:text-zinc-400 dark:aria-selected:bg-zinc-950 dark:aria-selected:text-zinc-100"
+                className="rounded-sm px-3 py-2 text-ink-muted aria-selected:bg-surface aria-selected:text-ink aria-selected:shadow-[inset_0_-2px_0_var(--melt)]"
               >
                 {id === 'open' ? `Open tasks (${open.length})` : `My tasks (${mine.length})`}
               </button>
@@ -287,9 +284,9 @@ export function MarketplaceView() {
                     data-on={filter === f.id}
                     aria-pressed={filter === f.id}
                     onClick={() => setFilter(f.id)}
-                    className={`shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:border-zinc-700 dark:text-zinc-300 ${
+                    className={`shrink-0 rounded-sm border border-line-strong px-3 py-1.5 text-sm text-ink-muted ${
                       f.id === 'all'
-                        ? 'data-[on=true]:border-zinc-900 data-[on=true]:bg-zinc-900 data-[on=true]:text-white dark:data-[on=true]:border-zinc-100 dark:data-[on=true]:bg-zinc-100 dark:data-[on=true]:text-zinc-900'
+                        ? BRAND_TYPE_STYLE.chip
                         : styleOf(f.id).chip
                     }`}
                   >
@@ -299,15 +296,15 @@ export function MarketplaceView() {
               </div>
 
               {shown.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-10 text-center dark:border-zinc-700">
+                <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center">
                   <p className="font-medium">No open {filter === 'all' ? '' : `${typeInfo(filter).label.toLowerCase()} `}tasks right now.</p>
-                  <p className="mt-1 text-sm text-zinc-500">
+                  <p className="gx-small mt-1">
                     Keep this page open. New tasks show up here the moment the factory posts them.
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-3">
-                  {shown.map((t) => (
+                <ul className="m-0 grid list-none gap-4 p-0">
+                  {shown.map((t, i) => (
                     <TaskTicket
                       key={t.id}
                       task={t}
@@ -321,14 +318,14 @@ export function MarketplaceView() {
                             type="button"
                             disabled={busy !== undefined}
                             onClick={() => void onClaim(t)}
-                            className="w-full rounded-md bg-zinc-900 px-4 py-3 text-base font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-900 active:translate-y-px disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                            className={`gx-btn gx-btn-block ${i === 0 && held.length === 0 ? 'gx-btn-primary' : ''}`}
                           >
                             {busy === t.id ? 'Claiming…' : `Claim for ${fmtPrice(t.priceCents)}`}
                           </button></Tdm59ClaimGate>
                         ) : contributor ? null : (
                           <Link
                             href="/join"
-                            className="block w-full rounded-md border border-zinc-900 px-4 py-3 text-center text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 dark:border-zinc-100"
+                            className={`gx-btn gx-btn-block ${i === 0 ? 'gx-btn-primary' : ''}`}
                           >
                             Join to claim
                           </Link>
@@ -351,6 +348,7 @@ export function MarketplaceView() {
               guest={!contributor}
             />
           )}
+          <p className="gx-small mt-6 mb-0">Test mode. No real money moves.</p>
         </>
       )}
 
@@ -359,12 +357,12 @@ export function MarketplaceView() {
           <div
             key={toast.id}
             role={toast.tone === 'bad' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg ${
-              toast.tone === 'bad' ? 'bg-[#a3243b]' : 'bg-zinc-900 dark:bg-zinc-800'
+            className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-sm border bg-surface px-4 py-3 text-sm font-medium text-ink shadow-overlay ${
+              toast.tone === 'bad' ? 'border-slag' : 'border-line'
             }`}
           >
             <span className="flex-1">{toast.text}</span>
-            <button type="button" onClick={() => setToast(undefined)} className="-my-1 rounded px-1 text-white/70 hover:text-white" aria-label="Dismiss">
+            <button type="button" onClick={() => setToast(undefined)} className="-my-1 rounded-sm px-1 text-ink-muted hover:text-ink" aria-label="Dismiss">
               ✕
             </button>
           </div>
@@ -397,52 +395,51 @@ function TaskTicket({
   return (
     <li
       id={`task-${task.id}`} // TDM-65 push deep link (/marketplace?task=N)
-      className={`tdm61-motion relative overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${busy ? 'opacity-80' : ''}`}
+      className={`tdm61-motion gx-task ${busy ? 'opacity-80' : ''}`}
       style={fresh ? { animation: 'tdm61-arrive 2.4s ease-out' } : undefined}
     >
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${s.rail}`} />
-      <div className="flex">
-        <div className="min-w-0 flex-1">
-          <div className="py-3 pl-5 pr-3">
-            <p className="flex items-baseline gap-2">
-              <span className={`text-sm font-semibold ${s.text}`}>{info.label}</span>
-              <span className="text-xs tabular-nums text-zinc-400">#{String(task.id)}</span>
-              {fresh && <span className="rounded-sm bg-[#f5b301] px-1 text-[11px] font-semibold text-zinc-900">New</span>}
-            </p>
-            <p className="mt-1 line-clamp-2 font-medium leading-snug">{ticket?.taskDescription ?? `Ticket ${task.ticketId}`}</p>
-            <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[13px] text-zinc-500 dark:text-zinc-400">
-              <div>
-                <dt className="sr-only">Robot</dt>
-                <dd>{robot?.name ?? `Robot ${task.robotId}`}</dd>
-              </div>
-              <div>
-                <dt className="sr-only">Time</dt>
-                <dd>about {info.minutes} min</dd>
-              </div>
-              <div>
-                <dt className="sr-only">Where</dt>
-                <dd>{info.where === 'remote' ? 'from your phone' : 'at the robot'}</dd>
-              </div>
-            </dl>
-            <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">{text || info.blurb}</p>
-            {task.type === 'reset' && (
-              <Link href={resetHref(task.id)} className={`mt-1.5 inline-block text-[13px] font-semibold underline underline-offset-2 ${s.text}`}>
-                Steps and start photo
-              </Link>
-            )}
-          </div>
-          {action && <div className="px-3 pb-3 pl-5">{action}</div>}
-        </div>
-
-        {/* Tear-off stub: the price. Notches sit on the card's top and bottom edges. */}
-        <div className="relative flex w-[5.5rem] shrink-0 flex-col items-center justify-center border-l-2 border-dashed border-zinc-200 px-2 py-4 text-center dark:border-zinc-700">
-          <span aria-hidden className="absolute -left-[9px] -top-[9px] h-4 w-4 rounded-full border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950" />
-          <span aria-hidden className="absolute -bottom-[9px] -left-[9px] h-4 w-4 rounded-full border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950" />
-          <span className="text-[1.6rem] font-bold leading-none tracking-tight tabular-nums">{fmtPrice(task.priceCents)}</span>
-          <span className="mt-1 text-[11px] leading-tight text-zinc-500">{task.type === 'reset' ? 'per reset' : 'per accepted episode'}</span>
-          <TestStripe className="mt-3 flex-col !gap-1" />
-        </div>
+      {/* TDM-109: TaskCard. Kind as a money tag, price in ochre mono top right. */}
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2">
+          <span className="gx-tag gx-tag-money">
+            <i className="gx-rivet" aria-hidden />
+            {info.label}
+          </span>
+          {fresh && <span className="gx-tag gx-tag-busy">New</span>}
+        </span>
+        <span className="text-right">
+          <span className="gx-price block">{fmtPrice(task.priceCents)}</span>
+          <span className="gx-id block">{task.type === 'reset' ? 'per reset' : 'per accepted episode'}</span>
+        </span>
       </div>
+      <h3 className="gx-task-title line-clamp-2">{ticket?.taskDescription ?? `Ticket ${task.ticketId}`}</h3>
+      <p className="m-0 line-clamp-3">{text || info.blurb}</p>
+      <dl className="gx-facts m-0">
+        <div>
+          <dt className="sr-only">Time</dt>
+          <dd className="m-0">About {info.minutes} min</dd>
+        </div>
+        <div>
+          <dt className="sr-only">Robot</dt>
+          <dd className="m-0 font-mono">{robot?.name ?? `Robot ${task.robotId}`}</dd>
+        </div>
+        <div>
+          <dt className="sr-only">Where</dt>
+          <dd className="m-0">{info.where === 'remote' ? 'From your phone' : 'At the robot'}</dd>
+        </div>
+        <div>
+          <dt className="sr-only">Task id</dt>
+          <dd className="m-0 font-mono">#{String(task.id)}</dd>
+        </div>
+      </dl>
+      {task.type === 'reset' && (
+        <Link href={resetHref(task.id)} className="text-[13px] font-semibold text-arc underline underline-offset-2">
+          Steps and start photo
+        </Link>
+      )}
+      <ShareTask taskId={task.id} />
+      {action}
+      <TestStripe />
     </li>
   );
 }
@@ -476,32 +473,32 @@ function HeldClaim({
   return (
     <section
       aria-label={`Task #${task.id} you hold`}
-      className="mb-5 overflow-hidden rounded-xl bg-[#18212e] text-white shadow-md ring-1 ring-black/5 dark:bg-[#0f1620] dark:ring-white/10"
+      className="mb-5 overflow-hidden rounded-lg border border-arc bg-surface text-ink"
     >
       <div className="px-4 pb-3 pt-4">
-        <p className="text-sm text-white/70">
-          You hold <span className="font-semibold text-white">{info.label.toLowerCase()} #{String(task.id)}</span>
+        <p className="text-sm text-ink-muted">
+          You hold <span className="font-semibold text-ink">{info.label.toLowerCase()} #{String(task.id)}</span>
         </p>
-        <p className="mt-1 line-clamp-2 text-lg font-semibold leading-snug">{ticket?.taskDescription ?? `Ticket ${task.ticketId}`}</p>
+        <p className="mt-1 line-clamp-2 font-display text-2xl font-extrabold leading-tight">{ticket?.taskDescription ?? `Ticket ${task.ticketId}`}</p>
 
         <div className="mt-4 flex items-end justify-between gap-3">
           <div>
-            <p className="text-xs text-white/60">Hold time left</p>
-            <p className={`text-4xl font-bold leading-none tabular-nums ${low ? 'text-[#ffb547]' : ''}`} aria-live="off">
+            <p className="gx-label">Hold time left</p>
+            <p className={`font-mono text-4xl font-medium leading-none tabular-nums ${low ? 'text-slag' : ''}`} aria-live="off">
               {fmtCountdown(left)}
             </p>
           </div>
-          <p className="flex items-center gap-1.5 pb-0.5 text-right text-xs text-white/70">
+          <p className="flex items-center gap-1.5 pb-0.5 text-right font-mono text-xs text-ink-muted">
             <span
               aria-hidden
-              className={`tdm61-motion inline-block h-2 w-2 rounded-full ${error ? 'bg-[#ff6b6b]' : 'bg-[#3fd6a6]'}`}
+              className={`tdm61-motion inline-block h-1.5 w-1.5 ${error ? 'bg-slag' : 'bg-arc'}`}
               style={error ? undefined : { animation: 'tdm61-pulse 2s ease-in-out infinite' }}
             />
             {error ? 'Keep-alive failed' : beatAgo === undefined ? 'Keeping your hold alive' : `Kept alive ${beatAgo} s ago`}
           </p>
         </div>
         <div
-          className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/15"
+          className="mt-2 h-2.5 overflow-hidden bg-surface-sunken"
           role="progressbar"
           aria-label="Hold time left"
           aria-valuemin={0}
@@ -509,11 +506,11 @@ function HeldClaim({
           aria-valuenow={Math.round(left / 1000)}
         >
           <div
-            className={`h-full rounded-full transition-[width] duration-500 ease-linear ${low ? 'bg-[#ffb547]' : 'bg-[#3fd6a6]'}`}
+            className={`h-full transition-[width] duration-500 ease-linear ${low ? 'bg-slag' : 'bg-arc'}`}
             style={{ width: `${frac * 100}%` }}
           />
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-white/60">
+        <p className="gx-small mt-2 mb-0">
           {error
             ? error
             : isArmControl(task.type)
@@ -521,26 +518,26 @@ function HeldClaim({
               : 'Your hold renews while this page is open. Mark it done when the scene is back at its start.'}
         </p>
         {task.type === 'reset' && (
-          <Link href={resetHref(task.id)} className="mt-2 inline-block text-sm font-semibold text-[#5fd8bd] underline underline-offset-2">
+          <Link href={resetHref(task.id)} className="mt-2 inline-block text-sm font-semibold text-arc underline underline-offset-2">
             Open the reset page: steps, start photo, robot camera
           </Link>
         )}
       </div>
 
-      <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-white/10 bg-black/15 p-3">
+      <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-line bg-surface-sunken p-3">
         {href ? (
           <Link
             href={href}
-            className="rounded-md bg-white px-4 py-3 text-center text-base font-semibold text-[#18212e] outline-none focus-visible:ring-2 focus-visible:ring-[#3fd6a6]"
+            className="gx-btn gx-btn-primary gx-btn-block"
           >
-            Open teleop controls
+            Open controls
           </Link>
         ) : (
           <button
             type="button"
             disabled={busy}
             onClick={onResetDone}
-            className="rounded-md bg-white px-4 py-3 text-base font-semibold text-[#18212e] outline-none focus-visible:ring-2 focus-visible:ring-[#3fd6a6] disabled:opacity-60"
+            className="gx-btn gx-btn-primary gx-btn-block"
           >
             {busy ? 'Saving…' : 'Mark reset done'}
           </button>
@@ -549,7 +546,7 @@ function HeldClaim({
           type="button"
           disabled={busy}
           onClick={onRelease}
-          className="rounded-md border border-white/25 px-4 py-3 text-sm font-medium text-white/85 outline-none focus-visible:ring-2 focus-visible:ring-[#3fd6a6] disabled:opacity-60"
+          className="gx-btn gx-btn-ghost h-11"
         >
           Release
         </button>
@@ -559,6 +556,23 @@ function HeldClaim({
 }
 
 // ------------------------------------------------------------------ my tasks
+
+/** Sum of paid payouts for this contributor's tasks (teleop via episode, resets via batch_ref "task:<id>"). */
+function paidTotalOf(tasks: readonly MarketTask[], payments: readonly Payment[], episodes: readonly Episode[]): number {
+  const epByTask = new Map<bigint, Episode>();
+  for (const e of episodes) if (e.taskId !== 0n) epByTask.set(e.taskId, e);
+  const payByEpisode = new Map<bigint, Payment>();
+  const payByRef = new Map<string, Payment>();
+  for (const p of payments) {
+    if (p.episodeId !== 0n) payByEpisode.set(p.episodeId, p);
+    if (p.batchRef) payByRef.set(p.batchRef, p);
+  }
+  return tasks.reduce((sum, t) => {
+    const ep = epByTask.get(t.id);
+    const pay = (ep && payByEpisode.get(ep.id)) ?? payByRef.get(`task:${t.id}`);
+    return pay?.status === 'paid' ? sum + Number(pay.amountCents) : sum;
+  }, 0);
+}
 
 type Tone = 'good' | 'bad' | 'busy' | 'wait' | 'warn';
 const TONE: Record<Tone, string> = {
@@ -616,9 +630,9 @@ function MyTasks({
 }) {
   if (guest) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-10 text-center dark:border-zinc-700">
+      <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center">
         <p className="font-medium">Join to keep track of your tasks.</p>
-        <Link href="/join" className="mt-3 inline-block rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white dark:bg-zinc-100 dark:text-zinc-900">
+        <Link href="/join" className="gx-btn gx-btn-primary mt-3">
           Join as a contributor
         </Link>
       </div>
@@ -626,9 +640,9 @@ function MyTasks({
   }
   if (tasks.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-10 text-center dark:border-zinc-700">
+      <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center">
         <p className="font-medium">You haven&apos;t claimed a task yet.</p>
-        <p className="mt-1 text-sm text-zinc-500">Tasks you claim stay here through review and payout.</p>
+        <p className="gx-small mt-1">Tasks you claim stay here through review and payout.</p>
       </div>
     );
   }
@@ -649,13 +663,13 @@ function MyTasks({
 
   return (
     <>
-      <p className="mb-2 flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="mb-2 flex items-center justify-between text-sm text-ink-muted">
         <span>
-          Paid so far <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{fmtPrice(paidTotal)}</span>
+          Paid so far <span className="font-mono font-medium tabular-nums text-ochre">{fmtPrice(paidTotal)}</span>
         </span>
         <TestStripe />
       </p>
-      <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+      <ul className="m-0 list-none divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface p-0">
         {tasks.map((t) => {
           const ep = epByTask.get(t.id);
           const pay = (ep && payByEpisode.get(ep.id)) ?? payByRef.get(`task:${t.id}`);
@@ -667,7 +681,7 @@ function MyTasks({
               <div className="min-w-0 flex-1">
                 <p className="flex items-baseline gap-2 text-sm">
                   <span className={`font-semibold ${styleOf(t.type).text}`}>{typeInfo(t.type).label}</span>
-                  <span className="text-xs tabular-nums text-zinc-400">#{String(t.id)}</span>
+                  <span className="gx-id">#{String(t.id)}</span>
                 </p>
                 <p className="truncate text-sm">{ticketById.get(t.ticketId)?.taskDescription ?? `Ticket ${t.ticketId}`}</p>
                 <p className={`mt-0.5 text-[13px] font-medium ${TONE[tone]}`}>
@@ -682,7 +696,7 @@ function MyTasks({
                   )}
                 </p>
               </div>
-              <span className="text-right text-lg font-bold tabular-nums">{fmtPrice(pay?.amountCents ?? t.priceCents)}</span>
+              <span className="gx-price text-right">{fmtPrice(pay?.amountCents ?? t.priceCents)}</span>
             </li>
           );
         })}

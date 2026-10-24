@@ -43,6 +43,7 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
             log.info("app.stopped")
 
     app = FastAPI(title="rdf-orchestrator", lifespan=lifespan)
+
     from .tickets_api import router as tickets_router  # TDM-19
 
     app.include_router(tickets_router)
@@ -61,6 +62,16 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(media_router)
     from .flywheel_api import router as flywheel_router  # TDM-22: /tickets/{id}/advance, /flywheel/*
     app.include_router(flywheel_router)
+    from .decision_api import decision_router  # TDM-68: GET /tickets/{id}/decision (evidence trail)
+    app.include_router(decision_router)
+    # TDM-68: the dashboard (apps/web, :3737) reads GET routes from the browser (decision trail,
+    # /media/sign). GET only, listed origins only (RDF_WEB_ORIGINS adds more, comma-separated).
+    import os
+
+    from fastapi.middleware.cors import CORSMiddleware
+    origins = ["http://localhost:3737", "http://127.0.0.1:3737"] + [
+        o.strip() for o in os.environ.get("RDF_WEB_ORIGINS", "").split(",") if o.strip()]
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET"], allow_headers=["*"])
 
     return app
 

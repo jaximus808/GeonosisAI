@@ -11,6 +11,7 @@ const NAV = [
   { href: '/dashboard', label: 'Tickets' }, // TDM-111: `/` is the public landing page
   { href: '/tickets/new', label: 'New ticket' },
   { href: '/agents', label: 'Agents' },
+  { href: '/factory', label: 'Factory' }, // TDM-112
   { href: '/events', label: 'Event log' },
   { href: '/marketplace', label: 'Tasks' },
   { href: '/earnings', label: 'Earnings' }, // TDM-64

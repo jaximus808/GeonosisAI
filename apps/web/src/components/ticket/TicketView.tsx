@@ -11,7 +11,7 @@ import { EvalCards } from './EvalCards';
 import { OfferCard } from './OfferCard';
 import { PaymentsTable, TasksTable } from './TasksTable';
 import { TicketHeader } from './TicketHeader';
-import { TimelineStrip } from './TimelineStrip';
+import { FactoryFloor } from '@/components/factory/FactoryFloor';
 import { TrainingRuns } from './TrainingRuns';
 import { RunSettingsButton } from './RunSettingsDrawer';
 import { Tdm100WatchRobot } from './Tdm100WatchRobot';
@@ -66,40 +66,6 @@ export function TicketView({ id }: { id: string }) {
     [ticket?.status, ticket?.iteration, settingsRows, trainingRuns, evalRuns, iterationOf, plans],
   );
 
-  // TDM-109: one real number per station of the line.
-  const lineNotes = useMemo(() => {
-    const notes: Record<string, string> = {};
-    const latest = <T extends { createdAt: { microsSinceUnixEpoch: bigint } }>(rows: readonly T[]) =>
-      [...rows].sort((a, b) => (a.createdAt.microsSinceUnixEpoch < b.createdAt.microsSinceUnixEpoch ? 1 : -1))[0];
-    const evalNote = (r?: (typeof evalRuns)[number]) =>
-      !r ? undefined : r.status === 'done' ? `${r.successes}/${r.trials}` : `${r.successes}/${r.completed} of ${r.trials}`;
-    notes.baseline = evalNote(latest(evalRuns.filter((r) => r.kind === 'baseline'))) ?? '';
-    const it = ticket?.iteration ?? 0;
-    const cl = clusters.filter((c) => c.iteration === it);
-    if (cl.length) notes.diagnose = `${cl.length} cluster${cl.length === 1 ? '' : 's'}`;
-    const plan = latest(plans);
-    if (plan) {
-      const unit: Record<string, string> = { recovery_takeover: 'takeovers', clean_teleop: 'demos', purchased: 'purchased', reset: 'resets' };
-      notes.plan_data = `${plan.amount} ${unit[plan.dataType] ?? plan.dataType.replace(/_/g, ' ')}`;
-      notes.dispatch = `${episodes.length}/${plan.amount}`;
-    } else if (episodes.length) notes.dispatch = `${episodes.length} episodes`;
-    if (reviews.length) notes.review = `${reviews.filter((r) => r.accepted).length} accepted`;
-    const tr = latest(trainingRuns);
-    if (tr) {
-      let steps: number | undefined;
-      try {
-        const h = JSON.parse(tr.hyperparamsJson || '{}');
-        steps = Number(h.num_train_steps ?? h.steps ?? h.train_steps) || undefined;
-      } catch {}
-      notes.train = steps ? `${steps.toLocaleString('en-US')} steps` : tr.status;
-    }
-    const cand = evalNote(latest(evalRuns.filter((r) => r.kind === 'candidate')));
-    if (cand) notes.eval = cand;
-    if (ticket) notes.shipped = `target ${Math.round(ticket.targetSuccess * 100)}%`;
-    for (const k of Object.keys(notes)) if (!notes[k]) delete notes[k];
-    return notes;
-  }, [evalRuns, clusters, plans, episodes, reviews, trainingRuns, ticket]);
-
   if (tid < 0n) return <p className="gx-small">“{id}” is not a ticket number.</p>;
   if (!ready) return <p className="gx-small">Connecting to the ticket…</p>;
   if (!ticket) {
@@ -118,7 +84,11 @@ export function TicketView({ id }: { id: string }) {
   return (
     <>
       <TicketHeader ticket={ticket} robot={robot} dataset={datasets[0]} mode={mode} maxIterations={settings?.maxIterations} />
-      <TimelineStrip ticket={ticket} events={events} notes={lineNotes} />
+      {/* TDM-112: the factory floor IS the line here (same eight stations, same rivets on a track), with
+          each agent's state, current activity, LLM and timer, the droids overhead and a drawer per station. */}
+      <section className="gx-plate mb-6" aria-label="Ticket stages">
+        <FactoryFloor ticketId={tid} />
+      </section>
 
       {/* TDM-79: run-settings editor (drawer). The report is linked from the header. */}
       <div className="mb-6">

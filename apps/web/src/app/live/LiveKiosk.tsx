@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { JoinQr } from '@/components/JoinQr';
+import { FactoryFloor } from '@/components/factory/FactoryFloor';
 import { TestModeTag } from '@/components/payments/TestModeBand';
 import { Tdm100RobotPanel } from '@/components/robotview/Tdm100RobotPanel';
 import { byNewest, isFakeRobot, ticketEvents, type TicketEvent } from '@/components/ticket/util';
@@ -559,7 +560,8 @@ function LiveKioskBody({ ticketParam }: { ticketParam: string | null }) {
 
           <div className={`${PLATE} px-6 pb-3 pt-4`}>
             {ticket ? (
-              <Line stations={stations} />
+              // TDM-112: the factory floor is the top band: every agent station, the droids overhead.
+              <FactoryFloor ticketId={ticket.id} variant="band" className="gx-foundry" />
             ) : (
               <p className="py-2 text-[20px] text-[var(--color-ink-muted)]">
                 {ticketsReady ? 'File a ticket at /tickets/new or from the Claude connector to put a robot on the line. This page picks it up as soon as it exists.' : 'Waiting for the ticket list.'}

@@ -1,0 +1,288 @@
+{
+  "fixture": true,
+  "note": "LABELLED FIXTURE episodes on a throwaway local SpacetimeDB (127.0.0.1:3033)",
+  "ticket_id": 1,
+  "episode_ids": {
+    "c1": 1,
+    "c2": 2,
+    "r1": 3,
+    "c4": 4,
+    "r3": 5,
+    "c3": 6,
+    "r2": 7
+  },
+  "accepted_ids": [
+    1,
+    2,
+    3,
+    6,
+    7
+  ],
+  "agent_session": {
+    "id": 1,
+    "role": "data_droid",
+    "status": "done",
+    "current_step": "done: DONE",
+    "factory_session_id": "a2eb2d52-870c-47a2-b325-dbc0b8d56be1",
+    "factory_session_ids_json": "[\"a2eb2d52-870c-47a2-b325-dbc0b8d56be1\"]",
+    "waiting_for_json": null,
+    "resume_payload_json": "{\"done\":\"Inspected ticket 1 and validated accepted episodes 1, 2, and 3.\",\"next\":\"Wait for accepted_count to reach 5, then rerun inspect/validate/assemble/verify/publish.\"}"
+  },
+  "turns": [
+    {
+      "protocol": "start",
+      "status": "waiting_for",
+      "turn": 1,
+      "credits": 9089.0,
+      "credits_total": 9089.0,
+      "seconds": 28.4,
+      "waiting_for": {
+        "table": "dataset",
+        "field": "accepted_count",
+        "op": ">=",
+        "value": 5,
+        "raw": "dataset:accepted_count>=5",
+        "ticket_id": 1
+      },
+      "error": null,
+      "final_text": "WAITING_FOR dataset:accepted_count>=5"
+    },
+    {
+      "protocol": "native_resume",
+      "status": "done",
+      "turn": 2,
+      "credits": 9487.0,
+      "credits_total": 18576.0,
+      "seconds": 59.7,
+      "waiting_for": null,
+      "error": null,
+      "final_text": "DONE"
+    }
+  ],
+  "credits_total": 18576.0,
+  "wall_s": 92.2,
+  "event_log_total": 85,
+  "droid_events": 36,
+  "droid_event_kinds": {
+    "droid.assistant_text": 6,
+    "droid.session_started": 1,
+    "droid.tool_call": 12,
+    "droid.tool_result": 12,
+    "droid.turn_completed": 2,
+    "droid.turn_started": 2,
+    "droid.waiting_for": 1
+  },
+  "tool_calls": [
+    "TodoWrite",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools inspect --ticket 1 --target 5 --out /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data-t1/episodes.json",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools validate --episodes /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data-t1/episodes.json --out /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data\u2026",
+    "ApplyPatch add services/factory/work/sessions/data-t1/notes.md, add services/factory/work/sessions/1/resume_payload.json",
+    "TodoWrite",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools inspect --ticket 1 --target 5 --out /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data-t1/episodes.json",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools validate --episodes /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data-t1/episodes.json --out /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data\u2026",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools assemble --episodes /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/data-t1/episodes.json --out-root /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets\u2026",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools verify --dataset /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1 --episodes /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/sessions/dat\u2026",
+    "ApplyPatch add services/factory/work/datasets/lerobot/rdf/ticket-1/README.md",
+    "Execute: uv run --frozen --project services/training python -m rdf_training.data_droid_tools publish --ticket 1 --manifest /Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1/manifest.json",
+    "TodoWrite"
+  ],
+  "permission_denied": [],
+  "dataset_row": {
+    "id": 1,
+    "ticket_id": 1,
+    "accepted_count": 5,
+    "total_count": 7,
+    "lerobot_uri": "file:///Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1",
+    "updated_at": 1792829380933028
+  },
+  "dataset_assembled_events": [
+    {
+      "ticket_id": 1,
+      "dataset_id": 1,
+      "lerobot_uri": "file:///Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1",
+      "episode_ids": [
+        1,
+        2,
+        3,
+        6,
+        7
+      ],
+      "episodes": 5,
+      "accepted_count": 5,
+      "iteration": 0,
+      "summary": {
+        "repo_id": "rdf/ticket-1",
+        "total_frames": 380,
+        "fps": 30,
+        "fixture": true,
+        "backend": "local",
+        "excluded": [
+          {
+            "episode_id": 4,
+            "kind": "clean_teleop",
+            "reason": "review_status=rejected (only accepted episodes train)"
+          },
+          {
+            "episode_id": 5,
+            "kind": "recovery_takeover",
+            "reason": "review_status=pending (only accepted episodes train)"
+          }
+        ],
+        "episodes": [
+          {
+            "episode_id": "1",
+            "kind": "clean_teleop",
+            "frames": 75,
+            "cut_before_takeover": 0
+          },
+          {
+            "episode_id": "2",
+            "kind": "clean_teleop",
+            "frames": 90,
+            "cut_before_takeover": 0
+          },
+          {
+            "episode_id": "3",
+            "kind": "recovery_takeover",
+            "frames": 75,
+            "cut_before_takeover": 60
+          },
+          {
+            "episode_id": "6",
+            "kind": "clean_teleop",
+            "frames": 60,
+            "cut_before_takeover": 0
+          },
+          {
+            "episode_id": "7",
+            "kind": "recovery_takeover",
+            "frames": 80,
+            "cut_before_takeover": 40
+          }
+        ],
+        "manifest_path": "/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1/manifest.json"
+      }
+    }
+  ],
+  "dataset_dir": "/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot/rdf/ticket-1",
+  "manifest_episode_ids": [
+    1,
+    2,
+    3,
+    6,
+    7
+  ],
+  "manifest_matches_accepted": true,
+  "verify_ok": true,
+  "takeover_cuts": [
+    {
+      "episode_id": "3",
+      "takeover_ts": null,
+      "cut_before_takeover": 60,
+      "first_source_row": 60,
+      "first_frame_ts": 1761292802000000,
+      "matches_source": true,
+      "no_frames_before_takeover": true
+    },
+    {
+      "episode_id": "7",
+      "takeover_ts": 1761292801333333,
+      "cut_before_takeover": 40,
+      "first_source_row": 40,
+      "first_frame_ts": 1761292801333333,
+      "matches_source": true,
+      "no_frames_before_takeover": true
+    }
+  ],
+  "lerobot_loader": {
+    "ran": true,
+    "ok": true,
+    "num_episodes": 5,
+    "num_frames": 380,
+    "fps": 30,
+    "items": [
+      {
+        "index": 0,
+        "task": "put the cup in the bin",
+        "observation.images.top": [
+          3,
+          240,
+          320
+        ],
+        "observation.images.wrist": [
+          3,
+          240,
+          320
+        ],
+        "observation.state": [
+          7
+        ],
+        "action": [
+          50,
+          7
+        ],
+        "action.ee_target": [
+          8
+        ],
+        "action_is_pad": [
+          50
+        ]
+      },
+      {
+        "index": 190,
+        "task": "put the cup in the bin",
+        "observation.images.top": [
+          3,
+          240,
+          320
+        ],
+        "observation.images.wrist": [
+          3,
+          240,
+          320
+        ],
+        "observation.state": [
+          7
+        ],
+        "action": [
+          50,
+          7
+        ],
+        "action.ee_target": [
+          8
+        ],
+        "action_is_pad": [
+          50
+        ]
+      },
+      {
+        "index": 379,
+        "task": "put the cup in the bin",
+        "observation.images.top": [
+          3,
+          240,
+          320
+        ],
+        "observation.images.wrist": [
+          3,
+          240,
+          320
+        ],
+        "observation.state": [
+          7
+        ],
+        "action": [
+          50,
+          7
+        ],
+        "action.ee_target": [
+          8
+        ],
+        "action_is_pad": [
+          50
+        ]
+      }
+    ]
+  },
+  "card_chars": 2541
+}

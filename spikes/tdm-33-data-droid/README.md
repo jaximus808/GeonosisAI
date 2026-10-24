@@ -28,6 +28,23 @@ The script never touches maincloud. It publishes HEAD's module, from a clean wor
 | openpi loader | `LeRobotDataset` at lerobot@0cf8648 (openpi's pin; TDM-39 venv) loads 5 episodes, 380 frames at 30 fps. Images are `[3,240,320]` x2, state is `[7]`, action is `[50,7]` (S-05a chunks). |
 | SpacetimeDB | `dataset.lerobot_uri` is set, and one `dataset.assembled` event lists the 5 ids. There are 36 `droid.*` event_log rows for the session (12 tool_call, 12 tool_result, 6 assistant_text, 2 turn_started, 2 turn_completed, 1 waiting_for, 1 session_started). `agent_session` status went running → waiting_for → resuming/running → done. |
 
+## Re-run with `autonomy="off"` (commit 7831121; the current `proof_result.json`)
+
+Commit 7831121 made the FactoryClient default `autonomy="off"`, so every file edit and command now goes through `write_roots` / `allow_commands`. The proof was re-run under that setting:
+
+- agent_session 1, Factory session `179d38c6-437b-4b23-93e9-f4981fcb8e00`, 3 turns, 27,089 credits, **0 permission denials**.
+- The droid used only the five tool commands, Read/LS, and ApplyPatch inside its write roots (notes.md, resume_payload.json, the card).
+- **Turn 1** (9,485 credits) parked on `dataset:accepted_count>=5`.
+- **Turn 2** (native resume, 16,604 credits) ran assemble, verify, the card and publish. It wrote the next-iteration `WAITING_FOR data_plan:iteration>=1`, but glued it onto the previous sentence with no newline (`...I'll stop.WAITING_FOR ...`). `parse_waiting_for` only reads a line that starts with it, so the row went to `paused`.
+- **Turn 3:** one bounded nudge (`send`, 1,000 credits), and the droid replied `DONE`.
+- Same outputs as above:
+  - manifest `[1, 2, 3, 6, 7]` equals the accepted ids;
+  - cuts of 60 and 40 frames, with `no_frames_before_takeover` true;
+  - LeRobotDataset loads 5 episodes / 380 frames;
+  - `dataset.lerobot_uri` set and one `dataset.assembled` event;
+  - 61 `droid.*` rows.
+- The previous run's result is kept as `proof_autonomy_low_result.json`.
+
 Two gaps:
 - The droid ended turn 2 with `DONE` rather than the brief's final park (`WAITING_FOR data_plan:iteration>=1`). The orchestrator hook covers this: a `done` session is not "live", so the next time the ticket enters `review` a fresh Data Droid starts.
 - The modal backend (`assemble --backend modal`, for `modal-vol://rdf-media` episodes) is written but not proven. `verify` only reads a local dataset.

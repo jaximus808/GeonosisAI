@@ -1,25 +1,25 @@
-# Ticket 1, LeRobot v2.1 dataset
+# Ticket 1 LeRobot v2.1 dataset
 
-FIXTURE: synthetic fixture episodes, not robot data.
+**FIXTURE WARNING:** this dataset was assembled with `--allow-fixtures` from labeled synthetic fixture episodes.
 
-- Ticket: 1
-- Task: put the cup in the bin
-- repo_id: rdf/ticket-1
-- LeRobot v2.1
-- fps: 30
+- Ticket: `1`
+- Task: `put the cup in the bin`
+- repo_id: `rdf/ticket-1`
+- Codebase version: `v2.1`
+- FPS: `30`
 
 ## Features
 
-- observation.images.top: [240, 320, 3]
-- observation.images.wrist: [240, 320, 3]
-- observation.state: [7]
-- action: [7]
-- action.ee_target: [8]
+- `observation.images.top`: `[240, 320, 3]`
+- `observation.images.wrist`: `[240, 320, 3]`
+- `observation.state`: `[7]`
+- `action`: `[7]`
+- `action.ee_target`: `[8]`
 
 ## Episodes
 
 | episode_id | kind | source frames | kept frames | cut before takeover | cut after handback |
-|---|---|---:|---:|---:|---:|
+|---|---:|---:|---:|---:|---:|
 | 1 | clean_teleop | 75 | 75 | 0 | 0 |
 | 2 | clean_teleop | 90 | 90 | 0 | 0 |
 | 3 | recovery_takeover | 150 | 75 | 60 | 15 |
@@ -28,40 +28,44 @@ FIXTURE: synthetic fixture episodes, not robot data.
 
 ## Excluded
 
-- episode 4: review_status=rejected (only accepted episodes train)
-- episode 5: review_status=pending (only accepted episodes train)
+- Episode 4, `clean_teleop`: `review_status=rejected (only accepted episodes train)`
+- Episode 5, `recovery_takeover`: `review_status=pending (only accepted episodes train)`
 
 ## Validate warnings
 
-- episode 1: synthetic fixture episode (parquet metadata fixture=true): not robot data
-- episode 2: synthetic fixture episode (parquet metadata fixture=true): not robot data
-- episode 3: synthetic fixture episode (parquet metadata fixture=true): not robot data
-- episode 3: no takeover_ts on the row: the converter cuts at the first human tick (60, t=1761292802000000)
-- episode 6: synthetic fixture episode (parquet metadata fixture=true): not robot data
-- episode 7: synthetic fixture episode (parquet metadata fixture=true): not robot data
+- Episode 1: synthetic fixture episode (parquet metadata fixture=true): not robot data
+- Episode 2: synthetic fixture episode (parquet metadata fixture=true): not robot data
+- Episode 3: synthetic fixture episode (parquet metadata fixture=true): not robot data
+- Episode 3: no takeover_ts on the row: the converter cuts at the first human tick (60, t=1761292802000000)
+- Episode 6: synthetic fixture episode (parquet metadata fixture=true): not robot data
+- Episode 7: synthetic fixture episode (parquet metadata fixture=true): not robot data
 
 ## Stats
 
-- state_mean: [0.1933, 0.2118, 0.1275, 0.1099, 0.267, 0.5464, 0.741]
-- state_std: [0.1063, 0.1843, 0.1867, 0.1071, 0.1733, 0.1949, 0.2202]
-- action_mean: [0.1943, 0.2084, 0.1236, 0.1098, 0.2716, 0.5522, 0.7503]
-- action_std: [0.1069, 0.1863, 0.1851, 0.1064, 0.1752, 0.1933, 0.2194]
-- norm-stats dims: 7
+State mean: `[0.1933, 0.2118, 0.1275, 0.1099, 0.2670, 0.5464, 0.7410]`
+
+State std: `[0.1063, 0.1843, 0.1867, 0.1071, 0.1733, 0.1949, 0.2202]`
+
+Action mean: `[-0.0164, -0.0973, -0.0880, 0.0029, 0.0919, 0.0972, 0.6296]`
+
+Action std: `[0.1167, 0.0893, 0.1070, 0.1189, 0.0917, 0.1028, 0.2373]`
+
+Norm-stats dims: `7`
 
 ## LeRobot loader
 
-- ok: true
-- num_episodes: 5
-- num_frames: 380
-- fps: 30
+- ok: `true`
+- num_episodes: `5`
+- num_frames: `380`
+- fps: `30`
 
-Items:
-- index 0: task `put the cup in the bin`, observation.images.top [3, 240, 320], observation.images.wrist [3, 240, 320], observation.state [7], action [50, 7], action.ee_target [8], action_is_pad [50]
-- index 190: task `put the cup in the bin`, observation.images.top [3, 240, 320], observation.images.wrist [3, 240, 320], observation.state [7], action [50, 7], action.ee_target [8], action_is_pad [50]
-- index 379: task `put the cup in the bin`, observation.images.top [3, 240, 320], observation.images.wrist [3, 240, 320], observation.state [7], action [50, 7], action.ee_target [8], action_is_pad [50]
+## Takeover cuts
+
+- Episode 3: `no_frames_before_takeover=true`
+- Episode 7: `no_frames_before_takeover=true`
 
 ## Load
 
-`HF_LEROBOT_HOME=/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets/lerobot`
-
-`repo_id=rdf/ticket-1`
+```bash
+HF_LEROBOT_HOME=/Users/jaxon/coding-project/robot-deploy-fact/services/factory/work/datasets lerobot-dataset-info rdf/ticket-1
+```

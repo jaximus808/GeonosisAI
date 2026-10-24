@@ -72,6 +72,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(offers_router)
     from .agents_api import agents_router  # TDM-35: GET /agents (AgentFeed v1, ?replay=1)
     app.include_router(agents_router)
+    from .robot_commands_api import robot_commands_router  # TDM-78: POST /robots/{id}/commands (operator key; soft_estop open)
+    app.include_router(robot_commands_router)
     # TDM-68: the dashboard (apps/web, :3737) reads GET routes from the browser (decision trail,
     # /media/sign). GET only, listed origins only (RDF_WEB_ORIGINS adds more, comma-separated).
     import os

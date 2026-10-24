@@ -48,6 +48,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(tickets_router)
     from .run_settings_api import run_settings_router  # TDM-20
     app.include_router(run_settings_router)
+    from .payments_api import router as payments_router  # TDM-63: /stripe/webhook, /payments/*
+    app.include_router(payments_router)
 
     @app.get("/healthz")
     def healthz(request: Request) -> dict:

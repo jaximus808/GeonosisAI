@@ -12,6 +12,8 @@ Env:
   spend on the dashboard / connector.
 * ``FLYWHEEL_SIM=1`` (or ``=review,onboarding``): swap every (or the listed) stage that has no
   implementation registered for the SIMULATED step in ``flywheel_sim``. Local servers only.
+* ``RDF_ONBOARDING_DROID=1``: the ``onboarding`` stage starts a TDM-32 Onboarding Droid
+  (``rdf_factory.droids.onboarding``) instead of the ``step.not_implemented`` stub.
 * ``RDF_MODAL_STUB=1``: queued training runs are marked running with a ``stub-`` call id instead
   of launching Modal (``register_modal_stub``). Local servers only.
 """
@@ -105,6 +107,10 @@ def _from_env(reg: Registry) -> Flywheel:
         from rdf_factory.droids.training import TrainingDroidStep
 
         fw.register_step("train", TrainingDroidStep())
+    if os.environ.get("RDF_ONBOARDING_DROID") == "1":  # TDM-32: an Onboarding Droid checks the adapter + writes the specs
+        from rdf_factory.droids.onboarding import OnboardingDroidStep
+
+        fw.register_step("onboarding", OnboardingDroidStep())
     return fw
 
 

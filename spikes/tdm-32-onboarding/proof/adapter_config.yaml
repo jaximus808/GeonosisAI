@@ -1,0 +1,14 @@
+robot: test.tdm32-yam-sim
+adapter: yam
+kwargs:
+  sim: true
+  arm_type: yam
+  gripper_type: linear_4310
+  kinematics: auto
+safety_profile: yam
+safety_overrides: {}
+cameras_config: services/robot-client/config/cameras.yaml
+rationale:
+  - This is the registered sim_yam robot, so the yam adapter matches the embodiment and arm type.
+  - The draft config already uses the simulated gripper and auto kinematics expected for this robot.
+  - No safety override is needed because the draft profile is already the correct tight baseline for onboarding.

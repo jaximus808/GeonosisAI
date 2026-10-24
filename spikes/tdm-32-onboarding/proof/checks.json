@@ -1,0 +1,208 @@
+{
+ "mode": "sim",
+ "config_errors": [],
+ "groups": {
+  "contract": {
+   "ok": true,
+   "errors": [],
+   "warnings": [],
+   "info": {
+    "yam_sim_backend": "teleport_stand_in (I2RT SDK not installed: no MuJoCo SimRobot)",
+    "class": "rdf_robot_client.adapters.yam.YamArm",
+    "name": "yam",
+    "embodiment": "sim_yam",
+    "adapter_version": "yam-tdm46-i2rt-sim@120c3c8",
+    "dof": 6,
+    "control_rate_hz": 30.0,
+    "describe": {
+     "adapter": "yam",
+     "embodiment": "sim_yam",
+     "adapter_version": "yam-tdm46-i2rt-sim@120c3c8",
+     "dof": 6,
+     "control_rate_hz": 30.0,
+     "sim": true,
+     "sdk": "i2rt@120c3c8 (github i2rt-robotics/i2rt)",
+     "arm_type": "yam",
+     "gripper_type": "linear_4310",
+     "can_channel": null,
+     "kinematics": "poe",
+     "tool_point": "grasp_site",
+     "smoothing": true,
+     "servo_rate_hz": 200.0,
+     "joint_limits": {
+      "lower": [
+       -2.61799,
+       0.0,
+       0.0,
+       -1.69297,
+       -1.5708,
+       -2.0944
+      ],
+      "upper": [
+       3.14159,
+       3.66519,
+       3.14159,
+       1.5708,
+       1.5708,
+       2.0944
+      ],
+      "source": "yam.urdf / yam.xml (SDK clips commands at +/-0.15 rad beyond)"
+     },
+     "note": "SDK MuJoCo SimRobot stand-in, NOT hardware"
+    },
+    "home_s": 14.11,
+    "home_err_rad": 0.0,
+    "ee_move_err_m": 0.0,
+    "estop_return_ms": 0.01,
+    "safety_counters": {
+     "commands": 378,
+     "sent": 378,
+     "clamped_joint_limit": 70,
+     "clamped_speed": 27,
+     "rejected_stopped": 1,
+     "estops": 1,
+     "speed_scale": 0.3,
+     "effective_scale": 0.3,
+     "watchdog_armed": true
+    },
+    "live_steps": [
+     "connect x2",
+     "read_state/status",
+     "home via SafetyLayer (14.1s, arrived=True)",
+     "command_ee 2 cm (streamed 1 s)",
+     "gripper + hold",
+     "soft e-stop latch + clear",
+     "disconnect x2"
+    ]
+   }
+  },
+  "cameras": {
+   "ok": true,
+   "errors": [],
+   "warnings": [
+    "top: device /dev/video0 is an index path that can swap on reboot; use /dev/v4l/by-id/... (`python -m rdf_robot_client.cameras list` on the Jetson)",
+    "wrist: device /dev/video2 is an index path that can swap on reboot; use /dev/v4l/by-id/... (`python -m rdf_robot_client.cameras list` on the Jetson)"
+   ],
+   "info": {
+    "path": "services/robot-client/config/cameras.yaml",
+    "cameras": [
+     "top",
+     "wrist"
+    ],
+    "reference": "top",
+    "policy_size": 224,
+    "sha256": "7ae7cfad6a540803e2c6847e94e683cee399d2c20f582a863194a33b832a989a",
+    "robot_announced_cameras": [
+     "top",
+     "wrist"
+    ],
+    "synthetic_capture": {
+     "pass": true,
+     "per_camera": {
+      "top": {
+       "frames": 91,
+       "dropped": 0,
+       "drop_pct": 0.0,
+       "fps": 30.24,
+       "pass": true
+      },
+      "wrist": {
+       "frames": 90,
+       "dropped": 0,
+       "drop_pct": 0.0,
+       "fps": 29.91,
+       "pass": true
+      }
+     },
+     "sync": {
+      "skew_ms_p50": 7.49,
+      "skew_ms_p95": 9.81,
+      "out_of_sync": 0,
+      "pass": true
+     },
+     "note": "SYNTHETIC frames with the configured size/fps: checks the pairing and timing path, not the real lenses"
+    }
+   }
+  },
+  "safety": {
+   "ok": true,
+   "errors": [],
+   "warnings": [
+    "joints [3, 4, 5]: safety cap above the adapter's own max_velocity ([1.2, 1.2, 1.2] vs [1.0, 1.0, 1.0]); the layer uses the lower of the two"
+   ],
+   "info": {
+    "profile": "yam",
+    "verified": false,
+    "overrides": {},
+    "tightened": [],
+    "safe_joint_range": {
+     "lower": [
+      -2.518,
+      0.1,
+      0.1,
+      -1.593,
+      -1.471,
+      -1.994
+     ],
+     "upper": [
+      3.042,
+      3.565,
+      3.042,
+      1.471,
+      1.471,
+      1.994
+     ]
+    },
+    "home_tool_xyz": [
+     0.3013,
+     -0.0,
+     0.2016
+    ],
+    "notes": [
+     "profile 'yam' is NOT verified on the arm: speed is capped at 0.3 on hardware until a human runs docs/safety-jetson-checklist.md"
+    ]
+   }
+  },
+  "kinematics": {
+   "ok": true,
+   "errors": [],
+   "warnings": [],
+   "info": {
+    "samples": 41,
+    "ik_success": 41,
+    "ik_success_rate": 1.0,
+    "pos_err_max_mm": 0.0438,
+    "rot_err_max_mrad": 0.6865,
+    "ik_ms_p50": 0.55,
+    "ik_ms_p95": 1.57,
+    "backend": "poe",
+    "seed": 32,
+    "tolerances": {
+     "pos_m": 0.001,
+     "rot_rad": 0.01,
+     "success_min": 0.95
+    }
+   }
+  }
+ },
+ "ok": true,
+ "hil_required": [
+  "connect: arm holds its boot pose (no sag, no buzz); status().ok, sdk_loop_hz ~250",
+  "zero pose: folded rest reads ~0 rad on every joint",
+  "FK sanity: tape-measure the grasp point at 2-3 poses vs ee_pose (base frame +x forward, +z up)",
+  "home: rest -> home pose at speed_scale <= 0.25 clears the table and fixtures",
+  "gripper: open -> closed -> open matches gripper readings within 0.1 (record YAM_GRIPPER_LIMITS)",
+  "CP-1 demo-square (10 cm, 2 cm/s, safety layer on): smooth, passed: true, state stream ~30 Hz",
+  "soft e-stop mid-move halts within a tick; physical e-stop cuts power",
+  "workspace: jog the tool to each face of the usable volume; shrink safety.yaml's box by 2-3 cm",
+  "reset routine: run it once by hand and time it"
+ ],
+ "hil_note": "simulation passed; these motion checks still need a human at the real arm before hardware use",
+ "ticket_id": 1,
+ "robot_id": 1,
+ "robot": "test.tdm32-yam-sim",
+ "config_path": "/private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboarding-t1/adapter_config.yaml",
+ "config_sha256": "49866211d9181eb249864c803facafa6113e5e63878d8babbb13c4fe2e56cc67",
+ "checked_at": 1792830994.943095,
+ "seconds": 19.2
+}

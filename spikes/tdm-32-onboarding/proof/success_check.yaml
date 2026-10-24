@@ -1,0 +1,14 @@
+ticket_id: 1
+task: "[SIM] pick up the red cup and put it in the grey bin"
+decided_by: operator
+auto_decide: false
+camera: top
+start_state: "The red cup is upright and visible near the starting area, and the grey bin is visible in the scene."
+success_when:
+  - "The red cup is fully inside the grey bin."
+failure_when:
+  - "The cup is still outside the bin when time runs out."
+  - "The cup is knocked over or hidden from the top camera."
+time_limit_s: 60
+ambiguous: "Treat as failure and note what was unclear."
+operator_prompt: "Watch the top camera and confirm whether the red cup ends fully inside the grey bin."

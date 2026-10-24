@@ -1,0 +1,19 @@
+home_joints:
+  - 0.0
+  - 0.98
+  - 0.93
+  - -0.73
+  - 0.0
+  - 0.0
+gripper: 1.0
+speed_fraction: 0.25
+arm_steps:
+  - hold
+  - move_joints(home_joints) through the SafetyLayer at speed_fraction
+  - open gripper
+human_steps:
+  - "Put the red cup back upright at the start area."
+  - "Keep the grey bin in its starting position for the next trial."
+requires_human: true
+operator_prompt: "Reset the scene so the cup and bin match the start state before the next run."
+est_seconds: 30

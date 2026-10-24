@@ -1,0 +1,229 @@
+{
+  "ticket_id": 1,
+  "robot_id": 1,
+  "agent_session_id": 1,
+  "factory_session_id": "54255c65-3aa6-4930-bace-2a553d620d01",
+  "dry": false,
+  "adapter_version": "yam-tdm46-i2rt-sim@120c3c8+onb.t1",
+  "ticket_status": "baseline",
+  "statuses_seen": [
+    "onboarding",
+    "baseline"
+  ],
+  "status_changes": [
+    {
+      "from": "created",
+      "to": "onboarding",
+      "note": "robot has no adapter yet; onboarding"
+    },
+    {
+      "from": "onboarding",
+      "to": "baseline",
+      "note": "robot 1 onboarded (adapter yam-tdm46-i2rt-sim@120c3c8+onb.t1)"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "status": "done",
+      "seconds": 57.3,
+      "credits": 19564.0
+    }
+  ],
+  "credits_total": 19564.0,
+  "wall_s": 62.7,
+  "droid_events": 28,
+  "droid_event_kinds": [
+    "droid.assistant_text",
+    "droid.session_started",
+    "droid.tool_call",
+    "droid.tool_result",
+    "droid.turn_completed",
+    "droid.turn_started"
+  ],
+  "tool_calls": [
+    "TodoWrite",
+    "Execute: uv run --frozen --project services/robot-client python -m rdf_robot_client.onboarding_tool probe --ctx /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/1/droid_c",
+    "LS /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboarding-t1",
+    "Execute: uv run --frozen --project services/robot-client python -m rdf_robot_client.onboarding_tool probe --ctx /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboardin",
+    "ApplyPatch add /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboarding-t1/adapter_config.yaml, add /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-dro",
+    "Execute: uv run --frozen --project services/robot-client python -m rdf_robot_client.onboarding_tool check --ctx /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboardin",
+    "ApplyPatch update /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboarding-t1/onboarding_report.md",
+    "Execute: uv run --frozen --project services/robot-client python -m rdf_robot_client.onboarding_tool publish --ctx /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboard",
+    "TodoWrite"
+  ],
+  "permission_denials": [],
+  "current_step_changes": 13,
+  "current_step_sample": [
+    "[running] turn 1 (start): shell; any other command is refused. Keep replies short; do not explore the repo beyond these commands.",
+    "[running] Factory session 54255c65 started (local)",
+    "[running] says: I\u2019ll probe the onboarding state, then I\u2019ll write the required files and run checks before publishing.",
+    "[running] LS /private/var/folders/vd/y5x1169970l93wk_ny2c45lr0000gn/T/tdm-32-droid/sessions/onboarding-t1",
+    "[running] says: The first probe used the wrong context path. I\u2019m checking the ticket directory, then I\u2019ll rerun probe with the right context.",
+    "[running] says: I have the robot facts. I\u2019m writing the four onboarding files now, then I\u2019ll run check.",
+    "[running] says: The files are in place. I\u2019m running the onboarding check now and will only adjust if it reports errors.",
+    "[running] says: The files are in place. I\u2019m running the onboarding check now and will only adjust if it reports errors. \u00b7 still working (46s into turn 1)",
+    "...",
+    "[running] says: Everything is written and the check passed. I\u2019m publishing the onboarding state now.",
+    "[running] says: DONE",
+    "[running] TodoWrite",
+    "[done] done: I\u2019ll probe the onboarding state, then I\u2019ll write the required files and run checks before publishing.The first probe used the wrong context path. I\u2019m checking the ticket directory, then I\u2019ll rerun pr\u2026"
+  ],
+  "onboarding": {
+    "status": "passed_sim",
+    "adapter": "yam",
+    "kwargs": {
+      "sim": true,
+      "arm_type": "yam",
+      "gripper_type": "linear_4310",
+      "kinematics": "auto"
+    },
+    "safety_profile": "yam",
+    "safety_overrides": {},
+    "checks_ok": {
+      "contract": true,
+      "cameras": true,
+      "safety": true,
+      "kinematics": true
+    },
+    "hil_pending": [
+      "connect: arm holds its boot pose (no sag, no buzz); status().ok, sdk_loop_hz ~250",
+      "zero pose: folded rest reads ~0 rad on every joint",
+      "FK sanity: tape-measure the grasp point at 2-3 poses vs ee_pose (base frame +x forward, +z up)",
+      "home: rest -> home pose at speed_scale <= 0.25 clears the table and fixtures",
+      "gripper: open -> closed -> open matches gripper readings within 0.1 (record YAM_GRIPPER_LIMITS)",
+      "CP-1 demo-square (10 cm, 2 cm/s, safety layer on): smooth, passed: true, state stream ~30 Hz",
+      "soft e-stop mid-move halts within a tick; physical e-stop cuts power",
+      "workspace: jog the tool to each face of the usable volume; shrink safety.yaml's box by 2-3 cm",
+      "reset routine: run it once by hand and time it"
+    ]
+  },
+  "report_checks": {
+    "contract": {
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "info": {
+        "class": "rdf_robot_client.adapters.yam.YamArm",
+        "adapter_version": "yam-tdm46-i2rt-sim@120c3c8",
+        "embodiment": "sim_yam",
+        "yam_sim_backend": "teleport_stand_in (I2RT SDK not installed: no MuJoCo SimRobot)",
+        "live_steps": [
+          "connect x2",
+          "read_state/status",
+          "home via SafetyLayer (14.1s, arrived=True)",
+          "command_ee 2 cm (streamed 1 s)",
+          "gripper + hold",
+          "soft e-stop latch + clear",
+          "disconnect x2"
+        ],
+        "home_err_rad": 0.0,
+        "ee_move_err_m": 0.0,
+        "estop_return_ms": 0.01
+      }
+    },
+    "cameras": {
+      "ok": true,
+      "errors": [],
+      "warnings": [
+        "top: device /dev/video0 is an index path that can swap on reboot; use /dev/v4l/by-id/... (`python -m rdf_robot_client.cameras list` on the Jetson)",
+        "wrist: device /dev/video2 is an index path that can swap on reboot; use /dev/v4l/by-id/... (`python -m rdf_robot_client.cameras list` on the Jetson)"
+      ],
+      "info": {
+        "path": "services/robot-client/config/cameras.yaml",
+        "cameras": [
+          "top",
+          "wrist"
+        ],
+        "reference": "top",
+        "synthetic_capture": {
+          "pass": true,
+          "per_camera": {
+            "top": {
+              "frames": 91,
+              "dropped": 0,
+              "drop_pct": 0.0,
+              "fps": 30.24,
+              "pass": true
+            },
+            "wrist": {
+              "frames": 90,
+              "dropped": 0,
+              "drop_pct": 0.0,
+              "fps": 29.91,
+              "pass": true
+            }
+          },
+          "sync": {
+            "skew_ms_p50": 7.49,
+            "skew_ms_p95": 9.81,
+            "out_of_sync": 0,
+            "pass": true
+          },
+          "note": "SYNTHETIC frames with the configured size/fps: checks the pairing and timing path, not the real lenses"
+        }
+      }
+    },
+    "safety": {
+      "ok": true,
+      "errors": [],
+      "warnings": [
+        "joints [3, 4, 5]: safety cap above the adapter's own max_velocity ([1.2, 1.2, 1.2] vs [1.0, 1.0, 1.0]); the layer uses the lower of the two"
+      ],
+      "info": {
+        "profile": "yam",
+        "verified": false,
+        "tightened": [],
+        "home_tool_xyz": [
+          0.3013,
+          -0.0,
+          0.2016
+        ],
+        "safe_joint_range": {
+          "lower": [
+            -2.518,
+            0.1,
+            0.1,
+            -1.593,
+            -1.471,
+            -1.994
+          ],
+          "upper": [
+            3.042,
+            3.565,
+            3.042,
+            1.471,
+            1.471,
+            1.994
+          ]
+        }
+      }
+    },
+    "kinematics": {
+      "ok": true,
+      "errors": [],
+      "warnings": [],
+      "info": {
+        "samples": 41,
+        "ik_success_rate": 1.0,
+        "pos_err_max_mm": 0.0438,
+        "rot_err_max_mrad": 0.6865,
+        "ik_ms_p50": 0.55,
+        "ik_ms_p95": 1.57,
+        "backend": "poe"
+      }
+    }
+  },
+  "ticket_dir_files": [
+    "adapter_config.yaml",
+    "checks.json",
+    "droid_context.json",
+    "onboarding_report.md",
+    "reset_routine.yaml",
+    "success_check.yaml"
+  ],
+  "checks": {
+    "passed": 11,
+    "failed": []
+  }
+}

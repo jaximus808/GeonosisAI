@@ -468,7 +468,7 @@ class Dropper:
     def render_still(self, spec: dict, w: int, h: int) -> Any:
         from PIL import Image
 
-        key = hashlib.sha256(json.dumps(spec, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        key = hashlib.sha256((STILL_VERSION + json.dumps(spec, sort_keys=True, default=str)).encode()).hexdigest()[:16]
         out = self.store.root / "_stills" / f"{key}-{int(w)}x{int(h)}.png"
         if not out.exists():
             if key in self._still_failed:
@@ -720,6 +720,7 @@ def _memo_frame(draw: Callable[[int, int], Any]) -> Callable[[int, int], Any]:
 
 
 ROBOT_CLIENT = Path(__file__).resolve().parents[3] / "robot-client"
+STILL_VERSION = "v2-arm-finish"  # bump when tdm108_still's look changes: cached stills are keyed by it
 
 
 def run_still_subprocess(spec: dict, sizes: list[tuple[int, int]], outs: list[Path], *, python: str | None = None,

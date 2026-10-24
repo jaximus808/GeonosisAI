@@ -20,6 +20,41 @@ import sys
 from pathlib import Path
 
 
+# The YAM as the web twin draws it (RobotTwin3D FINISH), not MuJoCo's per-link debug colours:
+# near-black machined links, steel joint housings, dark fingers, a black sensor. Arm bodies only.
+ARM_FINISH = {
+    "base": "#1c1916", "link2": "#1c1916", "link3": "#1c1916", "link5": "#1c1916", "gripper": "#1c1916",
+    "link1": "#8f9ca5", "link4": "#8f9ca5",  # joint housings / accents: steel
+    "tip_left": "#2a2e35", "tip_right": "#2a2e35",  # fingers: dark
+    "wrist_cam_mount": "#17191d",
+}
+ARM_DEFAULT = "#1c1916"
+
+
+def _rgb(hex_: str) -> tuple[float, float, float]:
+    h = hex_.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def finish_arm(m) -> int:
+    """Recolour the arm's visible geoms in place (the table, objects and plates are untouched).
+    Returns how many geoms changed."""
+    import mujoco
+
+    root = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "base")
+    if root < 0:
+        return 0
+    n = 0
+    for g in range(m.ngeom):
+        b = int(m.geom_bodyid[g])
+        if int(m.body_rootid[b]) != root or float(m.geom_rgba[g][3]) == 0.0:  # not the arm, or an invisible pad
+            continue
+        m.geom_rgba[g][:3] = _rgb(ARM_FINISH.get(m.body(b).name, ARM_DEFAULT))
+        m.geom_matid[g] = -1
+        n += 1
+    return n
+
+
 def render(spec: dict, sizes: list[tuple[int, int]], camera: str = "top") -> list:
     """One model load, one RGB array per (width, height)."""
     if "MUJOCO_GL" not in os.environ:
@@ -31,6 +66,7 @@ def render(spec: dict, sizes: list[tuple[int, int]], camera: str = "top") -> lis
     from .adapters.mujoco_sim import SIM_HOME
 
     m = mujoco.MjModel.from_xml_string(build_scene_xml(load_scene(spec)))
+    finish_arm(m)
     m.vis.global_.offwidth = max([int(m.vis.global_.offwidth)] + [w for w, _ in sizes])
     m.vis.global_.offheight = max([int(m.vis.global_.offheight)] + [h for _, h in sizes])
     d = mujoco.MjData(m)

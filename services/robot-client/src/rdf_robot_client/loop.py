@@ -234,7 +234,7 @@ class RobotClient:
             pose = self.arm.fk(target.joints)
         g = target.gripper if target.gripper is not None else (self._last_cmd[1] if self._last_cmd else self.arm.read_state().gripper)
         self._last_cmd = (pose, float(g), source, time.monotonic())
-        tick = self.control_tick()
+        tick = self.control_tick(_just_streamed=True)
         for fn in list(self._tick_listeners):
             try:
                 fn(tick)
@@ -242,14 +242,17 @@ class RobotClient:
                 _log("tick listener failed", error=repr(e)[:200])
         return tick
 
-    def control_tick(self) -> ControlTick:
+    def control_tick(self, *, _just_streamed: bool = False) -> ControlTick:
         """The current control tick, any time (e.g. once per camera frame).
 
         ``control_source`` is ``idle`` (target = measured pose) unless a command was streamed within
-        the last ~3 control periods and the robot is in a motion state.
+        the last ~3 control periods and the robot is in a motion state. ``record_command``'s own tick
+        (``_just_streamed``) skips the age check: a process stall between recording the command and
+        reading the arm must not relabel that streamed command ``idle``.
         """
         st = self.arm.read_state()
-        recent = self._last_cmd is not None and time.monotonic() - self._last_cmd[3] < 3.0 / self.arm.control_rate_hz
+        recent = self._last_cmd is not None and (
+            _just_streamed or time.monotonic() - self._last_cmd[3] < 3.0 / self.arm.control_rate_hz)
         if recent and self.sm.state in (S.ROLLOUT, S.TELEOP, S.HOMING):
             pose, g, source, _ = self._last_cmd  # type: ignore[misc]
         else:

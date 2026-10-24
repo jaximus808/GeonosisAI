@@ -13,6 +13,7 @@ import math
 import random
 import threading
 import time
+import types
 
 import pytest
 
@@ -481,9 +482,24 @@ def test_limit_events_are_rate_limited():
         layer.disconnect()
 
 
-def test_fuzz_invariants():
-    """Random garbage stream: every setpoint that reaches the adapter obeys every limit."""
-    layer, inner, clk = _layer()
+def test_fuzz_invariants(monkeypatch):
+    """Random garbage stream: every setpoint that reaches the adapter obeys every limit.
+
+    Workspace: a setpoint is inside the box, or (when the layer re-anchored on a measured position
+    that was already outside) no further outside than that position (the rule step 7 documents and
+    ``test_arm_outside_box_may_only_move_back_in`` pins). SimArm can end up a little outside between
+    two in-box setpoints: each joint saturates at its own max velocity, so it does not follow the
+    straight joint-space line, and a reject -> hold freezes it wherever it is on that curve.
+
+    The SimArm integrates on ``time.monotonic``; here it runs on the test's fake clock, so the run is
+    the same on an idle or a loaded machine (with real time, how far the sim moved between commands
+    depended on scheduling, which made the sequence, and the old absolute box assert, flaky).
+    """
+    from rdf_robot_client.adapters import sim as sim_mod
+
+    clk = FakeClock()
+    monkeypatch.setattr(sim_mod, "time", types.SimpleNamespace(monotonic=clk))
+    layer, inner, _ = _layer(clock=clk)
     rng = random.Random(4545)
     lo, hi = layer.limits.lower, layer.limits.upper
     ws = layer.config.workspace
@@ -492,6 +508,9 @@ def test_fuzz_invariants():
     try:
         for _ in range(3000):
             clk.tick(rng.choice([DT, DT, DT, 0.0, 0.001, 0.2]))
+            # what the layer will anchor this step on: its reference, or the measured arm after a hold
+            anchor_q = layer._ref_q if layer._ref_q is not None else inner.read_state().joints
+            anchor_viol = ws.violation(inner.fk(anchor_q).xyz)
             base = list(inner.last_joint_cmd or layer.home_joints)
             kind = rng.random()
             if kind < 0.1:
@@ -513,7 +532,7 @@ def test_fuzz_invariants():
                 prev = None  # rejected: held
                 continue
             assert all(a - 1e-9 <= v <= b + 1e-9 for v, a, b in zip(sent, lo, hi))
-            assert ws.violation(inner.fk(sent).xyz) <= 1e-6
+            assert ws.violation(inner.fk(sent).xyz) <= max(anchor_viol, 0.0) + 1e-6
             if prev is not None:
                 assert all(abs(s - p) <= vm * 2 * DT + 1e-9 for s, p, vm in zip(sent, prev, vmax))
             prev = sent

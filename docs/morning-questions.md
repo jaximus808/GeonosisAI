@@ -18,3 +18,8 @@ Work kept going around each of these. Answer in any order.
     - **Also decide:** do you want to allow maincloud publishes for the rest of the build (e.g. a permission rule for `spacetime publish -s maincloud robo-factory-a706j --delete-data=never`), or keep approving each one?
 12. **Demo data on maincloud (TDM-17)**: `make seed` seeds only a local SpacetimeDB and refuses maincloud. Maincloud's event_log is the evidence for the real run and is wiped once right before it (TDM-72), so seed rows there would gain nothing and could be mistaken for real activity. If you do want seeded rows on maincloud for some demo step, say so; the override is `make seed SEED_HOST=https://maincloud.spacetimedb.com ARGS="--allow-maincloud --confirm-db robo-factory-a706j"`, and every row is still tagged `test.seed` / `[SEED]` / `fake: true`.
     - **Modal deploy of `rdf-training` (TDM-39, and likely TDM-40/41): `make deploy-modal` was denied as a production deploy.** The deployed app is missing `modal_convert`, so real conversion would fail until it's redeployed. Ephemeral `modal run` proofs work. To deploy, from a clean HEAD worktree: `cd services/training && uv run --with modal modal deploy modal_app.py` (or `make deploy-modal`).
+12b. **A real public YAM dataset exists:** `hf://allenai/24112025-yam-01` (two-arm YAM; the left-arm episodes pass all our QA checks). It may help the demo:
+    - It's a realistic "the factory found and bought a dataset" story (label it as public data, not purchased).
+    - It's real-YAM data to warm-start the fine-tune.
+
+    Check its license or terms before using it in the pitch.

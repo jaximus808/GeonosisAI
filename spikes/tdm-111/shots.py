@@ -22,8 +22,8 @@ with sync_playwright() as p:
         ctx = b.new_context(viewport={"width": w, "height": h}, device_scale_factor=1, color_scheme="dark")
         pg = ctx.new_page()
         for path in pages:
-            pg.goto(base + path, wait_until="networkidle", timeout=60000)
-            pg.wait_for_timeout(2500)
+            pg.goto(base + path, wait_until="load", timeout=60000)
+            pg.wait_for_timeout(5000)
             over = pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
             name = (path.strip("/").replace("/", "_") or "home")
             f = OUT / f"{tag}-{name}-{w}.png"

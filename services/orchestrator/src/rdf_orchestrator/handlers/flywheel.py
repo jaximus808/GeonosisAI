@@ -100,6 +100,10 @@ def _from_env(reg: Registry) -> Flywheel:
         install_sim(fw, SimScript(reject_first_episode=False), registry=reg, stages=stages)
     if os.environ.get("RDF_MODAL_STUB") == "1":
         register_modal_stub(reg)
+    if os.environ.get("RDF_TRAINING_DROID") == "1":  # TDM-34: a Training Droid configures + queues the fine-tune
+        from rdf_factory.droids.training import TrainingDroidStep
+
+        fw.register_step("train", TrainingDroidStep())
     return fw
 
 

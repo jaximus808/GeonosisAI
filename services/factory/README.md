@@ -160,6 +160,31 @@ FeedEvent = { id: 'ev:<event_log id>' | 'rec:<agent_session_id>:<line>', agent_k
   - `replaySpeed: 4` plays the recording back at 4x and loops, with timestamps rebased to now.
 - **Live proof** (throwaway local SpacetimeDB, no credits): `cd services/orchestrator && uv run python ../../spikes/tdm-35/live_proof.py`. It replays the recording through `Mirror`, and a Node subscriber (`spikes/tdm-35/subscribe_feed.mjs`, using the real bindings and `normalize.ts`) builds the feed from subscriptions. The script checks that this feed matches `GET /agents`.
 
+## Training Droid (TDM-34): `rdf_factory.droids.training`
+
+**Role vs TDM-21.** TDM-21 (`rdf_orchestrator/modal_client.py`) stays the mechanical launcher: `training_run` entering `queued` -> spawn `convert` then `finetune(hyperparams=training_run.hyperparams_json)`, poll, write running/done/failed with checkpoint, metrics and GPU cost. The droid is the engineer around that launch:
+1. **Sanity-checks the dataset before any GPU is spent** (`check_dataset`): drops episodes that cannot yield a sample (shorter than the 50-step action horizon, no actions file, no camera, policy rollouts) and warns on few demos, wrong frame rate, length outliers, mixed camera sets, fake media.
+2. **Picks and justifies hyperparams** (`recommend`): steps sized to ~20 epochs for small sets (12 / 8 for larger), lr sqrt-scaled with batch, LoRA 16, clamped to the 2 h Modal timeout and the ticket's remaining budget. run_settings values that differ from the default are kept as the user's choice. The droid writes `configs/train_<ticket>_<iter>.yaml` with a `rationale` list.
+3. **Handoff = `queue_training_run(ticket, episode_ids, hyperparams_json)`.** Nothing else: TDM-21 launches it like any queued run. The stored hyperparams also carry `droid_session_id`, `droid_config` and `retry_of` (finetune keeps unknown keys in `extra`).
+4. **Parks** with `WAITING_FOR {"any":[training_run id=R status==done|failed|cancelled]}`; the TDM-27 bridge wakes it.
+5. **On failed**: `classify_failure` (oom / timeout / transient / data) -> `retry_plan` (OOM: half batch, sqrt-scaled lr, doubled steps to keep samples seen; timeout: fewer steps; data errors: no retry). **One** automatic retry per session.
+6. **On done**: `analyze_loss` on `metrics.loss_curve` (NaN / climb back from the minimum = diverged; rising tail; <15% drop = not learning; flat tail = plateau; >30 epochs or loss <3% of start on <10 demos = overfit risk, since there is no validation split) -> a short `training_note_<t>_<i>.md` -> `training.report` in event_log.
+
+The droid's records (`training.config` with the rationale, `training.report` with the analysis and note) are logged as actor `droid:training`; its steps show up as `droid.*` events and `agent_session.current_step` like every droid.
+
+**Bounds** (`launch_training_droid`): `write_roots` = its workdir + its ticket dir `work/sessions/training-t<t>-i<i>/`; `allow_commands` = only `uv run --project services/factory python -m rdf_factory.droids.training_tool` (inspect / queue / status / report, each printing one JSON object); `max_turns` = 6 (new `start_session(max_turns=)`: the turn after the limit is refused and the row set `failed`); `autonomy="off"` (new `start_session(autonomy=)`). **At the default `low`, droid-sdk runs commands it rates read-only and file edits without asking `on_permission`, so `write_roots` / `allow_commands` only bind with `off`** (seen live: the first proof attempt ran `cd <repo> && uv run ...` with no prompt). The tool enforces the guardrails in code: bounds, budget, dataset checks, one retry with `retry_of`, configs and notes only under the ticket dir, and it only talks to the database named in `droid_context.json` (a different `SPACETIME_HOST` in the environment is refused, so it never falls through to `.env`).
+
+**Flywheel:** `RDF_TRAINING_DROID=1` replaces TDM-22's `QueueTrainingStep` with `TrainingDroidStep` (`handlers/flywheel.py`). It skips while a run is queued/running/done or a training droid for the ticket is live, starts the droid off the flywheel's await, and falls back to `QueueTrainingStep` if the droid cannot start. Off by default. By hand: `uv run python -m rdf_factory.droids.training <ticket_id> <iteration>`.
+
+**Proof (2026-10-24, local droid, throwaway SpacetimeDB 127.0.0.1:3134, NO GPU):** `cd services/orchestrator && uv run python scripts/tdm34_training_droid_proof.py` (`TDM34_DRY=1` = a scripted stand-in, 0 credits). TDM-21's real launch/track handlers ran on the bus with a `FakeModal` backend injected into `TrainingRunner`: convert returns a fake dataset URI, finetune #1 raises a forced `RESOURCE_EXHAUSTED`, finetune #2 returns a `fake://` checkpoint and a synthetic loss curve (all tagged fake). agent_session 1, Factory session `ad687a11-5e3b-4f0d-b084-26ae02ac2443`, gpt-5.4-mini/low, 11/11 checks:
+- turn 1 (43 s, 10,952 credits): inspect -> config (lr 2.5e-5, 1900 steps = ~20 epochs over 3055 samples, batch 32, LoRA 16, 5-line rationale) -> queue -> parked.
+- TDM-21: run 1 queued -> running (convert) -> running (finetune) -> failed (forced OOM). Bridge woke the droid.
+- turn 2 (23 s, 5,157 credits): status -> OOM retry plan -> `train_1_0_retry1.yaml` (batch 16, lr 1.77e-5, 3800 steps, `retry_of: 1`) -> queue -> parked again.
+- TDM-21: run 2 -> done. Bridge woke it.
+- turn 3 (10 s, 3,106 credits): status (verdict ok, 0.447 -> 0.076, 83% drop, ~20 epochs) -> training note -> report -> DONE.
+
+Totals: 3 turns on one Factory session (protocol A), 19,215 credits, 85 s wall, 2 `agent.resumed` claims, 42 `droid.*` events, 18 `current_step` changes. The finetune spawn received exactly the droid's hyperparams. An earlier attempt (6,247 credits) ended paused when the droid tried to write its config through `python3 -c` and the denial ended its turn; the brief now says files go through the file tools, and the denial carries the reason as a comment.
+
 ## Config (`.env`)
 
 - `FACTORY_API_KEY`: required, never printed.

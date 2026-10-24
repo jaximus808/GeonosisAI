@@ -60,6 +60,10 @@ class SessionSpec:
     workdir: str  # per-agent_session scratch dir (resume_payload.json lives here)
     write_roots: list[str] = field(default_factory=list)  # local: where file edits are allowed
     allow_commands: list[str] = field(default_factory=list)  # local: Execute prefixes; [] = Execute off
+    max_turns: int = 0  # TDM-34: turns this agent_session may run in total (start + sends + resumes); 0 = no limit
+    # TDM-34: droid-sdk autonomy (local). "low" auto-approves file edits and commands the droid rates read-only
+    # WITHOUT asking on_permission, so write_roots / allow_commands only bind fully with "off".
+    autonomy: str = "low"
     repo_ref: str = ""
     computer_id: str = ""
     env: dict = field(default_factory=dict)  # extra context given to the droid in the brief
@@ -171,7 +175,7 @@ class LocalBackend:
                 denied.append("empty permission request")
             if denied:
                 emit("permission_denied", f"denied: {denied[0]}", tool=None, reasons=denied)
-                return req.respond(ToolConfirmationOutcome.CANCEL)
+                return req.respond(ToolConfirmationOutcome.CANCEL, comment="; ".join(denied)[:500])
             return req.respond(ToolConfirmationOutcome.PROCEED_ONCE)
 
         return InteractionHandlers(on_permission=on_permission)
@@ -193,7 +197,8 @@ class LocalBackend:
                 SessionTag(name=f"agent_session-{spec.agent_session_id}"), SessionTag(name=spec.role)]
             session = Session(
                 cwd=spec.cwd, model=spec.model, reasoning_effort=ReasoningEffort(spec.reasoning),
-                config=SessionConfig(autonomy=Autonomy.LOW, disabled_tools=self._disabled_tools(spec), tags=tags),
+                config=SessionConfig(autonomy=Autonomy(spec.autonomy or "low"), disabled_tools=self._disabled_tools(spec),
+                                     tags=tags),
                 interactions=handlers,
             )
         t0 = time.time()
@@ -207,6 +212,8 @@ class LocalBackend:
             raise
         sid = session.id
         try:
+            if factory_session_id and (spec.autonomy or "low") != "low":
+                await session.update_settings(autonomy=Autonomy(spec.autonomy))  # resume keeps the strict bounds
             if not factory_session_id:
                 await on_session_id(sid)
             names: dict[str, str] = {}

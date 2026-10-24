@@ -231,14 +231,19 @@ class FactoryClient:
     async def start_session(self, role: str, brief: str, env: dict | None = None, repo_ref: str = "", *,
                             ticket_id: int = 0, name: str = "", mode: str | None = None,
                             write_roots: list[str] | None = None, allow_commands: list[str] | None = None,
-                            finish_on_idle: bool = False) -> TurnResult:
+                            finish_on_idle: bool = False, max_turns: int = 0, autonomy: str = "low") -> TurnResult:
         """Create the agent_session row and a Factory session, run the first turn with ``brief``.
 
         ``env``: extra context passed to the droid (JSON). ``repo_ref``: local = checkout dir (default
         FACTORY_REPO_DIR); cloud = the repo/branch the Environment cloned. ``write_roots`` (local):
-        directories file edits are allowed in, default only the session workdir. ``allow_commands``
+        extra directories file edits are allowed in (default none beyond the workdir). ``allow_commands``
         (local): allow-listed Execute command prefixes, e.g. ["uv run pytest"]; default none (Execute
-        disabled). Returns after the first turn (status waiting_for / done / paused / failed).
+        disabled). The session workdir is always writable (resume_payload.json lives there).
+        ``max_turns``: total turns this agent_session may run (start + sends + resumes, across
+        restarts); the turn after the limit is refused and the row set ``failed``. 0 = no limit.
+        ``autonomy`` (local): droid-sdk autonomy; "off" routes every edit/command through the
+        write_roots / allow_commands policy (the default "low" auto-approves edits and commands the
+        droid rates read-only). Returns after the first turn (status waiting_for / done / paused / failed).
         """
         if role not in ROLES:
             raise ValueError(f"role must be one of {ROLES}")
@@ -249,9 +254,10 @@ class FactoryClient:
         cwd = (repo_ref or str(self.cfg.repo_dir)) if mode == "local" else workdir
         spec = SessionSpec(agent_session_id=agent_id, role=role, name=name, ticket_id=int(ticket_id), mode=mode,
                            model=self.cfg.model, reasoning=self.cfg.reasoning, cwd=cwd, workdir=workdir,
-                           write_roots=[str(Path(p).resolve()) for p in (write_roots or [])] or [workdir],
+                           write_roots=[workdir] + [str(Path(p).resolve()) for p in (write_roots or [])],
                            allow_commands=list(allow_commands or []), repo_ref=repo_ref, env=dict(env or {}),
-                           computer_id=self.cfg.computer_id)
+                           computer_id=self.cfg.computer_id, max_turns=max(0, int(max_turns or 0)),
+                           autonomy=autonomy)
         spec.save(self.cfg.state_dir)
         text = self._contract(spec) + "\n" + self._context(spec) + "\nTask:\n" + brief.strip()
         async with self._lock(agent_id):
@@ -414,8 +420,26 @@ class FactoryClient:
                 pass
         return self._read_payload_file(spec)
 
+    async def _refuse_over_limit(self, spec: SessionSpec, fsid: str | None, protocol: str) -> TurnResult:
+        """TDM-34 bound: the session already ran ``max_turns`` turns. No droid call; the row goes ``failed``."""
+        msg = f"turn limit reached: {spec.turns}/{spec.max_turns} turns used; refusing turn {spec.turns + 1} ({protocol})"
+        log.warning("agent_session %s: %s", spec.agent_session_id, msg)
+        t = _Turn(self, spec, spec.turns, fsid)
+        t.emit("error", msg, error_type="turn_limit", detail=msg)
+        await t.close()
+        try:
+            await self.mirror.upsert(spec.agent_session_id, spec.role, "failed", f"failed: {msg}", critical=True)
+        except Exception as e:  # noqa: BLE001
+            log.error("agent_session %s: failed status not mirrored: %s", spec.agent_session_id, e)
+        return TurnResult(agent_session_id=spec.agent_session_id, factory_session_id=fsid or "", protocol=protocol,
+                          status="failed", ok=False, text="", turn=spec.turns, credits=0.0,
+                          credits_total=spec.credits_total, error=msg,
+                          factory_session_ids=list(spec.factory_session_ids))
+
     async def _run(self, spec: SessionSpec, fsid: str | None, text: str, protocol: str, *,
                    finish_on_idle: bool = False, previous: str | None = None) -> TurnResult:
+        if spec.max_turns and spec.turns >= spec.max_turns:
+            return await self._refuse_over_limit(spec, fsid, protocol)
         spec.turns += 1
         turn = _Turn(self, spec, spec.turns, fsid)
         backend = self.backend(spec.mode)

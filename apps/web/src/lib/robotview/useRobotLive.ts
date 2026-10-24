@@ -203,28 +203,20 @@ export function useRobotLive(robotId: number | bigint | null | undefined, opts: 
 
     // ---------------------------------------------------------------- fixture
     if (opts.fixture) {
-      let raf = 0;
+      let tick: ReturnType<typeof setInterval> | null = null;
       import('./fixtures/sim_arm_motion.json').then((mod) => {
         if (dead) return;
         const fx = (mod.default ?? mod) as unknown as RobotStateFixture;
         const start = Date.now();
         setTransport('fixture');
-        let lastT = 0;
-        const step = () => {
-          if (dead) return;
+        tick = setInterval(() => {
           const now = Date.now();
-          if (now - lastT >= 1000 / fx.hz - 1) {
-            lastT = now;
-            const f = fixtureFrameAt(fx, start, now);
-            deliver(toLiveState(f), true, now, 0);
-          }
-          raf = requestAnimationFrame(step);
-        };
-        raf = requestAnimationFrame(step);
+          deliver(toLiveState(fixtureFrameAt(fx, start, now)), true, now, 0);
+        }, 1000 / fx.hz);
       });
       return () => {
         dead = true;
-        cancelAnimationFrame(raf);
+        if (tick) clearInterval(tick);
         clearInterval(meter);
       };
     }

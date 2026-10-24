@@ -57,6 +57,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
@@ -214,6 +215,97 @@ class Config:
     public_url: str = ""
     orch: str | None = None   # TDM-110 hybrid: the orchestrator, for requests carrying the edge secret
     edge_secret: str = ""     # RDF_EDGE_SECRET (shared with the Vercel web app)
+    invite_secret: str = ""   # TDM-108 per-task invites: RDF_DROP_INVITE_SECRET, else RDF_EDGE_SECRET
+
+
+# ----------------------------------------------------------------------------------------- TDM-108 invites
+# A job-drop post grants its own task only. The web app's /j route redeems the post's invite for the cookie
+# rdf_task ("t1.<ids>.<ticket>.<robot>.<exp>.<sig>"); this edge accepts it for that task's pages and APIs
+# (task_scope_allows) and the SpacetimeDB socket. Same formats as apps/web/src/lib/tdm108/invite.ts and
+# services/orchestrator/src/rdf_orchestrator/job_drop_invite.py (test vectors pinned in all three).
+TASK_COOKIE = "rdf_task"
+TASK_TTL_S = 24 * 3600
+INVITE_LABEL = b"rdf-drop-invite-v1"
+
+
+def _invite_key(secret: str) -> bytes:
+    return hmac.new(secret.encode(), INVITE_LABEL, hashlib.sha256).digest()
+
+
+def mint_task_cookie(secret: str, ids: list[int], ticket: int, robot: int, now: float | None = None,
+                     ttl_s: int = TASK_TTL_S) -> str:
+    exp = int((time.time() if now is None else now) + ttl_s)
+    body = f"t1.{'-'.join(str(int(i)) for i in ids)}.{int(ticket)}.{int(robot)}.{exp}"
+    sig = base64.urlsafe_b64encode(hmac.new(_invite_key(secret), f"task-access|{body}".encode(),
+                                            hashlib.sha256).digest()).decode().rstrip("=")[:32]
+    return f"{body}.{sig}"
+
+
+def verify_task_cookie(secret: str, value: str | None, now: float | None = None) -> dict | None:
+    if not secret or not value:
+        return None
+    parts = value.split(".")
+    if len(parts) != 6 or parts[0] != "t1":
+        return None
+    try:
+        ids = [int(x) for x in parts[1].split("-")]
+        ticket, robot, exp = int(parts[2]), int(parts[3]), int(parts[4])
+    except ValueError:
+        return None
+    now = time.time() if now is None else now
+    if not ids or len(ids) > 32 or exp <= now or exp > now + TASK_TTL_S + 60:
+        return None
+    if not hmac.compare_digest(mint_task_cookie(secret, ids, ticket, robot, now=exp, ttl_s=0).encode(), value.encode()):
+        return None
+    return {"ids": ids, "ticket": ticket, "robot": robot, "exp": exp}
+
+
+def _num(v: str | None) -> int | None:
+    return int(v) if v and re.fullmatch(r"\d{1,19}", v) else None
+
+
+def task_scope_allows(scope: dict, method: str, path: str, query: str) -> bool:
+    """Pages and APIs a task-scoped visitor may open (same list as tdm108TaskScopeAllows in invite.ts)."""
+    from urllib.parse import parse_qs, urlsplit
+
+    ids = set(scope["ids"])
+    q = {k: v[0] for k, v in parse_qs(query, keep_blank_values=True).items()}
+    if path == "/marketplace":
+        return _num(q.get("task")) in ids
+    m = re.fullmatch(r"/(teleop|reset)/(\d{1,19})/?", path)
+    if m:
+        return int(m.group(2)) in ids
+    if path == "/practice":
+        if _num(q.get("ticket")) == scope["ticket"] or _num(q.get("robot")) == scope["robot"]:
+            return True
+        nxt = q.get("next") or ""
+        if nxt.startswith("/") and not nxt.startswith("//") and not nxt.startswith("/practice"):
+            u = urlsplit(nxt)
+            return task_scope_allows(scope, "GET", u.path, u.query)
+        return False
+    if method == "POST" and path in ("/api/tdm55/stream-token", "/api/robotview/state-token"):
+        return True
+    for pat, field_ in ((r"/api/tdm62/resets/(\d{1,19})(/photo)?", "ids"), (r"/api/tdm57/tasks/(\d{1,19})/[a-z_]+", "ids"),
+                        (r"/api/tdm104/robots/(\d{1,19})/scene", "robot"), (r"/api/tdm108/share/(\d{1,19})\.png", "ids")):
+        m = re.fullmatch(pat, path)
+        if m:
+            return int(m.group(1)) in ids if field_ == "ids" else int(m.group(1)) == scope["robot"]
+    return path in ("/api/tdm108/claim-src", "/api/tdm59/ping") or path.startswith("/api/tdm65/")
+
+
+def env_or_dotenv(name: str) -> str:
+    """os.environ, else the repo .env (the edge is often started without it exported). Never logged."""
+    v = os.environ.get(name, "").strip()
+    if v:
+        return v
+    try:
+        for line in (Path(__file__).resolve().parents[2] / ".env").read_text().splitlines():
+            k, _, val = line.partition("=")
+            if k.strip() == name:
+                return val.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
 
 
 def edge_proof(secret: str, nonce: str, url: str) -> str:
@@ -266,6 +358,10 @@ class Guard:
     def has_access(self, req: web.Request) -> bool:
         return verify_access(self.cfg.access_code, req.cookies.get(ACCESS_COOKIE))
 
+    def task_scope(self, req: web.Request) -> dict | None:
+        """TDM-108: the visitor's per-task invite cookie, if valid."""
+        return verify_task_cookie(self.cfg.invite_secret, req.cookies.get(TASK_COOKIE))
+
     def edge_ok(self, req: web.Request) -> bool:
         got = req.headers.get(EDGE_SECRET_HEADER, "")
         want = self.cfg.edge_secret
@@ -317,7 +413,7 @@ class Guard:
             if not (stdb_allowed(method, path, ws, self.cfg.db) or (edge and stdb_server_allowed(method, path, self.cfg.db))):
                 self.stats["blocked"] += 1
                 return self.jerr(403, "not_allowed", "This SpacetimeDB route is not exposed publicly.")
-            if gate and not edge and not self.has_access(req):
+            if gate and not edge and not self.has_access(req) and not self.task_scope(req):
                 self.stats["refused_access"] += 1
                 return self.jerr(401, "access_code_required", "Enter the access code at /join first.")
             return await self.proxy(req, self.cfg.stdb, path, tunneled, access="n/a", ws_limit=tunneled)
@@ -329,10 +425,13 @@ class Guard:
                 return self.jerr(401, "edge_secret_required", "Server-to-server only.")
             return await self.proxy(req, self.cfg.orch, path, tunneled, access="n/a")
 
+        scope = self.task_scope(req) if gate else None
         if not gate:
             access = "local" if not tunneled else "off"
         elif self.has_access(req):
             access = "ok"
+        elif scope and task_scope_allows(scope, method, path, req.query_string):
+            access = "task:" + "-".join(str(i) for i in scope["ids"])  # TDM-108: that job's pages only
         else:
             access = "required"
             if not public_open(path):
@@ -537,7 +636,8 @@ def main() -> int:
                  api_secret=os.environ.get("RDF_PUBLIC_API_SECRET", ""),
                  access_code=os.environ.get("RDF_PUBLIC_ACCESS_CODE", ""),
                  public_url=os.environ.get("RDF_PUBLIC_URL", "").rstrip("/"),
-                 orch=a.orch, edge_secret=os.environ.get("RDF_EDGE_SECRET", ""))
+                 orch=a.orch, edge_secret=os.environ.get("RDF_EDGE_SECRET", ""),
+                 invite_secret=env_or_dotenv("RDF_DROP_INVITE_SECRET") or env_or_dotenv("RDF_EDGE_SECRET"))
     if cfg.api and len(cfg.api_secret) < 16:
         print("--api needs RDF_PUBLIC_API_SECRET (16+ url-safe chars)", file=sys.stderr)
         return 2

@@ -73,10 +73,16 @@ export function tdm110AccessOpen(path: string): boolean {
 export function tdm110AccessDecision(
   code: string,
   // operator: the request carries a valid operator session (rdf_op); TDM-111 counts it as access.
-  req: { path: string; search: string; method: string; accept: string; cookie: string | undefined; operator?: boolean },
-): { action: 'pass'; access: 'off' | 'ok' | 'required' } | { action: 'redirect'; to: string } | { action: 'deny' } {
+  // task: a verified TDM-108 per-task invite cookie (rdf_task) and whether its scope covers this request
+  // (lib/tdm108/invite.ts tdm108TaskScopeAllows; the caller computes it, so this module stays dependency-free).
+  req: { path: string; search: string; method: string; accept: string; cookie: string | undefined; operator?: boolean;
+    task?: { ids: number[]; allows: boolean } | null },
+): { action: 'pass'; access: 'off' | 'ok' | 'required' | `task:${string}` } | { action: 'redirect'; to: string } | { action: 'deny' } {
   if (!code) return { action: 'pass', access: 'off' };
   if (req.operator || tdm110VerifyAccess(code, req.cookie)) return { action: 'pass', access: 'ok' };
+  if (req.task?.allows) {
+    return { action: 'pass', access: `task:${req.task.ids.join('-')}` };
+  }
   if (tdm110AccessOpen(req.path)) return { action: 'pass', access: 'required' };
   if ((req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api/') && req.accept.includes('text/html')) {
     return { action: 'redirect', to: `/join?next=${encodeURIComponent(req.path + req.search).replace(/%2F/g, '/')}` };

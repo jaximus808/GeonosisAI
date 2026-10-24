@@ -158,7 +158,10 @@ def headline(p: DropPost) -> str:
 
 
 def access_line(p: DropPost) -> str:
-    return f"Access code {p.access_code}." if p.access_code else ""
+    return f"Code for this task: {p.access_code}." if p.access_code else ""
+
+
+CLAIMED_TEXT = "Claimed, no longer available."
 
 
 Sleep = Callable[[float], None]
@@ -252,8 +255,58 @@ class Discord:
             mid, cid, gid = str(j.get("id") or ""), str(j.get("channel_id") or ""), j.get("guild_id")
             post_url = f"https://discord.com/channels/{gid}/{cid}/{mid}" if gid and cid and mid else None
             return PostResult(post_id=mid, post_url=post_url, cost_estimate_usd=0.0, note=f"discord {via}",
-                              extra={"channel_id": cid})
+                              extra={"channel_id": cid, "via": via})
         raise ChannelError("discord rate limited", status=429, retryable=True)
+
+    # -- lifecycle: the message follows its task
+    def _message(self, rec: dict) -> tuple[str, dict]:
+        extra = rec.get("extra") or {}
+        mid = re.sub(r"\D", "", str(rec.get("post_id") or ""))
+        if not mid:
+            raise ChannelError("discord: no message id stored for this post")
+        if (extra.get("via") or self.via) == "bot":
+            cid = re.sub(r"\D", "", str(extra.get("channel_id") or self.s.rdf_drop_discord_channel_id or ""))
+            return (f"{self.s.rdf_drop_discord_api.rstrip('/')}/channels/{cid}/messages/{mid}",
+                    {"Authorization": f"Bot {_secret(self.s.discord_bot_token)}", "User-Agent": self.s.discord_user_agent})
+        hook = _secret(self.s.rdf_drop_discord_webhook).split("?", 1)[0].rstrip("/")
+        if not hook:
+            raise ChannelError("discord webhook not configured")
+        return f"{hook}/messages/{mid}", {"User-Agent": self.s.discord_user_agent}
+
+    def _call(self, http: httpx.Client, method: str, url: str, headers: dict, body: dict | None = None) -> httpx.Response:
+        for attempt in range(DISCORD_MAX_RETRIES + 1):
+            try:
+                r = http.request(method, url, headers=headers, json=body)
+            except Exception as e:  # noqa: BLE001
+                raise _safe_http_error(e) from None
+            if r.status_code == 429 and attempt < DISCORD_MAX_RETRIES:
+                self.sleep(min(_retry_after(r), MAX_RETRY_WAIT_S))
+                continue
+            return r
+        raise ChannelError("discord rate limited", status=429, retryable=True)
+
+    def mark_claimed(self, http: httpx.Client, rec: dict, p: DropPost) -> str:
+        """Edit the post: title kept, "Claimed, no longer available", steel; QR card, Claim button and code gone."""
+        url, headers = self._message(rec)
+        body = {"content": CLAIMED_TEXT, "attachments": [], "components": [], "allowed_mentions": {"parse": []},
+                "embeds": [{"title": p.title[:256], "description": CLAIMED_TEXT,
+                            "color": getattr(self.s, "discord_steel_color", 0x8F9CA5),
+                            "footer": {"text": f"GeonosisAI · task #{p.task_id}"}}]}
+        r = self._call(http, "PATCH", url, headers, body)
+        if r.status_code == 404:
+            return "gone"
+        if r.status_code >= 300:
+            raise _api_error(r, "discord edit")
+        return "edited"
+
+    def remove(self, http: httpx.Client, rec: dict) -> str:
+        url, headers = self._message(rec)
+        r = self._call(http, "DELETE", url, headers)
+        if r.status_code == 404:
+            return "gone"
+        if r.status_code >= 300:
+            raise _api_error(r, "discord delete")
+        return "deleted"
 
 
 # --------------------------------------------------------------------------- Bluesky
@@ -368,6 +421,26 @@ class Bluesky:
         return PostResult(post_id=uri, post_url=f"https://bsky.app/profile/{handle}/post/{rkey}" if rkey else None,
                           cost_estimate_usd=0.0, note="bluesky")
 
+    # -- lifecycle. Bluesky posts can't be edited, so a claimed task's post is deleted (a reopen reposts).
+    def remove(self, http: httpx.Client, rec: dict) -> str:
+        m = re.fullmatch(r"at://([^/]+)/([^/]+)/([^/]+)", str(rec.get("post_id") or ""))
+        if not m:
+            raise ChannelError("bluesky: no post uri stored for this post")
+        did, jwt = self._login(http)
+        try:
+            r = http.post(self._xrpc("com.atproto.repo.deleteRecord"), headers={"Authorization": f"Bearer {jwt}"},
+                          json={"repo": m.group(1), "collection": m.group(2), "rkey": m.group(3)})
+        except Exception as e:  # noqa: BLE001
+            raise _safe_http_error(e) from None
+        if r.status_code == 400 and "NotFound" in r.text:
+            return "gone"
+        if r.status_code >= 300:
+            raise _api_error(r, "bluesky deleteRecord")
+        return "deleted"
+
+    def mark_claimed(self, http: httpx.Client, rec: dict, p: DropPost) -> str:
+        return self.remove(http, rec)
+
 
 # --------------------------------------------------------------------------- X
 
@@ -467,6 +540,26 @@ class X:
                           note=f"x pay-per-use: post ${cost:.3f}" + (" (has a URL)" if cost > X_COST_POST_USD else
                                                                      ", media upload not priced on the docs page"))
 
+    # -- lifecycle. X posts can't be edited; on a claim the post stays up (deleting and reposting on a
+    # release would bill twice). It is deleted when the task is finished.
+    def mark_claimed(self, http: httpx.Client, rec: dict, p: DropPost) -> str:
+        return "unsupported (X posts can't be edited; deleted when the task finishes)"
+
+    def remove(self, http: httpx.Client, rec: dict) -> str:
+        pid = re.sub(r"\D", "", str(rec.get("post_id") or ""))
+        if not pid:
+            raise ChannelError("x: no post id stored for this post")
+        url = f"{self.s.rdf_drop_x_api.rstrip('/')}/2/tweets/{pid}"
+        try:
+            r = http.delete(url, headers={"Authorization": self._auth("DELETE", url)})
+        except Exception as e:  # noqa: BLE001
+            raise _safe_http_error(e) from None
+        if r.status_code == 404:
+            return "gone"
+        if r.status_code >= 300:
+            raise _api_error(r, "x delete post")
+        return "deleted"
+
 
 # --------------------------------------------------------------------------- Telegram
 
@@ -511,6 +604,26 @@ class Telegram:
             return PostResult(post_id=mid, post_url=f"https://t.me/{uname}/{mid}" if uname and mid else None,
                               note="telegram")
         raise ChannelError("telegram rate limited", status=429, retryable=True)
+
+    # -- lifecycle. A caption edit would leave the QR card up, so a claimed task's message is deleted too
+    # (a reopen reposts). Bots can delete their own channel messages.
+    def remove(self, http: httpx.Client, rec: dict) -> str:
+        mid = re.sub(r"\D", "", str(rec.get("post_id") or ""))
+        if not mid:
+            raise ChannelError("telegram: no message id stored for this post")
+        url = f"{self.s.rdf_drop_telegram_api.rstrip('/')}/bot{_secret(self.s.rdf_drop_telegram_bot_token)}/deleteMessage"
+        try:
+            r = http.post(url, data={"chat_id": self.s.rdf_drop_telegram_chat_id.strip(), "message_id": mid})
+        except Exception as e:  # noqa: BLE001
+            raise _safe_http_error(e) from None  # never str(e): the URL holds the bot token
+        if r.status_code == 400 and "not found" in r.text.lower():
+            return "gone"
+        if r.status_code >= 300:
+            raise _api_error(r, "telegram deleteMessage")
+        return "deleted"
+
+    def mark_claimed(self, http: httpx.Client, rec: dict, p: DropPost) -> str:
+        return self.remove(http, rec)
 
 
 # --------------------------------------------------------------------------- helpers

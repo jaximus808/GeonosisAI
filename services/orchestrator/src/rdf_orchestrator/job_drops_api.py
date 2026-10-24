@@ -10,6 +10,8 @@
   POST /drops/claim-src                {task_id, src, identity, spacetime_token}: the claimant's browser says
                                         which link brought it; logged once per task as ``job_drop.claimed``
   GET  /drops/attribution              claims and posts per channel (operator key)
+  GET|PUT /drops/tickets/{id}/channels {channels: {discord: bool, ...}}: which channels this ticket's jobs go to
+                                        (operator key; default all on)
 
 Reads come from the bus mirror (``app.state.bus``), so nothing here queries SpacetimeDB per request except
 the identity check on claim-src (the same proof as TDM-65's /push/subscribe).
@@ -82,12 +84,35 @@ def drop_attribution(rows: Rows = Depends(get_drop_rows), x_rdf_operator_key: st
     return job_drops.attribution(rows("event_log"))
 
 
+class TicketChannels(BaseModel):
+    channels: dict[str, bool]
+
+
+@job_drops_router.get("/drops/tickets/{ticket_id}/channels")
+def get_ticket_channels(ticket_id: int, d: job_drops.Dropper = Depends(get_dropper),
+                        x_rdf_operator_key: str | None = Header(default=None)) -> dict:
+    _op(x_rdf_operator_key)
+    return {"ticket_id": ticket_id, "channels": d.ticket_channels(ticket_id), "configured": d.configured()}
+
+
+@job_drops_router.put("/drops/tickets/{ticket_id}/channels")
+def put_ticket_channels(ticket_id: int, body: TicketChannels, d: job_drops.Dropper = Depends(get_dropper),
+                        x_rdf_operator_key: str | None = Header(default=None)) -> dict:
+    """Turn channels on/off for one ticket's future drops (and reposts). Posts already up are untouched."""
+    _op(x_rdf_operator_key)
+    unknown = [n for n in body.channels if n not in d.channels]
+    if unknown:
+        raise HTTPException(422, f"unknown channel(s): {', '.join(unknown)}")
+    return {"ticket_id": ticket_id, "channels": d.set_ticket_channels(ticket_id, body.channels),
+            "configured": d.configured()}
+
+
 @job_drops_router.get("/drops/share/{task_id}.png")
 async def share_card(task_id: int, size: str = "square", d: job_drops.Dropper = Depends(get_dropper),
                      rows: Rows = Depends(get_drop_rows)) -> Response:
     if size not in card.SIZES:
         raise HTTPException(422, "size is square or wide")
-    key = (task_id, size, job_drops.public_base(d.s), job_drops.access_code(d.s))
+    key = (task_id, size, job_drops.public_base(d.s), bool(d.s.rdf_drop_show_access_code))
     hit = _share_cache.get(key)
     if hit and time.time() - hit[0] < 300:
         return Response(hit[1], media_type="image/png", headers={"cache-control": "public, max-age=300"})
@@ -105,10 +130,11 @@ _share_cache: "OrderedDict[tuple, tuple[float, bytes]]" = OrderedDict()
 
 
 def _render_share(d: job_drops.Dropper, f: job_drops.DropFacts, size: str) -> bytes:
-    link = job_drops.task_link(job_drops.public_base(d.s), f.task_ids[0], "share", job_drops.access_code(d.s))
+    base = job_drops.public_base(d.s)
+    link = job_drops.invite_link(d.s, base, f.task_ids[0], "share") if job_drops.is_public_url(base) else ""
     frame, label, _ = d._frame(f)
-    return card.render_card(d.card_info(f), size=size, link=link, short=job_drops._short(link), frame=frame,
-                            frame_label=label)
+    return card.render_card(d.card_info(f, "share"), size=size, link=link, short=job_drops._short(link.split("?")[0]),
+                            frame=frame, frame_label=label)
 
 
 @job_drops_router.get("/drops/{drop_id}/card/{channel}.png")

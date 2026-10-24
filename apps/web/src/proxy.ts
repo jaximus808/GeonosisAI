@@ -9,10 +9,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { TDM110_ACCESS_COOKIE, tdm110AccessDecision, tdm110GateCode } from '@/lib/tdm110/access';
 import { OPERATOR_COOKIE, verifyOperatorSession } from '@/lib/operator/session';
+import { TDM108_TASK_COOKIE, tdm108InviteSecret, tdm108TaskScopeAllows, tdm108VerifyTaskCookie } from '@/lib/tdm108/invite';
 
 export function proxy(req: NextRequest) {
   const code = tdm110GateCode(process.env);
   if (!code) return NextResponse.next();
+  const scope = tdm108VerifyTaskCookie(tdm108InviteSecret(process.env), req.cookies.get(TDM108_TASK_COOKIE)?.value);
   const d = tdm110AccessDecision(code, {
     path: req.nextUrl.pathname,
     search: req.nextUrl.search,
@@ -21,6 +23,11 @@ export function proxy(req: NextRequest) {
     cookie: req.cookies.get(TDM110_ACCESS_COOKIE)?.value,
     // TDM-111: a logged-in operator never needs the contributor code
     operator: verifyOperatorSession(req.cookies.get(OPERATOR_COOKIE)?.value) != null,
+    // TDM-108: a job-drop invite opens its own task only
+    task: scope && {
+      ids: scope.ids,
+      allows: tdm108TaskScopeAllows(scope, req.method, req.nextUrl.pathname, req.nextUrl.search),
+    },
   });
   if (d.action === 'redirect') return NextResponse.redirect(new URL(d.to, req.url));
   if (d.action === 'deny') {

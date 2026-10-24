@@ -7,7 +7,13 @@ const DROP = /^[a-z0-9-]{1,64}$/;
 const CHANNEL = /^(discord|bluesky|x|telegram)\.png$/;
 
 /** The orchestrator path for an allowed call, else null. */
-export function tdm108Route(method: 'GET' | 'POST', parts: string[], search: URLSearchParams): Tdm108Route | null {
+export function tdm108Route(method: 'GET' | 'POST' | 'PUT', parts: string[], search: URLSearchParams): Tdm108Route | null {
+  // per-ticket channel choice: GET / PUT drops/tickets/{id}/channels (operator)
+  if ((method === 'GET' || method === 'PUT') && parts.length === 4 && parts[0] === 'drops' && parts[1] === 'tickets' &&
+    ID.test(parts[2]) && parts[3] === 'channels') {
+    return { target: parts.join('/'), operator: true };
+  }
+  if (method === 'PUT') return null;
   if (method === 'GET') {
     if (parts.length === 1 && parts[0] === 'drops') return { target: 'drops', operator: true };
     if (parts.length === 4 && parts[0] === 'drops' && DROP.test(parts[1]) && parts[2] === 'card' && CHANNEL.test(parts[3])) {

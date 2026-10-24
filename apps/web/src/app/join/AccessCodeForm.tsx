@@ -30,6 +30,21 @@ function prefillCode(next: string | undefined): string {
   }
 }
 
+/** TDM-108: the job-drop link a code may belong to: /j/<task>/<channel>, or the marketplace deep link it lands on. */
+export function tdm108InviteTarget(next: string | undefined): string | null {
+  const n = safeNext(next);
+  if (!n) return null;
+  const u = new URL(n, 'http://x');
+  const j = u.pathname.match(/^\/j\/(\d{1,19})\/([a-z0-9_-]{1,24})\/?$/);
+  if (j) return `/j/${j[1]}/${j[2]}`;
+  const task = u.searchParams.get('task');
+  const src = u.searchParams.get('src');
+  if (u.pathname === '/marketplace' && task && /^\d{1,19}$/.test(task) && src && /^[a-z0-9_-]{1,24}$/.test(src)) {
+    return `/j/${task}/${src}`;
+  }
+  return null;
+}
+
 /** TDM-111: what the box holds: uppercase, no spaces (codes are 6 letters and digits). */
 function tdm111CleanCode(v: string): string {
   return v.replace(/\s+/g, '').toUpperCase();
@@ -43,6 +58,9 @@ export function AccessCodeForm({ next }: { next?: string }) {
   useEffect(() => {
     const c = prefillCode(next);
     if (c) setCode((cur) => cur || c);
+    if (new URLSearchParams(window.location.search).get('bad') === '1') {
+      setError('That code is not right for this task. It is the 6 characters printed on the post.');
+    }
   }, [next]);
 
   async function submit(e: FormEvent) {
@@ -57,6 +75,13 @@ export function AccessCodeForm({ next }: { next?: string }) {
         cache: 'no-store',
       });
       const b = (await r.json().catch(() => ({}))) as { detail?: string };
+      // TDM-108: not the site-wide code, but this page came from a job post: it may be that task's own code,
+      // which /j redeems for access to that task only (a wrong one comes back here with ?bad=1)
+      const invite = tdm108InviteTarget(next);
+      if (r.status === 401 && invite) {
+        window.location.replace(`${invite}?c=${encodeURIComponent(tdm111CleanCode(code))}`);
+        return;
+      }
       if (!r.ok) throw new Error(b.detail || `HTTP ${r.status}`);
       window.location.replace(safeNext(next) ?? window.location.pathname + window.location.search);
     } catch (err) {
@@ -71,7 +96,7 @@ export function AccessCodeForm({ next }: { next?: string }) {
         Access code
       </label>
       <p className="text-sm text-zinc-500">
-        6 letters and digits, on the screen next to the QR code. You only enter it once on this phone.
+        6 letters and digits, on the screen next to the QR code or on the job post. You only enter it once on this phone.
       </p>
       <input
         id="rdf-access-code"

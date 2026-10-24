@@ -15,10 +15,12 @@ from PIL import Image
 from rdf_orchestrator import dispatcher as dsp
 from rdf_orchestrator import job_drop_card as card
 from rdf_orchestrator import job_drop_channels as ch
+from rdf_orchestrator import job_drop_invite as inv
 from rdf_orchestrator import job_drops as jd
 
 BOT = "MTIzNDU2Nzg5MDEyMzQ1Njc4.tdm108.not-a-real-token"
 BASE = "https://drop-test.example"
+TDM108_SECRET = "tdm108-test-secret-0123456789abcdef"
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +28,7 @@ def _tdm108_clean_env(monkeypatch):
     import os
 
     for k in list(os.environ):
-        if k.startswith(("RDF_DROP_", "DISCORD_", "RDF_PUBLIC", "RDF_WEB_PUBLIC", "STRIPE_SECRET")):
+        if k.startswith(("RDF_DROP_", "DISCORD_", "RDF_PUBLIC", "RDF_WEB_PUBLIC", "STRIPE_SECRET", "RDF_EDGE_SECRET")):
             monkeypatch.delenv(k, raising=False)
     yield
     jd.set_dropper(None)
@@ -155,16 +157,42 @@ def test_operator_only_and_other_restricted_tasks_are_not_dropped(tmp_path, task
     assert [t for t, _ in events] == ["job_drop.skipped"]
 
 
-def test_access_code_only_when_asked(tmp_path):
-    (tmp_path / "pub").mkdir()
-    (tmp_path / "pub" / "access_code").write_text("k7p3qx\n")
-    d, _ = tdm108_dropper(tmp_path)
-    assert jd.access_code(d.s) is None
-    d2, _ = tdm108_dropper(tmp_path, rdf_drop_show_access_code=True)
-    assert jd.access_code(d2.s) == "K7P3QX"
+def test_per_task_invite_in_links_and_code_only_when_asked(tmp_path):
+    d, events = tdm108_dropper(tmp_path, rdf_edge_secret=TDM108_SECRET)
+    assert jd.access_code(d.s, 12, "discord") is None  # RDF_DROP_SHOW_ACCESS_CODE off: no code printed
+    d.on_page(tdm108_req(), tdm108_rows())
+    c = d.store.load("task-12").channels["discord"]
+    assert c["link"] == f"{BASE}/j/12/discord?k={inv.invite_k(TDM108_SECRET, 12, 'discord')}"
+    assert "Code" not in c["text"]
+    # event_log is public: the invite never goes into it
+    assert all("?k=" not in json.dumps(p) for _, p in events)
+
+    d2, _ = tdm108_dropper(tmp_path / "b", rdf_edge_secret=TDM108_SECRET, rdf_drop_show_access_code=True,
+                           rdf_public_access_code="SITEWIDE")
     d2.on_page(tdm108_req(), tdm108_rows())
-    c = d2.store.load("task-12").channels["discord"]
-    assert c["link"] == f"{BASE}/j/12/discord?code=K7P3QX" and "Access code K7P3QX." in c["text"]
+    ch = d2.store.load("task-12").channels
+    assert "Code for this task: " + inv.invite_code(TDM108_SECRET, 12, "discord") + "." in ch["discord"]["text"]
+    assert inv.invite_code(TDM108_SECRET, 12, "bluesky") in ch["bluesky"]["text"]  # a code per channel
+    assert "SITEWIDE" not in json.dumps(ch)  # the site-wide code is never printed
+    # no secret configured: plain links, no code
+    d3, _ = tdm108_dropper(tmp_path / "c", rdf_drop_show_access_code=True)
+    d3.on_page(tdm108_req(), tdm108_rows())
+    assert d3.store.load("task-12").channels["discord"]["link"] == f"{BASE}/j/12/discord"
+
+
+def test_invite_vectors_match_the_web_and_edge():
+    # the same vectors are pinned in apps/web/test/tdm108-drops.test.ts and scripts/demo/test_public_guard.py
+    assert inv.invite_k(TDM108_SECRET, 7, "discord") == "3-ZQ1oRJDbQOYT503udnHy"
+    assert inv.invite_code(TDM108_SECRET, 7, "discord") == "CXGYS8"
+    assert inv.mint_task_cookie(TDM108_SECRET, [7, 9], 3, 2, now=1800000000, ttl_s=3600) == \
+        "t1.7-9.3.2.1800003600.w1_WyOK6ITs-MQnszOKl3byLs8vASzkb"
+    ok = inv.verify_task_cookie(TDM108_SECRET, "t1.7-9.3.2.1800003600.w1_WyOK6ITs-MQnszOKl3byLs8vASzkb", now=1800000000)
+    assert ok == {"ids": [7, 9], "ticket": 3, "robot": 2, "exp": 1800003600}
+    assert inv.verify_task_cookie(TDM108_SECRET, "t1.8-9.3.2.1800003600.w1_WyOK6ITs-MQnszOKl3byLs8vASzkb",
+                                  now=1800000000) is None
+    assert inv.check_invite(TDM108_SECRET, 7, "discord", code="cxg ys8")
+    assert not inv.check_invite(TDM108_SECRET, 8, "discord", code="CXGYS8")
+    assert not inv.check_invite("", 7, "discord", k="3-ZQ1oRJDbQOYT503udnHy")
 
 
 def test_public_url_from_demo_public_state(tmp_path):
@@ -540,3 +568,136 @@ def test_mujoco_still_is_rendered_once_per_scene_and_size_and_falls_back(tmp_pat
                     still_runner=lambda *a: fails.append(1) or False)
     d2.on_page(tdm108_req(), tdm108_rows())
     assert d2.store.load("task-12").frame == "sketch" and len(fails) == 1  # failed once: not retried
+
+
+# --------------------------------------------------------------------------- lifecycle + per-ticket channels
+
+class Tdm108Tasks:
+    """A mutable task table for lifecycle tests."""
+
+    def __init__(self, status="open"):
+        self.task = {"id": 12, "ticket_id": 4, "robot_id": 2, "type": "recovery_takeover", "status": status,
+                     "price_cents": 350, "instructions": "Take over when it pauses.", "assignee_id": 0}
+        self.base = tdm108_rows([self.task])
+
+    def __call__(self, table):
+        return self.base(table)
+
+
+def test_discord_post_follows_its_task_claimed_released_completed(tmp_path):
+    n = {"posts": 0}
+
+    def post(req):
+        n["posts"] += 1
+        return httpx.Response(200, json={"id": f"90{n['posts']}", "channel_id": "42", "guild_id": "7"})
+
+    http = Tdm108Http({("POST", "/channels/42/messages"): post,
+                       ("PATCH", "/channels/42/messages/901"): lambda r: httpx.Response(200, json={"id": "901"}),
+                       ("DELETE", "/channels/42/messages/901"): lambda r: httpx.Response(204),
+                       ("DELETE", "/channels/42/messages/902"): lambda r: httpx.Response(204)})
+    d, events = tdm108_dropper(tmp_path, http, rdf_drop_mode="live", discord_bot_token=BOT,
+                               rdf_drop_discord_channel_id="42", rdf_edge_secret=TDM108_SECRET,
+                               rdf_drop_show_access_code=True)
+    t = Tdm108Tasks()
+    d.on_page(tdm108_req(), t)
+    assert d.store.load("task-12").channels["discord"]["extra"] == {"channel_id": "42", "via": "bot"}
+
+    t.task["status"] = "claimed"
+    out = d.on_task_change(12, t)
+    assert out["lifecycle"] == "taken"
+    patch = http.calls[-1]
+    assert patch.method == "PATCH" and patch.headers["authorization"] == f"Bot {BOT}"
+    body = json.loads(patch.content)
+    assert body["content"] == "Claimed, no longer available." and body["components"] == [] and body["attachments"] == []
+    emb = body["embeds"][0]
+    assert emb["title"] == "Pick up the cube and place it in the empty plate" and "image" not in emb and "url" not in emb
+    assert emb["color"] == 0x8F9CA5 and "Code" not in json.dumps(body)  # steel, no QR / button / code
+    assert d.store.load("task-12").channels["discord"]["state"] == "claimed_edit"
+    assert d.on_task_change(12, t) is None  # no change, no call
+
+    t.task["status"] = "open"  # released / lease lapsed: the edited message goes, a NEW one is posted
+    d.on_task_change(12, t)
+    assert [(c.method, c.url.path) for c in http.calls[-2:]] == [("DELETE", "/api/v10/channels/42/messages/901"),
+                                                                 ("POST", "/api/v10/channels/42/messages")]
+    c = d.store.load("task-12").channels["discord"]
+    assert c["state"] == "posted" and c["post_id"] == "902" and c["history"][0]["post_id"] == "901"
+
+    t.task["status"] = "completed"
+    d.on_task_change(12, t)
+    assert (http.calls[-1].method, http.calls[-1].url.path) == ("DELETE", "/api/v10/channels/42/messages/902")
+    assert d.store.load("task-12").channels["discord"]["state"] == "deleted"
+    kinds = [t_ for t_, _ in events]
+    assert kinds.count("job_drop.updated") == 1 and kinds.count("job_drop.deleted") == 2 and kinds.count("job_drop.posted") == 2
+    assert BOT not in json.dumps(events)
+
+
+def test_webhook_edit_and_delete_paths(tmp_path):
+    hook = "http://mock.local/api/webhooks/1/hooktoken"
+    http = Tdm108Http({("POST", "/webhooks/1/hooktoken"): lambda r: httpx.Response(200, json={"id": "77", "channel_id": "5"}),
+                       ("PATCH", "/webhooks/1/hooktoken/messages/77"): lambda r: httpx.Response(200, json={"id": "77"}),
+                       ("DELETE", "/webhooks/1/hooktoken/messages/77"): lambda r: httpx.Response(204)})
+    d, events = tdm108_dropper(tmp_path, http, rdf_drop_mode="live", rdf_drop_discord_webhook=hook)
+    t = Tdm108Tasks()
+    d.on_page(tdm108_req(), t)
+    t.task["status"] = "claimed"
+    d.on_task_change(12, t)
+    t.task["status"] = "cancelled"
+    d.on_task_change(12, t)
+    assert [c.method for c in http.calls] == ["POST", "PATCH", "DELETE"]
+    assert "wait" not in http.calls[1].url.params and "hooktoken" not in json.dumps(events)
+
+
+def test_other_networks_delete_where_they_cannot_edit(tmp_path):
+    def session(req):
+        return httpx.Response(200, json={"did": "did:plc:abc", "accessJwt": "jwt1"})
+
+    deleted = []
+    http = Tdm108Http({
+        ("POST", "com.atproto.server.createSession"): session,
+        ("POST", "com.atproto.repo.uploadBlob"): lambda r: httpx.Response(200, json={"blob": {"ref": {"$link": "b"}}}),
+        ("POST", "com.atproto.repo.createRecord"): lambda r: httpx.Response(200, json={"uri": "at://did:plc:abc/app.bsky.feed.post/3k1"}),
+        ("POST", "com.atproto.repo.deleteRecord"): lambda r: deleted.append(("bsky", json.loads(r.content))) or httpx.Response(200, json={}),
+        ("POST", "/2/media/upload"): lambda r: httpx.Response(200, json={"data": {"id": "1880"}}),
+        ("POST", "/2/tweets"): lambda r: httpx.Response(201, json={"data": {"id": "555"}}),
+        ("DELETE", "/2/tweets/555"): lambda r: deleted.append(("x", r.headers["authorization"][:6])) or httpx.Response(200, json={"data": {"deleted": True}}),
+        ("POST", "/sendPhoto"): lambda r: httpx.Response(200, json={"ok": True, "result": {"message_id": 31, "chat": {}}}),
+        ("POST", "/deleteMessage"): lambda r: deleted.append(("tg", r.content.decode())) or httpx.Response(200, json={"ok": True}),
+    })
+    d, events = tdm108_dropper(tmp_path, http, rdf_drop_bsky_handle="h.bsky.social", rdf_drop_bsky_app_password="pw",
+                               rdf_drop_bsky_pds="http://mock.local", rdf_drop_telegram_bot_token="1:tok",
+                               rdf_drop_telegram_chat_id="@c", rdf_drop_telegram_api="http://mock.local",
+                               **x_settings(tmp_path))
+    t = Tdm108Tasks()
+    d.on_page(tdm108_req(), t)
+    t.task["status"] = "claimed"
+    d.on_task_change(12, t)
+    assert deleted[0] == ("bsky", {"repo": "did:plc:abc", "collection": "app.bsky.feed.post", "rkey": "3k1"})
+    assert deleted[1][0] == "tg" and "message_id=31" in deleted[1][1]
+    ch = d.store.load("task-12").channels
+    assert ch["x"]["state"] == "posted" and "unsupported" in ch["x"]["note"]  # X stays up while claimed
+    t.task["status"] = "completed"
+    d.on_task_change(12, t)
+    assert deleted[2] == ("x", "OAuth ")
+
+
+def test_ticket_channel_choice(tmp_path, monkeypatch):
+    http = Tdm108Http({("POST", "/channels/42/messages"): discord_ok})
+    d, events = tdm108_dropper(tmp_path, http, rdf_drop_mode="live", discord_bot_token=BOT,
+                               rdf_drop_discord_channel_id="42")
+    assert d.ticket_channels(4)["discord"] is True
+    d.set_ticket_channels(4, {"discord": False})
+    d.on_page(tdm108_req(), tdm108_rows())
+    assert http.calls == [] and d.store.load("task-12").channels["discord"]["state"] == "off_for_ticket"
+    # an operator's explicit "post now" still posts to that channel
+    assert d.post_now("task-12", "discord")["ok"] is True and len(http.calls) == 1
+
+    from rdf_orchestrator import job_drops_api as api
+
+    monkeypatch.setattr(api, "get_operator_key", lambda: "op-key")
+    c = tdm108_app(d, tdm108_rows())
+    h = {"x-rdf-operator-key": "op-key"}
+    assert c.get("/drops/tickets/4/channels").status_code == 401
+    assert c.get("/drops/tickets/4/channels", headers=h).json()["channels"]["discord"] is False
+    r = c.put("/drops/tickets/4/channels", json={"channels": {"discord": True, "x": False}}, headers=h).json()
+    assert r["channels"] == {"discord": True, "bluesky": True, "x": False, "telegram": True}
+    assert c.put("/drops/tickets/4/channels", json={"channels": {"myspace": True}}, headers=h).status_code == 422

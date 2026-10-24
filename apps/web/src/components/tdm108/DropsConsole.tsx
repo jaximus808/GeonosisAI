@@ -29,6 +29,7 @@ type Drop = {
   mode: string;
   sample: boolean;
   frame: string;
+  lifecycle?: 'open' | 'taken' | 'done';
   channels: Record<string, ChannelState>;
 };
 type Status = {
@@ -48,6 +49,63 @@ const CHANNELS = ['discord', 'bluesky', 'x', 'telegram'] as const;
 const LABEL: Record<string, string> = { discord: 'Discord', bluesky: 'Bluesky', x: 'X', telegram: 'Telegram' };
 const money = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 const when = (s: number) => new Date(s * 1000).toLocaleString();
+
+const LIFECYCLE: Record<string, string> = {
+  open: 'open',
+  taken: 'claimed: posts marked, not available',
+  done: 'finished: posts deleted',
+};
+
+/** Which channels this ticket's jobs go to (a job reaches only the communities the operator picks). */
+function TicketChannels({ ticketId, configured }: { ticketId: number; configured: Record<string, boolean> }) {
+  const [on, setOn] = useState<Record<string, boolean> | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetch(`/api/tdm108/drops/tickets/${ticketId}/channels`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { channels?: Record<string, boolean> } | null) => live && b?.channels && setOn(b.channels))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [ticketId]);
+  async function toggle(c: string) {
+    if (!on) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/tdm108/drops/tickets/${ticketId}/channels`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channels: { [c]: !on[c] } }),
+      });
+      const b = (await r.json().catch(() => null)) as { channels?: Record<string, boolean> } | null;
+      if (r.ok && b?.channels) setOn(b.channels);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!on) return null;
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-zinc-500">Ticket #{ticketId} posts to:</span>
+      {CHANNELS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          disabled={busy}
+          aria-pressed={on[c]}
+          onClick={() => void toggle(c)}
+          title={configured[c] ? undefined : 'No credentials set for this channel'}
+          className={`rounded px-2 py-0.5 font-mono ${on[c] ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'border border-zinc-300 text-zinc-500 line-through dark:border-zinc-700'} disabled:opacity-50`}
+        >
+          {LABEL[c]}
+        </button>
+      ))}
+      <span className="text-zinc-500">Affects new posts and reposts.</span>
+    </div>
+  );
+}
 
 export function DropsConsole() {
   const [data, setData] = useState<Status | null>(null);
@@ -216,14 +274,16 @@ export function DropsConsole() {
               </h2>
               <p className="font-mono text-xs text-zinc-500">
                 {d.sample ? 'no task' : `task #${d.task_ids.join(', #')}`} · {money(d.price_cents)} · {d.robot} · frame {d.frame} · {when(d.created_at)}
+                {d.lifecycle && d.lifecycle !== 'open' ? ` · ${LIFECYCLE[d.lifecycle]}` : ''}
               </p>
             </div>
+            {!d.sample && <TicketChannels ticketId={d.ticket_id} configured={data.channels} />}
             <div className="grid gap-4 md:grid-cols-2">
               {CHANNELS.map((c) => {
                 const s = d.channels[c];
                 if (!s) return null;
                 const posted = s.state === 'posted';
-                const why = !live ? 'Dry run' : !data.channels[c] ? 'No credentials' : posted ? 'Posted' : '';
+                const why = !live ? 'Dry run' : !data.channels[c] ? 'No credentials' : posted || s.state === 'claimed_edit' ? 'Posted' : '';
                 return (
                   <div key={c} className="space-y-2">
                     <div className="flex items-center justify-between text-sm">

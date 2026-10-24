@@ -70,6 +70,7 @@ from rdf_common.settings import RdfSettings
 
 from . import job_drop_card as card
 from . import job_drop_channels as chans
+from . import job_drop_invite as inv
 from .job_drop_theme import load_theme
 from .log import get_logger
 
@@ -78,6 +79,10 @@ log = get_logger("job_drops")
 ACTOR = "orchestrator:job_drops"
 EV_PREVIEW, EV_POSTED, EV_FAILED, EV_SKIPPED, EV_CLAIMED = (
     "job_drop.preview", "job_drop.posted", "job_drop.failed", "job_drop.skipped", "job_drop.claimed")
+EV_UPDATED, EV_DELETED = "job_drop.updated", "job_drop.deleted"
+LIVE_STATES = ("posted", "claimed_edit")  # a message of ours is up in that channel
+OPEN, TAKEN, DONE = "open", "taken", "done"  # a drop's lifecycle, from its tasks' statuses
+TERMINAL = ("completed", "expired", "cancelled")
 DEFAULT_DIR = Path.home() / ".local" / "state" / "rdf" / "job_drops"
 KIND = {"clean_teleop": "Clean demo", "recovery_takeover": "Recovery takeover", "reset": "Reset"}
 MINUTES = {"clean_teleop": 3, "recovery_takeover": 2, "reset": 1}  # = the marketplace's estimates (tdm61.ts)
@@ -101,6 +106,8 @@ class DropSettings(RdfSettings):
     rdf_web_public_url: str | None = None
     rdf_public_root: str | None = None
     rdf_public_access_code: SecretStr | None = None
+    rdf_drop_invite_secret: SecretStr | None = None  # per-task invites (job_drop_invite.py); else RDF_EDGE_SECRET
+    rdf_edge_secret: SecretStr | None = None
     stripe_secret_key: SecretStr | None = None  # only its sk_test_/sk_live_ prefix is read ("Test mode" footer)
     # Discord: bot (preferred) or webhook
     discord_bot_token: SecretStr | None = None
@@ -129,6 +136,10 @@ class DropSettings(RdfSettings):
         return load_theme().int_color("melt")
 
     @property
+    def discord_steel_color(self) -> int:
+        return load_theme().int_color("steel")
+
+    @property
     def discord_user_agent(self) -> str:
         return f"DiscordBot ({public_base(self)}, 1.0)"
 
@@ -136,6 +147,13 @@ class DropSettings(RdfSettings):
     def test_mode(self) -> bool:
         k = self.stripe_secret_key.get_secret_value() if self.stripe_secret_key else ""
         return not k.startswith(("sk_live_", "rk_live_"))
+
+    @property
+    def invite_secret(self) -> str:
+        for v in (self.rdf_drop_invite_secret, self.rdf_edge_secret):
+            if v and v.get_secret_value().strip():
+                return v.get_secret_value().strip()
+        return ""
 
     @property
     def types(self) -> set[str]:
@@ -179,21 +197,27 @@ def is_public_url(base: str) -> bool:
     return True
 
 
-def access_code(s: DropSettings) -> str | None:
-    """The demo-public access code, only when RDF_DROP_SHOW_ACCESS_CODE=1."""
-    if not s.rdf_drop_show_access_code:
+def access_code(s: DropSettings, task_id: int, channel: str) -> str | None:
+    """The per-task code printed on the card/post (RDF_DROP_SHOW_ACCESS_CODE=1). It opens THIS task only
+    (job_drop_invite.py); the site-wide RDF_PUBLIC_ACCESS_CODE is never printed."""
+    if not s.rdf_drop_show_access_code or not s.invite_secret or not task_id:
         return None
-    if s.rdf_public_access_code and s.rdf_public_access_code.get_secret_value().strip():
-        return s.rdf_public_access_code.get_secret_value().strip().upper()
-    try:
-        code = (_public_root(s) / "access_code").read_text().strip().upper()
-        return code or None
-    except OSError:
-        return None
+    return inv.invite_code(s.invite_secret, task_id, channel)
 
 
-def task_link(base: str, task_id: int, src: str, code: str | None = None) -> str:
-    return f"{base}/j/{int(task_id)}/{src}" + (f"?code={code}" if code else "")
+def task_link(base: str, task_id: int, src: str, k: str | None = None) -> str:
+    return f"{base}/j/{int(task_id)}/{src}" + (f"?k={k}" if k else "")
+
+
+def invite_link(s: DropSettings, base: str, task_id: int, src: str) -> str:
+    """The tracked link with this (task, channel)'s signed invite, when an invite secret is set."""
+    k = inv.invite_k(s.invite_secret, task_id, src) if s.invite_secret and task_id else None
+    return task_link(base, task_id, src, k)
+
+
+def _log_url(link: str | None) -> str | None:
+    """event_log is a PUBLIC table: log links without their invite."""
+    return link.split("?", 1)[0] if link else link
 
 
 def fmt_money(cents: int) -> str:
@@ -305,6 +329,7 @@ class Drop:
     sample: bool = False
     frame: str = ""  # photo | render | sketch | none
     public_url_ok: bool = False
+    lifecycle: str = OPEN  # open | taken (claimed: posts marked) | done (posts deleted)
     channels: dict[str, dict] = field(default_factory=dict)  # name -> {state, link, card, text, post_url, ...}
     share: dict[str, str] = field(default_factory=dict)
 
@@ -398,6 +423,7 @@ class Dropper:
         self._lock = threading.RLock()
         self._dropped: set[int] = set()  # task ids already given a drop (this process)
         self._claims_logged: set[int] = set()  # task ids whose claim src is already logged
+        self._task_drop: dict[int, str] = {}  # task id -> drop id (lifecycle); rebuilt from disk on demand
         self.still_runner = still_runner or (lambda spec, sizes, outs: run_still_subprocess(
             spec, sizes, outs, python=self.s.rdf_drop_still_python))
         self._still_failed: set[str] = set()  # scenes MuJoCo could not render: sketch, don't retry
@@ -490,24 +516,25 @@ class Dropper:
             return None
 
     # ---- building
-    def card_info(self, f: DropFacts) -> card.CardInfo:
+    def card_info(self, f: DropFacts, channel: str = "share") -> card.CardInfo:
         where = "At the robot" if f.task_type == "reset" else "From your phone"
         return card.CardInfo(task_id=f.task_ids[0] if f.task_ids else 0, kind=KIND.get(f.task_type, f.task_type),
                              title=f.title, instructions=f.instructions, price=fmt_money(f.price_cents),
                              price_note="per reset" if f.task_type == "reset" else "per accepted episode",
                              facts=[f"About {MINUTES.get(f.task_type, 2)} min", f.robot, where],
-                             count=len(f.task_ids), access_code=access_code(self.s), test_mode=self.s.test_mode,
+                             count=len(f.task_ids), test_mode=self.s.test_mode,
+                             access_code=access_code(self.s, f.task_ids[0] if f.task_ids else 0, channel),
                              sample=f.sample)
 
-    def post_of(self, f: DropFacts, link: str) -> chans.DropPost:
-        info = self.card_info(f)
+    def post_of(self, f: DropFacts, link: str, channel: str = "share") -> chans.DropPost:
+        info = self.card_info(f, channel)
         return chans.DropPost(task_id=info.task_id, kind=info.kind, title=f.title, instructions=f.instructions,
                               price=info.price, price_note=info.price_note, minutes=MINUTES.get(f.task_type, 2),
                               robot=f.robot, where=info.facts[2], link=link, count=info.count,
                               access_code=info.access_code, test_mode=info.test_mode, sample=f.sample)
 
     def build(self, f: DropFacts) -> Drop:
-        base, code = public_base(self.s), access_code(self.s)
+        base = public_base(self.s)
         public_ok = is_public_url(base)
         tid = f.task_ids[0] if f.task_ids else 0
         drop_id = f"task-{tid}" if not f.sample else f"sample-{int(self.clock() * 1000)}"
@@ -519,18 +546,23 @@ class Dropper:
         drop.frame = kind
         if callable(frame):
             frame = _memo_frame(frame)  # each well size is drawn once, not once per channel
-        info = self.card_info(f)
         self.store.write(drop_id, "facts.json", json.dumps(asdict(f), default=str))
+        for tid_ in f.task_ids:
+            self._task_drop[int(tid_)] = drop_id
         for name, ch in self.channels.items():
             prev = drop.channels.get(name) or {}
-            if prev.get("state") == "posted":
+            if prev.get("state") in LIVE_STATES:
                 continue
-            link = task_link(base, tid, name, code) if public_ok else ""  # never print a localhost link
-            png = card.render_card(info, size=ch.size, link=link, short=_short(link), frame=frame, frame_label=label)
-            text = ch.text(self.post_of(f, link))
+            link = invite_link(self.s, base, tid, name) if public_ok else ""  # never print a localhost link
+            info = self.card_info(f, name)
+            png = card.render_card(info, size=ch.size, link=link, short=_short(link.split("?", 1)[0]), frame=frame,
+                                   frame_label=label)
+            text = ch.text(self.post_of(f, link, name))
             p = self.store.write(drop_id, f"card-{name}.png", png)
             self.store.write(drop_id, f"text-{name}.txt", text)
-            drop.channels[name] = {**prev, "state": "preview" if ch.configured else "off", "link": link,
+            on = self.ticket_channels(drop.ticket_id).get(name, True)
+            state = ("preview" if on else "off_for_ticket") if ch.configured else "off"
+            drop.channels[name] = {**prev, "state": state, "link": link,
                                    "size": ch.size, "card": f"card-{name}.png", "card_path": str(p), "text": text,
                                    "configured": bool(ch.configured)}
             if name == "x":
@@ -578,7 +610,7 @@ class Dropper:
         self.event(EV_PREVIEW, {"drop_id": drop.drop_id, "task_id": drop.task_id, "task_ids": drop.task_ids,
                                 "ticket_id": drop.ticket_id, "mode": self.mode, "frame": drop.frame,
                                 "channels": {n: c["state"] for n, c in drop.channels.items()},
-                                "url": drop.channels.get("discord", {}).get("link"),
+                                "url": _log_url(drop.channels.get("discord", {}).get("link")),
                                 "dir": str(self.store.dir(drop.drop_id)), "sample": drop.sample})
         if self.mode == "live":
             self.publish(drop, f)
@@ -601,7 +633,9 @@ class Dropper:
         if self.mode != "live":
             return {n: {"state": "dry_run"} for n in (only or drop.channels)}
         f = f or self._facts_of(drop)
-        targets = [n for n, c in self.channels.items() if c.configured and (not only or n in only)]
+        enabled = self.ticket_channels(drop.ticket_id)
+        targets = [n for n, c in self.channels.items() if c.configured and (not only or n in only)
+                   and (enabled.get(n, True) or (manual and only))]
         if not is_public_url(public_base(self.s)):
             # a live post must carry a link phones can open: no RDF_WEB_PUBLIC_URL / demo-public -> no post
             for n in targets:
@@ -617,7 +651,7 @@ class Dropper:
         with self._lock:
             already_out = any(c.get("state") == "posted" for c in drop.channels.values())
             if not manual and not already_out and self.posted_last_hour() >= self.s.rdf_drop_max_per_hour:
-                for n in only or [n for n, c in self.channels.items() if c.configured]:
+                for n in targets:
                     drop.channels.setdefault(n, {})["state"] = "rate_limited"
                     out[n] = {"state": "rate_limited"}
                 self.store.save(drop)
@@ -631,20 +665,24 @@ class Dropper:
                 if not ch.configured:
                     out[name] = {"state": "off"}
                     continue
-                if c.get("state") == "posted":  # one post per task per channel, ever
-                    out[name] = {"state": "posted", "duplicate": True}
+                if name not in targets:
+                    c["state"] = "off_for_ticket"
+                    out[name] = {"state": "off_for_ticket"}
                     continue
-                link = c.get("link") or task_link(public_base(self.s), drop.task_id, name, access_code(self.s))
+                if c.get("state") in LIVE_STATES:  # one live post per task per channel (a reopen reposts)
+                    out[name] = {"state": c["state"], "duplicate": True}
+                    continue
+                link = c.get("link") or invite_link(self.s, public_base(self.s), drop.task_id, name)
                 try:
                     png = Path(c.get("card_path") or self.store.dir(drop.drop_id) / f"card-{name}.png").read_bytes()
                 except OSError:
                     out[name] = {"state": "failed", "error": "card missing"}
                     continue
-                cost = ch.cost(ch.text(self.post_of(f, link))) if name == "x" else 0.0
+                cost = ch.cost(ch.text(self.post_of(f, link, name))) if name == "x" else 0.0
                 base = {"channel": name, "task_id": drop.task_id, "task_ids": drop.task_ids, "drop_id": drop.drop_id,
-                        "url": link, "cost_estimate": cost, "sample": drop.sample}
+                        "url": _log_url(link), "cost_estimate": cost, "sample": drop.sample}
                 try:
-                    res = ch.post(self.http, self.post_of(f, link), png)
+                    res = ch.post(self.http, self.post_of(f, link, name), png)
                 except chans.ChannelError as e:
                     c.update(state="failed", error=str(e), failed_at=self.clock())
                     self.event(EV_FAILED, {**base, "error": str(e), "status": e.status})
@@ -656,7 +694,8 @@ class Dropper:
                     out[name] = {"state": "failed", "error": type(e).__name__}
                     continue
                 c.update(state="posted", posted_at=self.clock(), post_id=res.post_id, post_url=res.post_url,
-                         cost_estimate_usd=res.cost_estimate_usd, note=res.note, error=None, manual=manual)
+                         cost_estimate_usd=res.cost_estimate_usd, note=res.note, error=None, manual=manual,
+                         extra=res.extra)
                 self.event(EV_POSTED, {**base, "post_url": res.post_url, "post_id": res.post_id,
                                        "cost_estimate": res.cost_estimate_usd, "note": res.note, "manual": manual})
                 out[name] = {"state": "posted", "post_url": res.post_url}
@@ -689,6 +728,109 @@ class Dropper:
         res = self.publish(drop, only=[channel], manual=True)
         return {"ok": res.get(channel, {}).get("state") == "posted", **res.get(channel, {})}
 
+    # ---- per-ticket channel choice (/ops/drops): a job goes only to the communities the operator picks
+    def _ticket_file(self, ticket_id: int) -> Path:
+        return self.store.root / "_tickets" / f"{int(ticket_id)}.json"
+
+    def ticket_channels(self, ticket_id: int) -> dict[str, bool]:
+        """{channel: enabled} for a ticket; every channel is on unless the operator turned it off."""
+        try:
+            got = json.loads(self._ticket_file(ticket_id).read_text()).get("channels") or {}
+        except (OSError, ValueError):
+            got = {}
+        return {n: bool(got.get(n, True)) for n in self.channels}
+
+    def set_ticket_channels(self, ticket_id: int, channels: dict[str, bool]) -> dict[str, bool]:
+        cur = self.ticket_channels(ticket_id)
+        cur.update({n: bool(v) for n, v in channels.items() if n in self.channels})
+        p = self._ticket_file(ticket_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"ticket_id": int(ticket_id), "channels": cur, "updated_at": self.clock()}))
+        return cur
+
+    # ---- lifecycle: the post follows its task (claimed -> marked, finished -> deleted, reopened -> reposted)
+    def drop_for_task(self, task_id: int) -> Drop | None:
+        did = self._task_drop.get(int(task_id))
+        if did is None:
+            for d in self.store.recent(500):
+                for t in d.task_ids:
+                    self._task_drop.setdefault(int(t), d.drop_id)
+            did = self._task_drop.get(int(task_id))
+        return self.store.load(did) if did else None
+
+    @staticmethod
+    def lifecycle_of(statuses: list[str]) -> str:
+        if any(st == "open" for st in statuses):
+            return OPEN
+        if statuses and all(st in TERMINAL for st in statuses):
+            return DONE
+        return TAKEN
+
+    def on_task_change(self, task_id: int, rows: Callable[[str], list]) -> dict | None:
+        """A task row changed (bus handler). Bring the drop's posts in line with its tasks."""
+        drop = self.drop_for_task(task_id)
+        if drop is None or drop.sample:
+            return None
+        by_id = {_i(r.get("id")): r for r in rows("task")}
+        statuses = [str((by_id.get(t) or {}).get("status") or "open") for t in drop.task_ids]
+        state = self.lifecycle_of(statuses)
+        with self._lock:
+            drop = self.store.load(drop.drop_id) or drop
+            prev = drop.lifecycle or OPEN
+            if state == prev:
+                return None
+            if state == TAKEN:
+                out = self._take_down(drop, claimed=True)
+            elif state == DONE:
+                out = self._take_down(drop, claimed=False)
+            else:  # reopened (claim released / lease lapsed)
+                # only the "claimed" edits come down; a post still up as posted (X) stays and is not reposted
+                out = self._take_down(drop, claimed=False, reason="reopened", states=("claimed_edit",)) \
+                    if prev == TAKEN else {}
+                drop = self.store.load(drop.drop_id) or drop
+            drop.lifecycle = state
+            self.store.save(drop)
+        if state == OPEN and prev != OPEN and self.mode == "live":
+            out = {**out, "repost": self.publish(drop, self._facts_of(drop))}  # a NEW message (hourly cap applies)
+        return {"drop_id": drop.drop_id, "lifecycle": state, "from": prev, "channels": out}
+
+    def _take_down(self, drop: Drop, *, claimed: bool, reason: str | None = None,
+                   states: tuple[str, ...] = LIVE_STATES) -> dict:
+        """claimed: mark each live post "Claimed, no longer available" (delete where the network can't edit).
+        Otherwise delete them. Touches only our own messages, in either mode."""
+        out: dict[str, Any] = {}
+        f = self._facts_of(drop)
+        for name, c in drop.channels.items():
+            if c.get("state") not in states:
+                continue
+            ch = self.channels.get(name)
+            if ch is None:
+                continue
+            want = "claim" if claimed and c.get("state") == "posted" else "delete"
+            base = {"channel": name, "task_id": drop.task_id, "task_ids": drop.task_ids, "drop_id": drop.drop_id,
+                    "post_id": c.get("post_id"), "reason": reason or ("claimed" if claimed else "finished")}
+            try:
+                if want == "claim":
+                    done = ch.mark_claimed(self.http, c, self.post_of(f, "", name))
+                else:
+                    done = ch.remove(self.http, c)
+            except chans.ChannelError as e:
+                self.event(EV_FAILED, {**base, "action": want, "error": str(e), "status": e.status})
+                out[name] = {"state": c.get("state"), "error": str(e)}
+                continue
+            if done == "edited":
+                c.update(state="claimed_edit", updated_at=self.clock())
+                self.event(EV_UPDATED, {**base, "to": "claimed"})
+            elif done in ("deleted", "gone"):
+                c.setdefault("history", []).append({k: c.get(k) for k in ("post_id", "post_url", "posted_at")})
+                c.update(state="deleted", deleted_at=self.clock(), post_id=None, post_url=None)
+                self.event(EV_DELETED, {**base, "already_gone": done == "gone"})
+            else:  # the network has no edit/delete we use for this step (X on claim): leave it, say so
+                c.update(note=f"{want}: {done}")
+            out[name] = {"state": c.get("state"), "action": done}
+        self.store.save(drop)
+        return out
+
     # ---- attribution
     def record_claim(self, task_id: int, contributor_id: int, src: str) -> dict:
         if not SRC_RE.match(src or ""):
@@ -704,6 +846,7 @@ class Dropper:
         return {"mode": self.mode, "channels": self.configured(), "max_per_hour": self.s.rdf_drop_max_per_hour,
                 "posted_last_hour": self.posted_last_hour(), "public_url": public_base(self.s),
                 "show_access_code": bool(self.s.rdf_drop_show_access_code), "test_mode": self.s.test_mode,
+                "invites": bool(self.s.invite_secret),
                 "types": sorted(self.s.types), "dir": str(self.store.root)}
 
 
@@ -805,6 +948,24 @@ def set_dropper(d: Dropper | None) -> None:
     global _dropper
     with _dropper_lock:
         _dropper = d
+
+
+def task_changed(task_id: int, rows: Callable[[str], list]) -> None:
+    """Bus hook (handlers/job_drops.py): a task row changed; its drop's posts follow (off the bus thread)."""
+    d = _listener_dropper()
+    if d is None:
+        return
+    if d.inline:
+        d.on_task_change(task_id, rows)
+        return
+
+    def run() -> None:
+        try:
+            d.on_task_change(task_id, rows)
+        except Exception as e:  # noqa: BLE001
+            log.exception("job_drop.lifecycle_error", extra={"fields": {"task_id": task_id, "error": type(e).__name__}})
+
+    d._pool.submit(run)
 
 
 def page_listener(req: Any, rows: Callable[[str], list]) -> dict | None:

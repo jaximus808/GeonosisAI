@@ -5,6 +5,7 @@
 //   POST /api/tdm108/drops/{id}/post  {channel}     -> POST same                    (operator login)
 //   POST /api/tdm108/drops/preview    {task_id}     -> POST same                    (operator login)
 //   GET  /api/tdm108/share/{task}.png?size=&download=1 -> GET /drops/share/{task}.png (public: the Share button)
+//   GET|PUT /api/tdm108/drops/tickets/{id}/channels -> same (operator login; which channels this ticket posts to)
 //   POST /api/tdm108/claim-src        {task_id, src, identity, spacetime_token} -> POST /drops/claim-src (public;
 //                                     the orchestrator checks the browser's own SpacetimeDB identity)
 //
@@ -53,8 +54,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   return tdm108Forward('GET', r.target, { operator: r.operator, download: r.download });
 }
 
+export async function PUT(req: NextRequest, ctx: Ctx) {
+  return tdm108Write('PUT', req, ctx);
+}
+
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const r = tdm108Route('POST', (await ctx.params).path, req.nextUrl.searchParams);
+  return tdm108Write('POST', req, ctx);
+}
+
+async function tdm108Write(method: 'POST' | 'PUT', req: NextRequest, ctx: Ctx) {
+  const r = tdm108Route(method, (await ctx.params).path, req.nextUrl.searchParams);
   if (!r) return Response.json({ detail: 'not proxied' }, { status: 404 });
   if (r.operator) {
     const denied = requireOperator(req);
@@ -62,5 +71,5 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
   const raw = await req.text();
   if (raw.length > 16_384) return Response.json({ detail: 'body too large' }, { status: 413 });
-  return tdm108Forward('POST', r.target, { body: raw || '{}', operator: r.operator });
+  return tdm108Forward(method, r.target, { body: raw || '{}', operator: r.operator });
 }

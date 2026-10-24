@@ -86,7 +86,9 @@ function TestStripe({ className = '' }: { className?: string }) {
 
 // ------------------------------------------------------------------ view
 
-export function MarketplaceView() {
+export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
+  // TDM-108: a visitor who came in on a job-drop invite sees that job's task(s) only
+  const only = useMemo(() => (onlyTasks?.length ? new Set(onlyTasks) : null), [onlyTasks]);
   const { isActive } = useSpacetimeDB();
   const { contributor, ready } = useContributor();
   const me = contributor?.id;
@@ -115,8 +117,9 @@ export function MarketplaceView() {
     () =>
       tasks
         .filter((t) => isClaimable(t, now) && !(me != null && t.assigneeId === me && leaseLive(t, now)))
+        .filter((t) => only == null || only.has(String(t.id)))
         .sort((a, b) => Number(b.createdAt.microsSinceUnixEpoch - a.createdAt.microsSinceUnixEpoch)),
-    [tasks, now, me],
+    [tasks, now, me, only],
   );
   const held = useMemo(
     () => (me == null ? [] : tasks.filter((t) => t.assigneeId === me && leaseLive(t, now))),

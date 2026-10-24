@@ -19,6 +19,7 @@ CODE = "K7QM2X"
 SECRET = "s3cret-path-0123456789abcdef"
 CF = {"cf-connecting-ip": "203.0.113.9", "host": "abc.trycloudflare.com"}
 HTML = {"accept": "text/html,application/xhtml+xml"}
+TDM108_SECRET = "tdm108-test-secret-0123456789abcdef"
 
 
 def test_access_cookie_roundtrip():
@@ -91,7 +92,8 @@ def run():
                 await s.start_server()
             url = {k: f"http://127.0.0.1:{s.port}" for k, s in ups.items()}
             cfg = g.Config(web=url["web"], stdb=url["stdb"], db="rdfdemo", stream=url["stream"], api=url["api"],
-                           api_secret=SECRET, access_code=CODE, public_url="https://abc.trycloudflare.com")
+                           api_secret=SECRET, access_code=CODE, public_url="https://abc.trycloudflare.com",
+                           invite_secret=TDM108_SECRET)
             client = TestClient(TestServer(g.make_app(cfg)))
             await client.start_server()
             try:
@@ -232,4 +234,44 @@ def test_tdm111_public_pages_and_operator_login(run):
         assert sc and "HttpOnly" in sc[0] and "Secure" in sc[0]
         r = await c.get("/marketplace", headers={**CF, **HTML, "cookie": sc[0].split(";")[0]}, allow_redirects=False)
         assert r.status == 200 and (await r.json())["access"] == "ok", "the operator now has access"
+    run(t)
+
+
+def test_tdm108_task_cookie_vectors_match_web_and_orchestrator():
+    v = "t1.7-9.3.2.1800003600.w1_WyOK6ITs-MQnszOKl3byLs8vASzkb"
+    assert g.mint_task_cookie(TDM108_SECRET, [7, 9], 3, 2, now=1800000000, ttl_s=3600) == v
+    assert g.verify_task_cookie(TDM108_SECRET, v, now=1800000000) == {"ids": [7, 9], "ticket": 3, "robot": 2,
+                                                                      "exp": 1800003600}
+    assert g.verify_task_cookie(TDM108_SECRET, v.replace("t1.7-9", "t1.8-9"), now=1800000000) is None
+    assert g.verify_task_cookie("other-secret", v, now=1800000000) is None
+
+
+def test_tdm108_task_invite_opens_its_task_only(run):
+    async def t(c: TestClient):
+        cookie = {"cookie": f"{g.TASK_COOKIE}={g.mint_task_cookie(TDM108_SECRET, [7], 3, 2)}"}
+        h = {**CF, **HTML, **cookie}
+        for ok in ("/marketplace?task=7&src=discord", "/teleop/7", "/reset/7", "/practice?ticket=3",
+                   "/practice?next=%2Fmarketplace%3Ftask%3D7"):
+            r = await c.get(ok, headers=h, allow_redirects=False)
+            assert r.status == 200 and (await r.json())["access"] == "task:7", ok
+        for no in ("/marketplace?task=8", "/marketplace", "/teleop/8", "/reset/8", "/tickets/3", "/dashboard",
+                   "/practice?ticket=4", "/earnings", "/robots/2"):
+            r = await c.get(no, headers=h, allow_redirects=False)
+            assert r.status == 302 and r.headers["location"].startswith("/join?next="), no
+        for path, method in (("/api/tdm55/stream-token", "POST"), ("/api/tdm62/resets/7", "GET"),
+                             ("/api/tdm104/robots/2/scene", "GET"), ("/api/tdm108/share/7.png", "GET"),
+                             ("/api/tdm108/claim-src", "POST"), ("/api/tdm65/config", "GET")):
+            r = await c.request(method, path, headers={**CF, **cookie})
+            assert r.status == 200, path
+        for path, method in (("/api/tdm62/resets/8", "GET"), ("/api/tdm104/robots/5/scene", "GET"),
+                             ("/api/tdm64/payments/mode", "GET"), ("/api/tdm74/tickets", "POST"),
+                             ("/api/tdm108/drops", "GET"), ("/api/tdm55/stream-token", "GET")):
+            r = await c.request(method, path, headers={**CF, **cookie})
+            assert r.status == 401, path
+        assert (await c.get("/v1/ping", headers={**CF, **cookie})).status == 200, "the SpacetimeDB socket works"
+        # a forged / foreign cookie opens nothing
+        bad = {"cookie": f"{g.TASK_COOKIE}={g.mint_task_cookie('another-secret-0123456789', [7], 3, 2)}"}
+        r = await c.get("/marketplace?task=7", headers={**CF, **HTML, **bad}, allow_redirects=False)
+        assert r.status == 302
+        assert (await c.get("/v1/ping", headers={**CF, **bad})).status == 401
     run(t)

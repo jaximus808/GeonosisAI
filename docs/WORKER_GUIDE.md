@@ -1,0 +1,44 @@
+# Worker guide: read before starting a ticket
+
+Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTEXT.md` is the spec. Where this guide and CONTEXT.md disagree, this guide wins: it reflects the user's later decisions.
+
+## Overrides to CONTEXT.md
+- **GPU work runs on Modal**, not Vultr/RunPod. The Modal CLI is logged in on this laptop.
+- **The robot computer is a Jetson** running `services/robot-client/` (CONTEXT.md calls it robot-bridge) with the I2RT YAM SDK. Hardware is one YAM arm and a spare Jetson.
+- **Evals are ~10 trials**, not 20. We need only a few clean demos (π0.5 plus 3–5 demos on an easy task).
+- **Entry points** are the website, or the Claude connector (remote MCP).
+- **Our backend** (`services/orchestrator/`) owns ticket start, run settings, the Modal integration and all cross-agent orchestration. Factory Droids are only for the long-running agents.
+- **Fly.io deploy is on hold** until the user adds Fly secrets (morning of Sat Oct 24). Run everything locally.
+
+## Secrets
+- They live in `.env` (gitignored). **Never print, cat, echo or log values**, and never put them in code, commits or board notes.
+- To check which keys are set: `./scripts/check-env.sh`, which prints only set/MISSING.
+- If you add a key, append it to `.env.example` with a blank value.
+- Set: ANTHROPIC_API_KEY, FACTORY_API_KEY, STRIPE_SECRET_KEY (sk_test_), STRIPE_PUBLISHABLE_KEY, HF_TOKEN, MODAL_TOKEN_ID/SECRET, SPACETIME_HOST/DB_NAME/TOKEN.
+- Not set: JETSON_HOST/USER, FLY_API_TOKEN, WANDB_API_KEY, NGROK_AUTHTOKEN, STRIPE_WEBHOOK_SECRET.
+
+## SpacetimeDB (already set up; see `spacetime/README.md`)
+- Maincloud host is `https://maincloud.spacetimedb.com`. The database is `robo-factory-a706j`. The module is TypeScript in `spacetime/spacetimedb/src/`, built with CLI v2.13 and the npm `spacetimedb@2.13` client.
+- Publish with `cd spacetime && spacetime publish -s maincloud robo-factory-a706j --yes=remote,migrate`. **Don't pass `--delete-data`** unless your ticket says so.
+- HTTP reducer call: `POST /v1/database/<db>/call/<reducer>`. Send `Authorization: Bearer $SPACETIME_TOKEN` and `Content-Type: application/json`, with a JSON array of args in order.
+- SQL: `POST /v1/database/<db>/sql`, with the raw SQL as the body.
+- TS bindings use camelCase (`conn.db.eventLog`, `conn.reducers.appendEvent`).
+- **Security:**
+  - Anonymous callers can invoke any reducer and read any public table. Important reducers (claim_task, payments, reviews, robot commands) must check `ctx.sender` against an allow-list of service identities. Keep sensitive tables private.
+  - `SPACETIME_TOKEN` is the owner token. Per-service identities come from `POST /v1/identity`.
+
+## Repo layout (from TDM-1)
+- **TS:** pnpm workspace with `apps/web`, `apps/mcp` and `apps/mobile`, named `@rdf/*`.
+- **Python:** one uv project each (Python 3.11) under `services/{orchestrator,factory,training,robot-client}`, plus `services/payments` (Stripe).
+- **Make targets:** `make install`, `make dev`, `make env-check`.
+- **Spike code:** `spikes/<ticket>/`.
+
+## Working in the shared checkout
+- Several workers run at the same time. Stay inside your ticket's surface. Commit by explicit path, never `git add -A`.
+- If you need a dependency in a shared manifest (a root `package.json`, or a service's `pyproject.toml`), make one targeted edit and re-run install. Don't reformat other people's code.
+- **Nobody is at the arm tonight.** For [HIL] or Jetson work, build against a fake or simulated robot, and leave a ready-to-run script plus a checklist for the human.
+- Need the user's answer? Add it to `docs/morning-questions.md` and keep going with the best assumption.
+- Made a decision with lasting impact? Add a line to `docs/decisions.md`: the decision, why, and how to revert quickly.
+- **Never fake** eval numbers, success rates or planner decisions. Label any mock as mocked in the UI.
+- Never edit `event_log` rows. It is append-only.
+- No real money: Stripe stays in test mode.

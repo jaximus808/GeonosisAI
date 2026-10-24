@@ -124,3 +124,12 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - release the lock and remove the worktree
 - That means **commit your reducer first, then publish**.
 - If a publish is refused by a permission prompt, release the lock and note it in your result; the orchestrator session will publish.
+
+## Modal training app (TDM-38)
+- The app `rdf-training` is in `services/training/modal_app.py`. Deploy with `make deploy-modal`, and refresh the Modal Secret `rdf-training` from `.env` with `make modal-secrets` (it prints key names only).
+- **Functions:**
+  - `convert(ticket_id, episode_manifest)` returns `modal-vol://rdf-datasets/lerobot/<repo_id>`.
+  - `finetune(ticket_id, dataset_uri, hyperparams)` returns `{checkpoint_uri, metrics}`. It's a stub until TDM-40.
+  - The `Policy` class has `health()` and `infer(obs)`, and is a stub until TDM-41.
+- **Volumes:** `rdf-checkpoints` at `/checkpoints` (pi05_base is cached in `openpi-cache/`; outputs go to `runs/` and `metrics/`), `rdf-datasets` at `/datasets`, and `rdf-media` mounted read-only at `/media`.
+- **Calling from Python (Modal 1.6):** `modal.Function.from_name("rdf-training","finetune").spawn(...)`, then poll `modal.FunctionCall.from_id(id).get(timeout=0)`, which raises `TimeoutError` while the job is still running. `Function.lookup` doesn't exist.

@@ -31,7 +31,6 @@
 import { t, SenderError } from 'spacetimedb/server';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { requireRole } from '../auth';
-import { logEvent } from '../event_log'; // TDM-15
 import { oneOf } from '../enums';
 
 type Tdm11Ticket = NonNullable<ReturnType<RdfCtx['db']['ticket']['id']['find']>>;
@@ -60,7 +59,13 @@ function tdm11Json(value: unknown): string {
 }
 
 function tdm11Log(ctx: RdfCtx, actor: string, type: string, payload: Record<string, unknown>): void {
-  logEvent(ctx, actor, type, tdm11Json({ ...payload, sender: ctx.sender.toHexString() })); // TDM-15: sole event_log writer
+  ctx.db.eventLog.insert({
+    id: 0n,
+    ts: ctx.timestamp,
+    actor,
+    type,
+    payload_json: tdm11Json({ ...payload, sender: ctx.sender.toHexString() }),
+  });
 }
 
 function tdm11JsonText(field: string, text: string): string {

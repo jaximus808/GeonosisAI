@@ -20,7 +20,6 @@
 import { t, SenderError } from 'spacetimedb/server';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { requireRole } from '../auth';
-import { logEvent } from '../event_log'; // TDM-15
 import { DEFAULT_PRICES_CENTS, DEFAULT_RUN_SETTINGS, TRAINING_STATUSES, oneOf } from '../enums';
 
 // openpi base weights (spikes/tdm-36-finetune/rdf_s05a_config.py PI05_BASE_PARAMS).
@@ -29,7 +28,13 @@ const TDM12_PLAN_DATA_TYPES = ['clean_teleop', 'recovery_takeover'] as const;
 const TDM12_EPS = 1e-9;
 
 function tdm12Log(ctx: RdfCtx, actor: string, type: string, payload: unknown): void {
-  logEvent(ctx, actor, type, JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? Number(v) : v))); // TDM-15: sole event_log writer
+  ctx.db.eventLog.insert({
+    id: 0n,
+    ts: ctx.timestamp,
+    actor,
+    type,
+    payload_json: JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? Number(v) : v)),
+  });
 }
 
 function tdm12Ticket(ctx: RdfCtx, ticketId: bigint) {

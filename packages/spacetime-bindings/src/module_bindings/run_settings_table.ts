@@ -20,4 +20,5 @@ export default __t.row({
   maxIterations: __t.u32().name("max_iterations"),
   hyperparamsJson: __t.string().name("hyperparams_json"),
   updatedAt: __t.timestamp().name("updated_at"),
+  dataTypeOverride: __t.string().name("data_type_override"),
 });

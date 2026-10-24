@@ -108,5 +108,7 @@ export const revoke_service_identity = spacetimedb.reducer(
 export * from './reducers/tickets'; // TDM-9
 export * from './reducers/training_eval'; // TDM-12
 export * from './reducers/agent_robot'; // TDM-13
+export * from './reducers/dataset_offer'; // TDM-14
 export * from './reducers/marketplace'; // TDM-10
 export * from './reducers/episodes_payments'; // TDM-11
+export * from './reducers/contributors'; // TDM-60

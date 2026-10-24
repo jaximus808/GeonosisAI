@@ -105,3 +105,18 @@ The rule: a seller is paid only for `target_episodes − (episodes already uploa
 | `cancel_dataset_offer(offer_id, reason)` | orchestrator, mcp, web | Open offer → `cancelled`, which releases its reserved slots. |
 
 Local test (44 checks, including target 5 with 2 accepted → `needed_count` 3, and the 4th ingest rejected): `spikes/tdm-14-dataset-offer/local_test.sh`.
+
+## Contributor identity and presence (TDM-60, `src/reducers/contributors.ts`)
+
+A contributor **is** a SpacetimeDB connection identity: the browser connects anonymously, the server issues a token, and `apps/web` keeps it in localStorage (`lib/spacetime/provider.tsx`), so a refresh reconnects as the same identity and finds the same row. Never the owner token: service identities are refused. No passwords.
+
+Tables added (TDM-60): `contributor_presence` (public; contributor_id PK, last_seen, page), `contributor_contact` (**private**; contributor_id PK, email, updated_at — PII for Stripe onboarding, owner SQL only), `contributor_presence_sweep` (private schedule row, seeded by the first heartbeat).
+
+| Reducer (HTTP args in order) | Who may call | Notes |
+|---|---|---|
+| `register_contributor(name, email, devices, kind, source_ticket_id)` | any **non-service** identity, as itself | Upsert by `ctx.sender`: one row per identity. `name` `""` → `guest-<6 hex of identity>`; trimmed, ≤ 64. `email` `""` keeps the stored one; else validated, lowercased, written only to `contributor_contact`. `devices` ≤ 8 of `[a-z0-9_]{1,32}`, deduped (`phone`, `android_webxr`, `laptop`, `leader_arm`). `kind` ∈ CONTRIBUTOR_KINDS, fixed at creation. `source_ticket_id` (0 = none) is the ticket whose QR brought them (event only). Sets `online`. Logs `contributor.registered` / `contributor.updated` (`has_email`, never the email). |
+| `contributor_heartbeat(page)` | the contributor itself | Every 30 s from marketplace pages. Moves `contributor_presence.last_seen`; logs `contributor.online` **only on the offline→online transition**. |
+| `contributor_offline()` | the contributor itself | Tab closed (pagehide). Logs `contributor.offline` {reason: left} on transition. |
+| `sweep_contributor_presence` (scheduled, 30 s) | the scheduler (harmless if called: it only applies the time rule) | Online contributors with no heartbeat for 75 s go offline; logs `contributor.offline` {reason: stale}, actor `spacetime`. |
+
+`stripe_account_id` / `payouts_enabled` are set by TDM-63's `set_contributor_payout_account`. Tests (45 checks, incl. the sweep; local server only): `spacetime/tests/test_tdm60_contributor_reducers.py`.

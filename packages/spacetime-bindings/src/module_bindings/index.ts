@@ -40,13 +40,17 @@ import AgentResumeReducer from "./agent_resume_reducer";
 import AgentStepReducer from "./agent_step_reducer";
 import AgentWaitForReducer from "./agent_wait_for_reducer";
 import AppendEventReducer from "./append_event_reducer";
+import ApproveSpendReducer from "./approve_spend_reducer";
 import BootstrapOwnerReducer from "./bootstrap_owner_reducer";
 import CancelDatasetOfferReducer from "./cancel_dataset_offer_reducer";
 import CancelTaskReducer from "./cancel_task_reducer";
 import ClaimTaskReducer from "./claim_task_reducer";
 import CompleteRobotCommandReducer from "./complete_robot_command_reducer";
 import CompleteTaskReducer from "./complete_task_reducer";
+import ContributorHeartbeatReducer from "./contributor_heartbeat_reducer";
+import ContributorOfflineReducer from "./contributor_offline_reducer";
 import CreateDatasetOfferReducer from "./create_dataset_offer_reducer";
+import CreateEpisodeReducer from "./create_episode_reducer";
 import CreateTaskReducer from "./create_task_reducer";
 import CreateTicketReducer from "./create_ticket_reducer";
 import ExpireTaskLeasesReducer from "./expire_task_leases_reducer";
@@ -56,19 +60,29 @@ import FinalizeOfferReducer from "./finalize_offer_reducer";
 import HeartbeatClaimReducer from "./heartbeat_claim_reducer";
 import IngestPurchasedEpisodeReducer from "./ingest_purchased_episode_reducer";
 import IssueRobotCommandReducer from "./issue_robot_command_reducer";
+import MarkPaymentAwaitingOnboardingReducer from "./mark_payment_awaiting_onboarding_reducer";
+import MarkPaymentFailedReducer from "./mark_payment_failed_reducer";
+import MarkPaymentPaidReducer from "./mark_payment_paid_reducer";
+import MarkPaymentReversedReducer from "./mark_payment_reversed_reducer";
 import QueueTrainingRunReducer from "./queue_training_run_reducer";
 import RecordDataPlanReducer from "./record_data_plan_reducer";
 import RecordEvalTrialReducer from "./record_eval_trial_reducer";
 import RecordFailureClusterReducer from "./record_failure_cluster_reducer";
 import RecordQaResultReducer from "./record_qa_result_reducer";
+import RegisterContributorReducer from "./register_contributor_reducer";
 import RegisterRobotReducer from "./register_robot_reducer";
 import RegisterServiceIdentityReducer from "./register_service_identity_reducer";
 import ReleaseTaskReducer from "./release_task_reducer";
+import ReserveDatasetPaymentReducer from "./reserve_dataset_payment_reducer";
+import ReservePaymentReducer from "./reserve_payment_reducer";
+import ReserveTaskPaymentReducer from "./reserve_task_payment_reducer";
 import RevokeServiceIdentityReducer from "./revoke_service_identity_reducer";
 import RobotHeartbeatReducer from "./robot_heartbeat_reducer";
+import SetContributorPayoutAccountReducer from "./set_contributor_payout_account_reducer";
 import SetTicketStatusReducer from "./set_ticket_status_reducer";
 import SetTrainingStatusReducer from "./set_training_status_reducer";
 import StartEvalRunReducer from "./start_eval_run_reducer";
+import SubmitReviewReducer from "./submit_review_reducer";
 import UpdateRunSettingsReducer from "./update_run_settings_reducer";
 import UpsertAgentSessionReducer from "./upsert_agent_session_reducer";
 
@@ -77,6 +91,7 @@ import UpsertAgentSessionReducer from "./upsert_agent_session_reducer";
 // Import all table schema definitions
 import AgentSessionRow from "./agent_session_table";
 import ContributorRow from "./contributor_table";
+import ContributorPresenceRow from "./contributor_presence_table";
 import DataPlanRow from "./data_plan_table";
 import DatasetRow from "./dataset_table";
 import DatasetOfferRow from "./dataset_offer_table";
@@ -127,6 +142,17 @@ const tablesSchema = __schema({
       { name: 'contributor_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ContributorRow),
+  contributorPresence: __table({
+    name: 'contributor_presence',
+    indexes: [
+      { accessor: 'contributor_id', name: 'contributor_presence_contributor_id_idx_btree', algorithm: 'btree', columns: [
+        'contributorId',
+      ] },
+    ],
+    constraints: [
+      { name: 'contributor_presence_contributor_id_key', constraint: 'unique', columns: ['contributorId'] },
+    ],
+  }, ContributorPresenceRow),
   dataPlan: __table({
     name: 'data_plan',
     indexes: [
@@ -427,13 +453,17 @@ const reducersSchema = __reducers(
   __reducerSchema("agent_step", AgentStepReducer),
   __reducerSchema("agent_wait_for", AgentWaitForReducer),
   __reducerSchema("append_event", AppendEventReducer),
+  __reducerSchema("approve_spend", ApproveSpendReducer),
   __reducerSchema("bootstrap_owner", BootstrapOwnerReducer),
   __reducerSchema("cancel_dataset_offer", CancelDatasetOfferReducer),
   __reducerSchema("cancel_task", CancelTaskReducer),
   __reducerSchema("claim_task", ClaimTaskReducer),
   __reducerSchema("complete_robot_command", CompleteRobotCommandReducer),
   __reducerSchema("complete_task", CompleteTaskReducer),
+  __reducerSchema("contributor_heartbeat", ContributorHeartbeatReducer),
+  __reducerSchema("contributor_offline", ContributorOfflineReducer),
   __reducerSchema("create_dataset_offer", CreateDatasetOfferReducer),
+  __reducerSchema("create_episode", CreateEpisodeReducer),
   __reducerSchema("create_task", CreateTaskReducer),
   __reducerSchema("create_ticket", CreateTicketReducer),
   __reducerSchema("expire_task_leases", ExpireTaskLeasesReducer),
@@ -443,19 +473,29 @@ const reducersSchema = __reducers(
   __reducerSchema("heartbeat_claim", HeartbeatClaimReducer),
   __reducerSchema("ingest_purchased_episode", IngestPurchasedEpisodeReducer),
   __reducerSchema("issue_robot_command", IssueRobotCommandReducer),
+  __reducerSchema("mark_payment_awaiting_onboarding", MarkPaymentAwaitingOnboardingReducer),
+  __reducerSchema("mark_payment_failed", MarkPaymentFailedReducer),
+  __reducerSchema("mark_payment_paid", MarkPaymentPaidReducer),
+  __reducerSchema("mark_payment_reversed", MarkPaymentReversedReducer),
   __reducerSchema("queue_training_run", QueueTrainingRunReducer),
   __reducerSchema("record_data_plan", RecordDataPlanReducer),
   __reducerSchema("record_eval_trial", RecordEvalTrialReducer),
   __reducerSchema("record_failure_cluster", RecordFailureClusterReducer),
   __reducerSchema("record_qa_result", RecordQaResultReducer),
+  __reducerSchema("register_contributor", RegisterContributorReducer),
   __reducerSchema("register_robot", RegisterRobotReducer),
   __reducerSchema("register_service_identity", RegisterServiceIdentityReducer),
   __reducerSchema("release_task", ReleaseTaskReducer),
+  __reducerSchema("reserve_dataset_payment", ReserveDatasetPaymentReducer),
+  __reducerSchema("reserve_payment", ReservePaymentReducer),
+  __reducerSchema("reserve_task_payment", ReserveTaskPaymentReducer),
   __reducerSchema("revoke_service_identity", RevokeServiceIdentityReducer),
   __reducerSchema("robot_heartbeat", RobotHeartbeatReducer),
+  __reducerSchema("set_contributor_payout_account", SetContributorPayoutAccountReducer),
   __reducerSchema("set_ticket_status", SetTicketStatusReducer),
   __reducerSchema("set_training_status", SetTrainingStatusReducer),
   __reducerSchema("start_eval_run", StartEvalRunReducer),
+  __reducerSchema("submit_review", SubmitReviewReducer),
   __reducerSchema("update_run_settings", UpdateRunSettingsReducer),
   __reducerSchema("upsert_agent_session", UpsertAgentSessionReducer),
 );

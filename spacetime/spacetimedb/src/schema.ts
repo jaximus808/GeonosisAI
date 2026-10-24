@@ -167,6 +167,39 @@ const contributor = table(
   }
 );
 
+// TDM-60: presence heartbeat (every 30 s from marketplace pages). Kept out of
+// `contributor` so heartbeats don't rewrite that row; contributor.online only
+// flips on transitions (heartbeat → online, sweep/leave → offline).
+const contributorPresence = table(
+  { name: 'contributor_presence', public: true },
+  {
+    contributor_id: t.u64().primaryKey(),
+    last_seen: t.timestamp(),
+    page: t.string(), // e.g. "join", "marketplace", "teleop"
+  }
+);
+
+// TDM-60: private contact details (email for Stripe onboarding). PII stays out
+// of public tables; readable by the owner (SQL) and by reducers only.
+const contributorContact = table(
+  { name: 'contributor_contact' },
+  {
+    contributor_id: t.u64().primaryKey(),
+    email: t.string(),
+    updated_at: t.timestamp(),
+  }
+);
+
+// TDM-60: schedule row for sweep_contributor_presence (interval 30 s), seeded
+// lazily by the first heartbeat. Exported so the reducer can bind onSchedule.
+export const contributorPresenceSweep = table(
+  { name: 'contributor_presence_sweep' },
+  {
+    scheduled_id: t.u64().primaryKey().autoInc(),
+    scheduled_at: t.scheduleAt(),
+  }
+);
+
 // ---------------------------------------------------------------- episodes & review
 
 const episode = table(
@@ -377,6 +410,9 @@ const spacetimedb = schema({
   dataPlan,
   task,
   contributor,
+  contributorPresence, // TDM-60
+  contributorContact, // TDM-60
+  contributorPresenceSweep, // TDM-60
   episode,
   review,
   qaResult,

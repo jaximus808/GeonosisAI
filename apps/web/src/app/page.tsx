@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { Section } from '@/components/Section';
 import { TicketList } from '@/components/TicketList';
 import { EventLogList } from '@/components/EventLogList';
+import { ContributorsPanel } from '@/components/ContributorsPanel';
+import { JoinQr } from '@/components/JoinQr';
 
 export default function Home() {
   return (
@@ -9,6 +11,12 @@ export default function Home() {
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">Tickets</h1>
       <Section title="Tickets (live)" aside={<Link href="/tickets/new" className="text-xs text-blue-600 hover:underline">New ticket</Link>}>
         <TicketList />
+      </Section>
+      <Section title="Contributors (live)">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <JoinQr />
+          <div className="min-w-0 flex-1"><ContributorsPanel limit={10} /></div>
+        </div>
       </Section>
       <Section title="Latest events (live)" aside={<Link href="/events" className="text-xs text-blue-600 hover:underline">All events</Link>}>
         <EventLogList limit={10} />

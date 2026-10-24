@@ -23,7 +23,6 @@
 import { t, SenderError } from 'spacetimedb/server';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { requireRole, serviceRole } from '../auth';
-import { logEvent } from '../event_log'; // TDM-15
 import { DEFAULT_RUN_SETTINGS } from '../enums';
 
 // Episode kinds that go into the training dataset (baseline/eval rollouts do not).
@@ -135,7 +134,13 @@ function tdm14Commitment(ctx: RdfCtx, ticketId: bigint, excludeOfferId: bigint):
 }
 
 function tdm14Log(ctx: RdfCtx, actor: string, type: string, payload: Record<string, unknown>) {
-  logEvent(ctx, actor, type, JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))); // TDM-15: sole event_log writer
+  ctx.db.eventLog.insert({
+    id: 0n,
+    ts: ctx.timestamp,
+    actor,
+    type,
+    payload_json: JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)),
+  });
 }
 
 function tdm14Offer(ctx: RdfCtx, offerId: bigint) {

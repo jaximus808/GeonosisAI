@@ -40,6 +40,26 @@ export const Contributor = __t.object("Contributor", {
 });
 export type Contributor = __Infer<typeof Contributor>;
 
+export const ContributorContact = __t.object("ContributorContact", {
+  contributorId: __t.u64(),
+  email: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type ContributorContact = __Infer<typeof ContributorContact>;
+
+export const ContributorPresence = __t.object("ContributorPresence", {
+  contributorId: __t.u64(),
+  lastSeen: __t.timestamp(),
+  page: __t.string(),
+});
+export type ContributorPresence = __Infer<typeof ContributorPresence>;
+
+export const ContributorPresenceSweep = __t.object("ContributorPresenceSweep", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type ContributorPresenceSweep = __Infer<typeof ContributorPresenceSweep>;
+
 export const DataPlan = __t.object("DataPlan", {
   id: __t.u64(),
   ticketId: __t.u64(),
@@ -234,6 +254,7 @@ export const RunSettings = __t.object("RunSettings", {
   maxIterations: __t.u32(),
   hyperparamsJson: __t.string(),
   updatedAt: __t.timestamp(),
+  dataTypeOverride: __t.string(),
 });
 export type RunSettings = __Infer<typeof RunSettings>;
 

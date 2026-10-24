@@ -3,6 +3,7 @@
 import { fmtCents, fmtTs } from '@/lib/format';
 import { FakeBadge, StatusPill } from './Badges';
 import { CamVideo } from './media';
+import { LlmBadge } from '@/components/llm/LlmBadge';
 import {
   DATA_TYPE_LABEL,
   byNewest,
@@ -137,7 +138,8 @@ export function DecisionCard({ plans, clusters, episodes, events }: {
             </blockquote>
             <p className="mt-2 text-xs text-zinc-500">
               Planner reasoning, verbatim from data_plan #{plan.id.toString()}, logged {fmtTs(plan.createdAt)}
-              {planEvent && <> (event #{planEvent.row.id.toString()}, actor {planEvent.row.actor})</>}.
+              {planEvent && <> (event #{planEvent.row.id.toString()}, actor {planEvent.row.actor})</>}.{' '}
+              <LlmBadge prefix="decided by" rec={evidence?.model && typeof evidence.model === 'object' ? (evidence.model as Json) : null} />
             </p>
             {alt && (
               <p className="mt-3 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">

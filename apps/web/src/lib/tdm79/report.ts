@@ -35,7 +35,8 @@ export interface PlanView {
   approved_by: string | null;
   approvals: { event_id: number; approved_by: string | null; approved_cents: number | null; via: string | null }[];
   planner_event: Ref;
-  model: { requested: string | null; served: string | null; effort: string | null } | null;
+  /** backend: api | droid | claude_code (absent on plans recorded before the switchable backend). */
+  model: { backend?: string | null; model?: string | null; requested: string | null; served: string | null; effort: string | null } | null;
   guardrail: { rule?: string | null; required_type?: string | null; why?: string } | null;
   fake: boolean;
 }
@@ -59,6 +60,7 @@ export interface IterationBlock {
   diagnosis: {
     event: Ref;
     model: string | null;
+    backend?: string | null;
     reasoning: string | null;
     source_eval_run_id: number | null;
     clusters: { failure_cluster_id: number; label: string; count: number; description: string | null; fake: boolean }[];

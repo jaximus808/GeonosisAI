@@ -18,6 +18,7 @@ import {
   type IterationBlock,
   type Report,
 } from '@/lib/tdm79/report';
+import { llmBadge } from '@/lib/llmbackend/types';
 import { ReportToolbar } from './ReportToolbar';
 import './report.css';
 
@@ -446,16 +447,16 @@ function Iteration({ it }: { it: IterationBlock }) {
           <blockquote>{p.reasoning ? p.reasoning : <span className="r-missing-inline">The planner left no reasoning.</span>}</blockquote>
           <figcaption>
             The planner&apos;s reasoning, verbatim
-            {p.model?.served ? `, ${p.model.served}` : ''}
             {p.planner_event ? `, event #${p.planner_event.event_id}` : ''}
-            {p.fake ? '. A scripted stand-in, not a planner decision.' : '.'}
+            {p.fake ? '. A scripted stand-in, not a planner decision.' : '.'}{' '}
+            <LlmLine rec={p.model} />
           </figcaption>
         </figure>
       )}
 
       {it.diagnosis.reasoning && (
         <details className="r-details">
-          <summary>How the failures were clustered</summary>
+          <summary>How the failures were clustered <LlmLine rec={{ backend: it.diagnosis.backend, model: it.diagnosis.model }} /></summary>
           <p className="r-small r-pre">{it.diagnosis.reasoning}</p>
         </details>
       )}
@@ -492,5 +493,15 @@ function Iteration({ it }: { it: IterationBlock }) {
         <span className="r-muted">Iteration cost {usd(it.cost_cents.total)}.</span>
       </p>
     </div>
+  );
+}
+
+/** Which LLM backend and model produced a decision (never assumed to be the API when unrecorded). */
+function LlmLine({ rec }: { rec: Parameters<typeof llmBadge>[0] }) {
+  const b = llmBadge(rec);
+  return (
+    <span className={`r-llm r-llm-${b.tone}`} data-llm-backend={b.backend ?? 'unknown'}>
+      Produced by {b.text}
+    </span>
   );
 }

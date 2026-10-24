@@ -690,3 +690,21 @@
     text-decoration: none;
   }
 }
+
+/* Which LLM backend produced a decision (Claude API / Claude Code (local) / Factory droid). */
+.tdm79-report .r-llm {
+  display: inline-block;
+  border: 1px solid var(--r-rule);
+  border-radius: 3px;
+  padding: 0 0.35em;
+  font-size: 0.8em;
+  font-style: normal;
+  color: var(--r-muted);
+  white-space: nowrap;
+}
+.tdm79-report .r-llm-local,
+.tdm79-report .r-llm-droid {
+  border-color: var(--r-threshold);
+  color: var(--r-threshold);
+  font-weight: 600;
+}

@@ -12,6 +12,7 @@
 // It re-fetches when refreshKey changes and every 15 s. Self-contained on purpose (own media
 // signing via GET /media/sign) so it does not depend on other tickets' helpers.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { LlmBadge } from '@/components/llm/LlmBadge';
 
 const ORCH = (process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:8000').replace(/\/$/, '');
 const POLL_MS = 15_000;
@@ -46,7 +47,7 @@ type Plan = {
   guardrail: { rule: string | null; required_type: string | null; why: string } | null;
   guardrail_forced: string[] | null; guardrail_agreed_first_try: boolean | null;
   budget_math: { remaining_cents: number; needed: number } | null;
-  model: { requested: string | null; served: string | null; effort: string | null; attempts: unknown[] | null } | null;
+  model: { backend?: string | null; model?: string | null; requested: string | null; served: string | null; effort: string | null; attempts: unknown[] | null } | null;
   data_type_override: string | null;
 };
 type Alternative = {
@@ -56,7 +57,7 @@ type Alternative = {
 type Link = { check: string; ok: boolean | null; detail: string };
 type Decision = {
   iteration: number; source_eval: EvalView | null;
-  diagnosis: { event: Ref; model: string | null; reasoning: string | null; recoverable_failures: number | null; unrecoverable_failures: number | null } | null;
+  diagnosis: { event: Ref; model: string | null; backend?: string | null; reasoning: string | null; recoverable_failures: number | null; unrecoverable_failures: number | null } | null;
   clusters: Cluster[]; plan: Plan | null; alternative: Alternative | null;
   approvals: (Ref & { approved_by: string | null; approved_cents: number | null })[];
   tasks: { task_id: number; type: string; status: string; price_cents: number; assignee_id: number; event: Ref | null; episode_ids: number[] }[];
@@ -209,7 +210,7 @@ function Chain({ d }: { d: Decision }) {
           ) : <Missing>The eval run these failures came from is not linked.</Missing>}
         </Step>
 
-        <Step n={++step} title="Failure clusters" aside={d.diagnosis && <Cite ev={d.diagnosis.event} label={d.diagnosis.model ?? 'diagnosis'} />}>
+        <Step n={++step} title="Failure clusters" aside={d.diagnosis && <><LlmBadge rec={{ backend: d.diagnosis.backend, model: d.diagnosis.model }} className="mr-2" /><Cite ev={d.diagnosis.event} label={d.diagnosis.model ?? 'diagnosis'} /></>}>
           {d.clusters.length === 0 ? <Missing>No failure clusters recorded.</Missing> : (
             <ul className="space-y-4">
               {d.clusters.map((c) => (
@@ -252,6 +253,7 @@ function Chain({ d }: { d: Decision }) {
               <div className="mt-4">
                 <Quote text={p.reasoning} source={<>
                   Planner reasoning, verbatim from data_plan #{p.data_plan_id}
+                  {' · '}<LlmBadge prefix="decided by" rec={p.model} />
                   {p.model?.served && <> · model {p.model.served}{p.model.effort ? ` (${p.model.effort} effort)` : ''}, {p.model.attempts?.length ?? 0} attempt{p.model.attempts?.length === 1 ? '' : 's'}</>}
                   {p.event_reasoning_verbatim === true && <> · matches event #{p.event?.event_id} byte for byte</>}
                   {p.event_reasoning_verbatim === false && <span className="text-red-600"> · DIFFERS from event #{p.event?.event_id}</span>}

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ConnectionStatus } from './ConnectionStatus';
+import { LlmBackendChip } from './llm/LlmBackendChip';
 
 const NAV = [
   { href: '/', label: 'Tickets' },
@@ -24,7 +25,8 @@ export function Header() {
             </Link>
           ))}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <LlmBackendChip />
           <ConnectionStatus />
         </div>
       </div>

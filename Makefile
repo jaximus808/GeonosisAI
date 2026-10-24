@@ -27,6 +27,8 @@ help:
 	@echo "make seed       seed SpacetimeDB with demo data (stub)"
 	@echo "make deploy     deploy the backend (stub)"
 	@echo "make env-check  report which .env keys are set (never prints values)"
+	@echo "make test-loop  full-loop integration tests: local SpacetimeDB + fake robot, no arm (TDM-28)"
+	@echo "make fake-stack boot local SpacetimeDB + fake robot and keep them running (TDM-28)"
 
 install:
 	pnpm install
@@ -85,3 +87,16 @@ deploy:
 
 env-check:
 	@./scripts/check-env.sh
+
+# TDM-28: integration harness. Throwaway SpacetimeDB on 127.0.0.1:$(TDM28_PORT) (data under
+# $$TMPDIR/tdm-28), the fake robot (rdf-robot-client --fake) and a stub Modal trainer. No arm, no
+# maincloud. DRIVER=orchestrator runs the real orchestrator flywheel instead of the scripted one.
+TDM28_PORT ?= 3028
+DRIVER ?= scripted
+.PHONY: test-loop fake-stack
+test-loop:
+	cd services/orchestrator && TDM28_PORT=$(TDM28_PORT) RDF_LOOP_DRIVER=$(DRIVER) \
+	  uv run --quiet pytest ../../tests/integration -v -p no:cacheprovider
+
+fake-stack:
+	cd services/orchestrator && TDM28_PORT=$(TDM28_PORT) uv run --quiet python ../../tests/integration/harness.py up $(ARGS)

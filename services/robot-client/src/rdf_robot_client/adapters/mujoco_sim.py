@@ -286,7 +286,8 @@ class MujocoSimArm(ArmAdapter):
                     self._lag_resets += 1
                 self._track_episode()
                 self._publish()
-            self._stop_evt.wait(max(0.0, dt - (time.monotonic() - now)) if self.realtime else 0.0)
+            # wake at ~250 Hz and step the physics due (nstep, 500 Hz sim time): half the wakeups on a busy laptop
+            self._stop_evt.wait(max(0.0, 2 * dt - (time.monotonic() - now)) if self.realtime else 0.0)
 
     def step_for(self, seconds: float) -> None:
         """Advance physics without the thread (tests / offline calibration; arm not connected)."""

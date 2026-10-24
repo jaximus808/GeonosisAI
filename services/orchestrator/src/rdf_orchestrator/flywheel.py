@@ -536,13 +536,11 @@ _TDM70_NOT_SERVABLE = ("fake://", "sim://", "stub://")
 
 
 def _tdm70_http_activate(url: str, body: dict, timeout: float) -> None:
-    """POST /policy/activate on the TDM-41 policy server (bearer POLICY_SERVER_TOKEN when set)."""
-    import httpx
+    """POST /policy/activate on the TDM-41 policy server: the shared ``policy_activate.http_activate``
+    (bearer POLICY_SERVER_TOKEN from env or .env), the same one ``evaluate.py`` uses."""
+    from .policy_activate import http_activate
 
-    tok = os.environ.get("POLICY_SERVER_TOKEN", "").strip()
-    r = httpx.post(url, json=body, timeout=timeout, headers={"Authorization": f"Bearer {tok}"} if tok else {})
-    if r.status_code >= 300:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+    http_activate(url, body, timeout)
 
 
 async def _tdm70_save_report(bus, ticket_id: int) -> dict:

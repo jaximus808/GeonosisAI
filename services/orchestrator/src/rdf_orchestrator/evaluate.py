@@ -41,6 +41,7 @@ exactly those outcomes with ``record_eval_trial``. It never invents or edits a t
 
 Env (all optional):
   POLICY_SERVER_URL              policy server base URL for /policy/activate ("" = skip)
+  POLICY_SERVER_TOKEN            bearer token for /policy/activate (env, else repo .env; never logged)
   EVAL_POLICY_ACTIVATE_TIMEOUT_S 300
   EVAL_TRIAL_TIMEOUT_S           120   per-trial rollout timeout, sent to the robot as timeout_s
   EVAL_RESET_WAIT_S              900   allowance per reset when computing the eval's overall timeout
@@ -66,6 +67,7 @@ from .dispatcher import JOB_TYPES, OPEN_JOB, Mirror, Writer, task_ref
 from .flywheel import PI05_BASE_CHECKPOINT, StepContext, TicketView
 from . import flywheel as _flywheel
 from .log import get_logger
+from .policy_activate import http_activate
 from .stats import EvalRunFinalizer
 
 log = get_logger("evaluate")
@@ -138,12 +140,7 @@ class EvalConfig:
 PolicyActivator = Callable[[str, dict, float], None]  # (url, body, timeout) -> raises on failure
 
 
-def _http_activate(url: str, body: dict, timeout: float) -> None:
-    import httpx
-
-    r = httpx.post(url, json=body, timeout=timeout)
-    if r.status_code >= 300:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+_http_activate = http_activate  # bearer POLICY_SERVER_TOKEN (TDM-41 auth); shared with flywheel.ShipStep
 
 
 class EvalOrchestrator:

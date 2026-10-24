@@ -151,10 +151,14 @@ class FinalizerTest(unittest.TestCase):
         done = dict(self.run, status="finalized")
         for i in range(10):
             self.f.on_eval_trial(self._trial(i, True), done)
-        withci = dict(self.run, id=43, ci_low=0.5)
-        for i in range(10):
-            self.f.on_eval_trial(dict(self._trial(i, True), eval_run_id=43), withci)
         self.assertEqual(self.calls, [])
+
+    def test_ci_low_placeholder_does_not_block_finalize(self):
+        # Raw eval_run rows carry ci_low=0.0 before finalize; that must not count as final.
+        raw = dict(self.run, id=43, status="running", ci_low=0.0)
+        for i in range(10):
+            self.f.on_eval_trial(dict(self._trial(i, True), eval_run_id=43), raw)
+        self.assertEqual(len(self.calls), 1)
 
     def test_independent_runs(self):
         other = {"id": 7, "trials": 2}

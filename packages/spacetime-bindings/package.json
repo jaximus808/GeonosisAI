@@ -1,0 +1,22 @@
+{
+  "name": "@rdf/spacetime-bindings",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generated SpacetimeDB TS bindings (spacetime generate) plus createSpacetimeClient() with reconnect",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./module_bindings": "./src/module_bindings/index.ts"
+  },
+  "scripts": {
+    "gen": "node ../../scripts/gen-spacetime-bindings.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

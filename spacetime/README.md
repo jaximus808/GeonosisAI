@@ -33,17 +33,25 @@ If a schema change would break clients or delete data, the publish stops instead
 Inspect the database with `spacetime describe -s maincloud robo-factory-a706j`, `spacetime logs -s maincloud robo-factory-a706j`
 and `spacetime sql -s maincloud robo-factory-a706j "SELECT * FROM event_log"`.
 
-## Generate client bindings (TypeScript)
+## Generate client bindings (TypeScript + Python, TDM-16)
 
 ```sh
-spacetime generate --lang typescript --out-dir ../apps/web/src/module_bindings --module-path ./spacetimedb
+pnpm gen:bindings            # from the repo root; --ts-only / --py-only
 ```
 
-Re-run this after every schema change. In the client, columns and reducer args are camelCase
+One command, run after every publish. It writes:
+
+- **TS** (`spacetime generate` from this module's source) to `packages/spacetime-bindings/src/module_bindings`,
+  exported by `@rdf/spacetime-bindings` together with `createSpacetimeClient()` (automatic reconnect,
+  subscriptions replayed by the SDK). It also mirrors the output to `apps/web/src/module_bindings` while the web app keeps its own copy.
+- **Python** (from the *published* `/schema`) to `services/common/src/rdf_common/spacetime_tables.py`:
+  a dataclass per table plus typed reducer wrappers, used with `rdf_common.spacetime_client`.
+
+It warns when the module source and the published database differ, so publish first. In the client, columns and reducer args are camelCase
 (`payload_json` becomes `payloadJson`), and the `spacetimedb` npm package should match the CLI version (2.13.x):
 
 ```ts
-import { DbConnection } from './module_bindings';
+import { DbConnection } from '@rdf/spacetime-bindings';   // or createSpacetimeClient({ subscriptions: [...] })
 DbConnection.builder()
   .withUri('https://maincloud.spacetimedb.com')
   .withDatabaseName('robo-factory-a706j')
@@ -57,6 +65,17 @@ DbConnection.builder()
 ```
 
 ## HTTP API (Python services)
+
+Python services should use the shared helper rather than raw HTTP (one keep-alive connection, typed args, live subscriptions):
+
+```python
+from rdf_common.spacetime_client import SpacetimeClient, subscribe
+stdb = SpacetimeClient()                                   # SPACETIME_HOST / DB_NAME / TOKEN from env
+stdb.call_reducer("append_event", actor="planner", type="plan.decision", payload_json="{}")
+sub = subscribe(["SELECT * FROM ticket"], on_insert=..., on_update=..., on_delete=...)   # thread; reconnects
+```
+
+`services/common/scripts/spacetime_roundtrip.py` shows the round trip (call, then the insert event in ~130 ms). The raw API underneath:
 
 Base is `$SPACETIME_HOST/v1/database/$SPACETIME_DB_NAME`. Auth header: **`Authorization: Bearer $SPACETIME_TOKEN`**.
 

@@ -178,9 +178,8 @@ class EvalRunFinalizer:
 
     def _already_final(self, eval_run: Any) -> bool:
         status = _field(eval_run, "status", None)
-        if isinstance(status, str) and status.lower() in self.FINAL_STATUSES:
-            return True
-        return _field(eval_run, "ci_low", None) is not None
+        # Status only: eval_run.ci_low is always present (0.0 until finalized).
+        return isinstance(status, str) and status.lower() in self.FINAL_STATUSES
 
     def on_eval_trial(self, trial: Any, eval_run: Any) -> bool:
         """Record one trial. Returns True only on the call that fired finalize."""

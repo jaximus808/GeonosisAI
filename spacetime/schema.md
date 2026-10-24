@@ -31,8 +31,8 @@ The source is `spacetimedb/src/schema.ts`. The allowed enum values and defaults 
 | `training_run` | public | A Modal fine-tune: iteration, episode_ids, status (queued/running/done/failed/cancelled), modal_call_id, base_checkpoint_uri, checkpoint_uri, hyperparams_json, metrics_json, gpu_cost_cents, error, start/finish times. |
 | `eval_run` | public | An N-trial eval of a checkpoint: kind (baseline/candidate/ab_live), status, trials, completed, successes, ci_low/ci_high (Wilson 95%), training_run_id, robot_id. |
 | `eval_trial` | public | One trial: eval_run_id, trial_index, success, duration_ms, episode_id, failure_note. |
-| `agent_session` | public | A long-running agent (planner, reviewer, dispatcher or a droid). Fields: status (running/paused/waiting_for/done/failed), current_step, factory_session_id plus factory_session_ids_json, waiting_for_json (pause signal and predicate), resume_payload_json, ticket_id. |
-| `robot_command` | public | The command bus to the Jetson. Fields: robot_id, ticket_id, type (run_baseline/run_eval/start_teleop/stop_teleop/pause_for_takeover/handback/reset_request/load_checkpoint/stop), payload_json, status (issued/acked/done/failed), issued_by, result_json, issued/acked/finished times. |
+| `agent_session` | public | A long-running agent (planner, reviewer, dispatcher or a droid). Fields: status (starting/running/paused/waiting_for/resuming/done/failed), current_step, factory_session_id plus factory_session_ids_json, waiting_for_json (pause signal and predicate), resume_payload_json, ticket_id. |
+| `robot_command` | public | The command bus to the Jetson. Fields: robot_id, ticket_id, seq (per-robot 1, 2, 3...), type (run_baseline/run_eval/start_teleop/stop_teleop/pause_for_takeover/resume_policy/handback/reset_request/load_checkpoint/home/stop/soft_estop), payload_json, status (issued/acked/done/failed/preempted), issued_by, result_json, issued/acked/finished times. |
 | `event_log` | public | An append-only evidence log: id, ts, actor, type, payload_json. The columns are unchanged from the placeholder module. Never edit or delete rows. |
 
 ## Reducers in this ticket
@@ -43,6 +43,23 @@ The reducer tickets (TDM-9..15) add the rest. Each one goes in its own file and 
 - **`bootstrap_owner()`:** seeds the owner row once, for the hard-coded owner identity only. Maincloud predates `init`, so this ran once on 2026-10-24.
 - **`register_service_identity(identity, role, label)`** and **`revoke_service_identity(identity)`:** owner-only. Both log to `event_log`.
 - **`append_event(actor, type, payload_json)`:** unchanged and still open to any caller. Gate it with `requireService` once every service has its own identity.
+
+## Agent-session and robot-command reducers (TDM-13, `reducers/agent_robot.ts`)
+
+Callers: agent reducers need the `orchestrator` or `factory` role (owner always passes). Positional HTTP args are in the order shown.
+
+- **`upsert_agent_session(id, role, factory_session_id, status, current_step, name, ticket_id)`:** `id` 0 creates the row. On update, `""`/`0` leave name, ticket_id and factory_session_id unchanged. A new factory_session_id is appended to `factory_session_ids_json`. It cannot enter `waiting_for` or `resuming` (use the next two), and leaving `waiting_for` clears `waiting_for_json`.
+- **`agent_wait_for(session_id, predicate_json, resume_payload_json)`:** sets status `waiting_for` and stores the predicate verbatim in `waiting_for_json`, e.g. `{"table":"dataset","ticket_id":1,"field":"accepted_count","op":">=","value":5}`. Compound predicates use `{"all":[...]}` or `{"any":[...]}`; `op` is one of `== != > >= < <=`. `resume_payload_json` (`""` = none) is the state handed to a restarted session.
+- **`agent_resume(session_id, new_factory_session_id, reason)`:** the resume bridge's atomic wake-up claim. It succeeds only from `waiting_for` or `paused`, so a second bridge loses. It sets status `resuming` and clears `waiting_for_json`. **Native pause/resume:** pass `""`, then message the same `factory_session_id`. **End-and-restart:** pass the new Factory session id. It becomes `factory_session_id`, is appended to `factory_session_ids_json` under the same `agent_session.id`, and `resume_payload_json` stays on the row to seed it. A bridge can also claim with `""` first, start the new session, and then report its id with `upsert_agent_session`.
+- **`agent_step(session_id, step_text)`:** updates current_step and last_update. A `starting` or `resuming` session moves to `running`. Refused once the session is `done` or `failed`.
+- **`issue_robot_command(robot_id, type, payload_json, ticket_id)`:**
+  - Who can call it: the owner, `orchestrator` or `factory`; or the contributor holding a claimed, unexpired task on that robot. A claimant may only send start_teleop, stop_teleop, pause_for_takeover, resume_policy, handback or soft_estop, and the ticket_id comes from the task.
+  - Each command gets the next per-robot `seq`.
+  - "Job" types (run_baseline, run_eval, start_teleop, reset_request, home, load_checkpoint) are refused while another job is open (issued or acked) on the robot.
+  - Every non-e-stop command is refused while a soft_estop is open or `robot.status = estop`.
+  - **`soft_estop` is never blocked.** Any service role may send it, as may the claimant. It skips every busy and latch check, is accepted even for an unknown robot_id, and preempts every other open command on the robot (status `preempted`, with `result_json.preempted_by`).
+- **`ack_robot_command(id)`**, **`complete_robot_command(id, result_json)`**, **`fail_robot_command(id, error)`:** only the robot's bound `client_identity` may call these, or a `robot_client` role if the robot has no binding. Ack moves issued to acked; repeating an ack is a no-op, and acking a preempted command is refused, so it must not run. Complete needs an acked command. Fail works from issued or acked.
+- **event_log types:** agent.session_created, agent.session_updated, agent.waiting_for, agent.resumed (with mode native or restart), agent.step, robot.command_issued, robot.soft_estop (with the preempted list), robot.command_acked, robot.command_done and robot.command_failed.
 
 ## Auth hooks (`auth.ts`)
 

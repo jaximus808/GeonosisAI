@@ -85,7 +85,17 @@ export const AGENT_ROLES = [
   'data_droid',
   'training_droid',
 ] as const;
-export const AGENT_STATUSES = ['running', 'paused', 'waiting_for', 'done', 'failed'] as const;
+// TDM-13: starting (row created, Factory session not yet confirmed) and
+// resuming (agent_resume claimed the wake-up; native resume or restart in flight).
+export const AGENT_STATUSES = [
+  'starting',
+  'running',
+  'paused',
+  'waiting_for',
+  'resuming',
+  'done',
+  'failed',
+] as const;
 
 export const ROBOT_COMMAND_TYPES = [
   'run_baseline',
@@ -97,8 +107,13 @@ export const ROBOT_COMMAND_TYPES = [
   'reset_request',
   'load_checkpoint',
   'stop',
+  // TDM-13 additions
+  'resume_policy',
+  'home',
+  'soft_estop', // always accepted; preempts every open command on the robot
 ] as const;
-export const ROBOT_COMMAND_STATUSES = ['issued', 'acked', 'done', 'failed'] as const;
+// preempted (TDM-13): closed by a soft_estop before it finished; never run it.
+export const ROBOT_COMMAND_STATUSES = ['issued', 'acked', 'done', 'failed', 'preempted'] as const;
 
 // Example prices from CONTEXT.md / docs/stripe-plan.md PRICES_CENTS.
 export const DEFAULT_PRICES_CENTS = {

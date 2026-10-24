@@ -350,6 +350,7 @@ const robotCommand = table(
     issued_at: t.timestamp(),
     acked_at: t.option(t.timestamp()),
     finished_at: t.option(t.timestamp()),
+    seq: t.u64().default(0n), // TDM-13: per-robot command sequence, 1, 2, 3...
   }
 );
 

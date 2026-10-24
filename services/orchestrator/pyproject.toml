@@ -13,6 +13,7 @@ dependencies = [
     "websockets>=13",
     "anthropic>=2.3.0",
     "rdf-payments",  # TDM-63 Stripe test-mode payouts
+    "modal>=1.6.0",
 ]
 
 [project.scripts]

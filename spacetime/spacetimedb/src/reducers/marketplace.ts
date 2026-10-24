@@ -32,6 +32,7 @@ import { t, SenderError } from 'spacetimedb/server';
 import { Timestamp } from 'spacetimedb';
 import spacetimedb, { type RdfCtx } from '../schema';
 import { serviceRole, requireRole } from '../auth';
+import { logEvent } from '../event_log'; // TDM-15
 import { TASK_TYPES, DEFAULT_PRICES_CENTS, oneOf } from '../enums';
 
 const TASK_LEASE_MICROS = 10n * 60n * 1_000_000n; // 10 min (resets)
@@ -81,13 +82,7 @@ function tdm10Json(obj: Record<string, unknown>): string {
 }
 
 function tdm10Log(ctx: RdfCtx, actor: string, type: string, payload: Record<string, unknown>): void {
-  ctx.db.eventLog.insert({
-    id: 0n,
-    ts: ctx.timestamp,
-    actor,
-    type,
-    payload_json: tdm10Json({ ...payload, sender: ctx.sender.toHexString() }),
-  });
+  logEvent(ctx, actor, type, tdm10Json({ ...payload, sender: ctx.sender.toHexString() })); // TDM-15: sole event_log writer
 }
 
 function tdm10GetTask(ctx: RdfCtx, task_id: bigint): TaskRow {

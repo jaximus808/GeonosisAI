@@ -22,6 +22,7 @@ Endpoints (one port, default 8091):
 
   ``GET /ws/cameras``                 WebSocket, protocol below
   ``GET /ws/control`` (+ ``/control``)  WebSocket, TDM-52 teleop control (``teleop.py``), when registered
+  ``GET /ws/state``                   WebSocket, TDM-96 live robot state (``rdf-state/1``, below), when registered
   ``GET /snapshot/<cam>.jpg?token=``  one JPEG (the browser's fallback when WebSockets fail)
   ``GET /healthz``                    JSON: cameras, viewers, public URL (no frames, no auth)
 
@@ -45,6 +46,19 @@ Use from the command loop (TDM-49)::
     camera_config = {**camera_config, **stream.info()}   # -> robot.camera_config_json["stream"]
     stream.on_url(lambda info: ...)                     # tunnel restarted with a new URL
     stream.stop()
+
+Live state, ``/ws/state`` (TDM-96, protocol ``rdf-state/1``; ``install_state_feed(stream, client)``)::
+
+  client -> server   {type:"auth", token} first (within 5 s) and at half-life; {type:"ping", c:<client ms>}
+  server -> client   {t:"hello", protocol, robot_id, hz, sim, exp, server_ms}
+                     {t:"state", v:1, sim, t_ms, joints[6] rad, gripper 0..1, ee:{pos[3] m, quat[w,x,y,z]},
+                      control_source, robot_state, estop, safety:{clamps_1s:{kind:n}}, checkpoint_uri?,
+                      scene?, chunk_preview?, workspace?}       at ``hz`` (default 30), newest only
+                     {t:"pong", c, server_ms} / {t:"auth_ok", exp} / {t:"error", code}
+  close codes 4001 expired / 4003 bad token. Any valid token for this robot works, including a
+  ``view``-scope one (``POST /stream/token`` with ``scope:"view"``); ``/control`` refuses ``view``.
+  ``t_ms`` / ``server_ms`` are the robot's wall clock (ms), so the browser can correct for clock offset.
+  The message shape is ``RobotLiveState`` in ``apps/web/src/lib/robotview/types.ts``.
 
 CLI (laptop or Jetson)::
 
@@ -290,7 +304,8 @@ class CameraStreamServer:
                 "public_url": self.public_url, "connections": self.connections, "denied": self.denied,
                 "width": self.width, "fps": self.cfg.fps,
                 "encoders": {c: e.stats() for c, e in self.encoders.items()},
-                "rig_fps": {c: v.get("fps") for c, v in (st.get("cameras") or {}).items()}}
+                "rig_fps": {c: v.get("fps") for c, v in (st.get("cameras") or {}).items()},
+                **({"state": self.state_feed.stats()} if getattr(self, "state_feed", None) else {})}
 
     # -- WebSocket side
     async def _handler(self, ws: ServerConnection) -> None:
@@ -465,6 +480,270 @@ class CameraStreamServer:
             e.stop()
 
 
+# ------------------------------------------------------------------------------- live state (TDM-96)
+
+STATE_PROTOCOL = "rdf-state/1"
+STATE_PATH = "/ws/state"
+STATE_HZ = 30.0
+# safety-layer counters reported as clamps_1s (rdf_robot_client.safety.COUNTERS minus commands/sent)
+CLAMP_KEYS = ("clamped_joint_limit", "clamped_speed", "clamped_workspace", "clamped_gripper",
+              "rejected_nonfinite", "rejected_jump", "rejected_stopped", "watchdog_holds", "estops")
+
+
+def _unwrap(arm: Any) -> list[Any]:
+    """``arm`` and every adapter it wraps (SafetyLayer -> SimArm / YAM / MuJoCo)."""
+    out, seen = [], set()
+    while arm is not None and id(arm) not in seen:
+        seen.add(id(arm))
+        out.append(arm)
+        arm = getattr(arm, "inner", None)
+    return out
+
+
+class LiveStateSampler:
+    """Builds one ``RobotLiveState`` dict from a running robot client (``RobotClient`` or ``StandaloneRobot``).
+
+    Reads only what the client already keeps: ``arm.read_state()`` (joints, gripper, measured EE pose),
+    ``client.control_tick()`` (control_source, as the recorder sees it), ``client.sm`` (state machine,
+    e-stop latch), the TDM-45 safety layer's ``stats()`` (clamp counters, turned into counts over the
+    last second here) and ``config.workspace``. Optional duck-typed hooks:
+      * ``scene_state()`` on the adapter (or anything it wraps): ``{"cube": {pos, quat}, "plate": {pos}}``
+        (the MuJoCo sim adapter). Absent on the real arm -> no ``scene`` key.
+      * ``client.services["chunk_preview"]()``: downsampled joint targets of the current policy chunk.
+    """
+
+    def __init__(self, client: Any, *, sim: bool | None = None, window_s: float = 1.0):
+        self.client = client
+        self.window_s = window_s
+        self._hist: deque[tuple[float, dict[str, int]]] = deque()
+        arms = _unwrap(getattr(client, "arm", None))
+        self._safety = next((a for a in arms if callable(getattr(a, "stats", None))), None)
+        self._scene = next((a.scene_state for a in arms if callable(getattr(a, "scene_state", None))), None)
+        if sim is None:
+            cc = getattr(client, "camera_config", None) or {}
+            sim = bool(cc.get("sim")) or any(getattr(a, "name", "") in ("sim", "mujoco", "mujoco_sim") for a in arms)
+        self.sim = bool(sim)
+        self.workspace = self._workspace()
+
+    def _workspace(self) -> dict[str, Any] | None:
+        ws = getattr(getattr(self._safety, "config", None), "workspace", None)
+        if ws is None or not getattr(ws, "enabled", False):
+            return None
+        lo, hi = [float(v) for v in ws.lo], [float(v) for v in ws.hi]
+        return {"min": [round(v, 4) for v in lo], "max": [round(v, 4) for v in hi], "table_z": round(lo[2], 4)}
+
+    def clamps_1s(self, counts: dict[str, Any], now: float | None = None) -> dict[str, int]:
+        """Clamp counts over the last ``window_s`` from the safety layer's cumulative counters."""
+        now = time.monotonic() if now is None else now
+        cur = {k: int(counts.get(k, 0) or 0) for k in CLAMP_KEYS}
+        self._hist.append((now, cur))
+        while len(self._hist) > 1 and self._hist[1][0] <= now - self.window_s:
+            self._hist.popleft()
+        base = self._hist[0][1]
+        return {k: max(0, cur[k] - base.get(k, 0)) for k in CLAMP_KEYS}
+
+    def sample(self) -> dict[str, Any]:
+        c = self.client
+        arm, sm = c.arm, c.sm
+        st = arm.read_state()
+        try:
+            source = c.control_tick().control_source
+        except Exception:  # noqa: BLE001 - e.g. arm hiccup: report idle rather than nothing
+            source = "idle"
+        safety = self._safety.stats() if self._safety is not None else {}
+        hub = (getattr(c, "services", None) or {}).get("teleop")
+        if hub is not None and getattr(hub, "mode", None) and source == "idle" and str(sm.state) == "teleop":
+            source = "human"  # a human holds control even between clutch strokes
+        pose = st.ee_pose
+        msg: dict[str, Any] = {
+            "t": "state", "v": 1, "sim": self.sim, "t_ms": int(time.time() * 1000),
+            "joints": [round(float(v), 5) for v in st.joints],
+            "gripper": round(float(st.gripper), 4),
+            "ee": {"pos": [round(float(v), 5) for v in pose.xyz], "quat": [round(float(v), 5) for v in pose.quat]},
+            "control_source": source if source in ("policy", "human", "idle") else "idle",
+            "robot_state": str(sm.state),
+            "estop": bool(sm.locked or safety.get("stopped")),
+            "safety": {"clamps_1s": self.clamps_1s(safety)},
+        }
+        job = getattr(c, "current_job", None)
+        ckpt = getattr(c, "checkpoint_uri", None) or (
+            (getattr(getattr(job, "command", None), "payload", None) or {}).get("checkpoint_uri") if job else None)
+        if ckpt:
+            msg["checkpoint_uri"] = str(ckpt)
+        if self.workspace:
+            msg["workspace"] = self.workspace
+        if self._scene is not None:
+            try:
+                scene = self._scene()
+                if scene:
+                    msg["scene"] = scene
+            except Exception:  # noqa: BLE001 - scene is decoration; never drop the state for it
+                log.debug("scene_state failed", exc_info=True)
+        preview = (getattr(c, "services", None) or {}).get("chunk_preview")
+        if callable(preview):
+            try:
+                cp = preview()
+                if cp:
+                    msg["chunk_preview"] = [[round(float(v), 4) for v in row] for row in cp]
+            except Exception:  # noqa: BLE001
+                log.debug("chunk_preview failed", exc_info=True)
+        return msg
+
+
+class StateFeed:
+    """One sampler at ``hz`` on the stream server's loop, fanned out to every ``/ws/state`` viewer.
+
+    Samples only while somebody watches. Each viewer gets the newest message (a slow viewer skips
+    states, never queues them), so latency stays bounded on a bad link.
+    """
+
+    def __init__(self, sample: Callable[[], dict[str, Any]], *, hz: float = STATE_HZ, sim: bool = False,
+                 robot_id: int | None = None):
+        self.sample, self.hz, self.sim, self.robot_id = sample, float(hz), sim, robot_id
+        self.viewers: set["_StateViewer"] = set()
+        self._task: asyncio.Task | None = None
+        self.samples = 0
+        self.errors = 0
+        self.sample_ms: deque[float] = deque(maxlen=120)
+
+    def _ensure(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.get_running_loop().create_task(self._run())
+
+    async def _run(self) -> None:
+        period = 1.0 / max(self.hz, 1.0)
+        nxt = time.monotonic()
+        while self.viewers:
+            t0 = time.perf_counter()
+            try:
+                msg = await asyncio.to_thread(self.sample)
+                raw = json.dumps(msg, separators=(",", ":"))
+                self.samples += 1
+            except Exception as e:  # noqa: BLE001 - keep sampling; tell the viewers once per failure
+                self.errors += 1
+                raw = json.dumps({"t": "error", "code": "sample_failed", "detail": f"{type(e).__name__}: {e}"[:200]})
+            self.sample_ms.append((time.perf_counter() - t0) * 1e3)
+            for v in list(self.viewers):
+                v.offer(raw)
+            nxt += period
+            delay = nxt - time.monotonic()
+            if delay < -period:  # fell behind (slow read): re-anchor instead of bursting
+                nxt, delay = time.monotonic(), 0.0
+            await asyncio.sleep(max(0.0, delay))
+
+    def stats(self) -> dict[str, Any]:
+        return {"viewers": len(self.viewers), "hz": self.hz, "samples": self.samples, "errors": self.errors,
+                "sample_ms_p50": round(statistics.median(self.sample_ms), 2) if self.sample_ms else None}
+
+
+class _StateViewer:
+    def __init__(self) -> None:
+        self.latest: str | None = None
+        self.event = asyncio.Event()
+
+    def offer(self, raw: str) -> None:  # on the server loop
+        self.latest = raw
+        self.event.set()
+
+
+async def state_ws(server: "CameraStreamServer", ws: ServerConnection, feed: StateFeed) -> None:
+    """``/ws/state`` handler: auth (any valid token for this robot, ``view`` scope included), then states."""
+    try:
+        first = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
+        msg = json.loads(first) if isinstance(first, str) else {}
+        if (msg.get("type") or msg.get("t")) != "auth":
+            raise StreamTokenError("auth_required")
+        claims = server.check_token(str(msg.get("token", "")))
+    except (asyncio.TimeoutError, json.JSONDecodeError, StreamTokenError) as e:
+        server.denied += 1
+        code = e.code if isinstance(e, StreamTokenError) else "auth_required"
+        await server._send_json(ws, {"t": "error", "type": "error", "code": code})
+        try:
+            await ws.close(CLOSE_EXPIRED if code == "expired" else CLOSE_FORBIDDEN, code)
+        except ConnectionClosed:
+            pass
+        return
+    except ConnectionClosed:
+        return
+    state = {"claims": claims}
+    viewer = _StateViewer()
+    await server._send_json(ws, {"t": "hello", "protocol": STATE_PROTOCOL, "robot_id": claims.robot_id or feed.robot_id,
+                                 "hz": feed.hz, "sim": feed.sim, "exp": claims.exp, "scope": claims.scope,
+                                 "server_ms": time.time() * 1000})
+    feed.viewers.add(viewer)
+    feed._ensure()
+    log.info("state: viewer %s sub=%s scope=%s", ws.remote_address, claims.sub, claims.scope)
+
+    async def sender() -> None:
+        while True:
+            await viewer.event.wait()
+            viewer.event.clear()
+            raw, viewer.latest = viewer.latest, None
+            if raw is not None:
+                await ws.send(raw)
+
+    async def receiver() -> None:
+        async for raw in ws:
+            if not isinstance(raw, str):
+                continue
+            try:
+                m = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(m, dict):
+                continue
+            t = m.get("type") or m.get("t")
+            if t == "ping":
+                await server._send_json(ws, {"t": "pong", "type": "pong", "c": m.get("c", m.get("t_ms")),
+                                             "server_ms": time.time() * 1000})
+            elif t == "auth":
+                try:
+                    c = server.check_token(str(m.get("token", "")))
+                except StreamTokenError as e:
+                    await server._send_json(ws, {"t": "error", "code": e.code})
+                    continue  # keep the old token until it expires
+                state["claims"] = c
+                await server._send_json(ws, {"t": "auth_ok", "exp": c.exp})
+
+    async def expiry() -> None:
+        while True:
+            await asyncio.sleep(0.5)
+            if time.time() > state["claims"].exp + 2.0:
+                await server._send_json(ws, {"t": "error", "code": "expired"})
+                await ws.close(CLOSE_EXPIRED, "expired")
+                return
+
+    tasks = [asyncio.create_task(x()) for x in (sender, receiver, expiry)]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    except ConnectionClosed:
+        pass
+    finally:
+        feed.viewers.discard(viewer)
+        if not feed.viewers and feed._task is not None:  # last viewer gone: stop sampling now
+            feed._task.cancel()
+            feed._task = None
+        for tk in tasks:
+            tk.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        log.info("state: viewer %s left", ws.remote_address)
+
+
+def install_state_feed(stream: Any, client: Any, *, hz: float | None = None, sim: bool | None = None) -> StateFeed:
+    """Mount ``/ws/state`` on a TDM-55 ``StreamHandle`` (or ``CameraStreamServer``) for ``client``."""
+    server = getattr(stream, "server", stream)
+    sampler = LiveStateSampler(client, sim=sim)
+    feed = StateFeed(sampler.sample, hz=hz or float(os.environ.get("RDF_STATE_HZ") or STATE_HZ), sim=sampler.sim,
+                     robot_id=getattr(client, "robot_id", None))
+
+    async def handler(srv: Any, ws: ServerConnection) -> None:
+        await state_ws(srv, ws, feed)
+
+    server.add_ws_route(STATE_PATH, handler)
+    server.state_feed = feed
+    return feed
+
+
 # -------------------------------------------------------------------------------------------- tunnel
 
 class QuickTunnel:
@@ -582,6 +861,8 @@ class StreamHandle:
         ctl = next((p for p in ("/ws/control", "/control") if p in self.server.ws_routes), None)
         if ctl:  # TDM-52 teleop control socket (same token)
             info["control_url"] = None if http is None else re.sub(r"^http", "ws", http) + ctl
+        if STATE_PATH in self.server.ws_routes:  # TDM-96 live state (same token, view scope allowed)
+            info["state_url"] = None if http is None else re.sub(r"^http", "ws", http) + STATE_PATH
         return {"stream": info}
 
     def stop(self) -> None:

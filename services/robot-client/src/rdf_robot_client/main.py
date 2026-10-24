@@ -155,6 +155,9 @@ def run(argv: list[str] | None = None) -> None:
         else:
             _teleop.install_control(stream, _teleop.hub_for(client, config=_teleop.TeleopConfig(
                 allow_ops_tokens=os.environ.get("RDF_TELEOP_ALLOW_OPS") == "1")))
+            from .stream import install_state_feed  # TDM-96: /ws/state live robot state (RDF_STATE_HZ, default 30)
+
+            install_state_feed(stream, client, sim=sim)
             client.camera_config.update(stream.info())
 
             def _republish(info: dict[str, Any]) -> None:

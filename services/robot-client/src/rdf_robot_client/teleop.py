@@ -961,6 +961,8 @@ async def control_ws(server: Any, ws: Any, hub: TeleopHub) -> None:
         if _type(msg) != "auth":
             raise StreamTokenError("auth_required")
         claims = server.check_token(str(msg.get("token", "")))
+        if getattr(claims, "scope", "control") != "control":  # TDM-96: view tokens watch, never drive
+            raise StreamTokenError("view_only")
     except (TimeoutError, json.JSONDecodeError, StreamTokenError) as e:
         code = e.code if isinstance(e, StreamTokenError) else "auth_required"
         server.denied += 1
@@ -1021,6 +1023,8 @@ async def control_ws(server: Any, ws: Any, hub: TeleopHub) -> None:
             if t == "auth":
                 try:
                     c = server.check_token(str(m.get("token", "")))
+                    if getattr(c, "scope", "control") != "control":  # TDM-96: no downgrade to a view token
+                        raise StreamTokenError("view_only")
                 except StreamTokenError as e:
                     await sess.send({"t": "error", "code": e.code})
                     continue
@@ -1122,6 +1126,9 @@ def _cmd_serve(a: argparse.Namespace) -> int:
     hub = hub_for(robot, config=TeleopConfig(allow_ops_tokens=a.allow_ops))
     stream = start_stream(rig, robot_name=a.robot_name, port=a.port, tunnel=a.tunnel)
     install_control(stream, hub)
+    from .stream import install_state_feed  # TDM-96: /ws/state on the same server
+
+    install_state_feed(stream, robot, sim=a.sim)
     print(json.dumps(stream.info(), indent=2), flush=True)
     ctx = robot.context({"kind": "clean_teleop"}, type_="start_teleop")
     robot.current_job = ctx  # type: ignore[attr-defined]

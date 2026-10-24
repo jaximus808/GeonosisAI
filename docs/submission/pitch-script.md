@@ -1,5 +1,7 @@
 # Pitch script: 3 minutes + 2 minutes Q&A
 
+> Superseded by `pitch.md` and `qa.md` (TDM-87, Sat Oct 24). Kept for history; edit the new file.
+
 DRAFT. Follows the pitch reference in `CONTEXT.md`. Stage cues are in `[brackets]`. Numbers in `[TODO …]` come from the real run; do not say any of them until they are real. Target about 420 spoken words for the 3 minutes. Practise with the timer; cut the "how" paragraph first if you run long.
 
 ## Setup before you start

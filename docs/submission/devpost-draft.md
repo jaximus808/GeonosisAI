@@ -1,5 +1,7 @@
 # Devpost draft: Robot Deployment Factory
 
+> Superseded by `devpost.md` (TDM-87, Sat Oct 24). Kept for history; edit the new file.
+
 Status: DRAFT. Every number below comes from the git log or a committed proof script. Anything proven only in simulation, on a fake robot or on labelled fixture data is marked as such. `[TODO after real run: …]` placeholders must be filled from the real-arm ticket before submitting. Do not submit with a placeholder left in.
 
 **One-liner:** Plug in your robot, tell it the job, and the factory gets it deployed.

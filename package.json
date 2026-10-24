@@ -1,0 +1,12 @@
+{
+  "name": "robot-deployment-factory",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.2.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev"
+  }
+}

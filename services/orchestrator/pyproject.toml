@@ -1,0 +1,16 @@
+[project]
+name = "rdf-orchestrator"
+version = "0.0.0"
+description = "Planner and reviewer loops, dispatcher; writes decisions to the event log"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[project.scripts]
+rdf-orchestrator = "rdf_orchestrator.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rdf_orchestrator"]

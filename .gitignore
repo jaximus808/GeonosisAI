@@ -61,3 +61,6 @@ minio-data/
 .docker-data/
 logs/
 *.log
+
+# Claude Code local harness state
+.claude/scheduled_tasks.lock

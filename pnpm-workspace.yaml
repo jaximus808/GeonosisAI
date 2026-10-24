@@ -1,0 +1,4 @@
+# TS workspace packages. spacetime/ (SpacetimeDB module) manages its own
+# package.json; add "spacetime/*" here once its owner is ready to join.
+packages:
+  - "apps/*"

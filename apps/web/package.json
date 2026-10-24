@@ -1,0 +1,9 @@
+{
+  "name": "@rdf/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dashboard and contributor phone task pages (Next.js + SpacetimeDB TS client)",
+  "scripts": {
+    "dev": "node -e \"console.log('[web] placeholder: Dashboard and contributor phone task pages (Next.js + SpacetimeDB TS client) (not implemented yet)')\""
+  }
+}

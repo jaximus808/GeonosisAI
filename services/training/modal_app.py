@@ -5,7 +5,7 @@ signatures. The bodies are STUBS for now (sleep, then return ``stub://`` URIs) s
 orchestrator's Modal client (TDM-21) can integrate before the real work lands:
 
     convert(ticket_id, episode_manifest) -> dataset_uri                    TDM-39 (rdf_training.convert)
-    finetune(ticket_id, dataset_uri, hyperparams) -> {checkpoint_uri, metrics}   TDM-40
+    finetune(ticket_id, dataset_uri, hyperparams) -> {checkpoint_uri, metrics, gpu_seconds}  TDM-40 (rdf_training.finetune)
     Policy (class): infer(obs) -> {"actions": [[...]] }, health()          TDM-41
 
 Calling it from the orchestrator (Modal 1.x; ``Function.lookup`` no longer exists)::
@@ -40,14 +40,13 @@ Commands (repo root):
     cd services/training && uv run modal run modal_app.py::finetune --ticket-id test   # runs, prints nothing
     cd services/training && uv run modal run modal_app.py --action finetune --ticket-id test   # prints the result
     cd services/training && uv run modal run modal_app.py::seed_base_weights   # one-time, CPU only
-No function sets min_containers / keep_warm, and the stubs request no GPU.
+No function sets min_containers / keep_warm. finetune requests 1x H100 (TDM-40); the stubs request no GPU.
 """
 
 # No `from __future__ import annotations`: modal.parameter() needs real (non-string) annotations.
 import json
 import pathlib
 import time
-import uuid
 from typing import Any
 
 import modal
@@ -166,37 +165,45 @@ def convert(ticket_id: str, episode_manifest=None) -> str:
 
 # ---------------------------------------------------------------- finetune (TDM-40)
 
+FINETUNE_TIMEOUT_S = 2 * 3600  # hard cap; rdf_training.finetune refuses step counts that cannot fit
+progress_dict = modal.Dict.from_name("rdf-training-progress", create_if_missing=True)
+
 
 # Unannotated JSON args on purpose: the `modal run` CLI only parses unannotated (Any) or scalar params.
-# TDM-40: real resources are gpu="H100", cpu=16, memory=98304, timeout=2*3600 (S-05a).
+# S-05a resources: 1x H100, 16 CPU (12 loader workers), 96 GB RAM. Override per call with
+# finetune.with_options(gpu="A100-80GB"). No min_containers / keep_warm: it scales to zero.
 @app.function(
     image=image,
     volumes={CHECKPOINTS_ROOT: checkpoints_volume, DATASETS_ROOT: datasets_volume},
     secrets=[secret],
-    cpu=1.0,
-    memory=2048,
-    timeout=2 * 3600,
+    gpu="H100",
+    cpu=16,
+    memory=98304,
+    timeout=FINETUNE_TIMEOUT_S,
 )
 def finetune(ticket_id: str, dataset_uri: str = "", hyperparams=None) -> dict:
-    """LoRA fine-tune pi0.5 on dataset_uri. Returns {checkpoint_uri, metrics}. STUB.
+    """LoRA fine-tune pi0.5 on dataset_uri (TDM-40; see rdf_training.finetune for the full contract).
 
-    hyperparams: dict (or its JSON string from the CLI), merged over the S-05a defaults.
+    hyperparams: run_settings.hyperparams_json as a dict (or its JSON string from the CLI):
+    {lr, steps (2000), batch_size (32), lora_rank (16; 0 = full fine-tune), prompt ('' = dataset task)},
+    plus optional base_checkpoint_uri, training_run_id, smoke, norm_stats ('auto' | 'recompute').
+    Returns {checkpoint_uri: modal-vol://rdf-checkpoints/runs/ticket-<t>/<run>/<step>, metrics, gpu_seconds}.
+    Live progress: modal.Dict "rdf-training-progress"[<modal call id>] (+ POST ORCHESTRATOR_URL/modal/progress).
     """
-    hp = {"mode": "lora", "steps": 2000, "batch_size": 32, "action_horizon": 50, **_json_arg(hyperparams, {})}
-    started = time.time()
-    time.sleep(float(hp.get("stub_sleep_s", STUB_SLEEP_S)))
-    run = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
-    return {
-        "checkpoint_uri": _stub_uri(CHECKPOINTS_VOLUME, f"runs/ticket-{ticket_id}/{run}/{hp['steps'] - 1}"),
-        "metrics": {
-            "stub": True,
-            "ticket_id": ticket_id,
-            "dataset_uri": dataset_uri,
-            "hyperparams": hp,
-            "wall_s": round(time.time() - started, 1),
-            "gpu": None,
-        },
-    }
+    from rdf_training.finetune import run_finetune
+
+    return run_finetune(
+        ticket_id,
+        dataset_uri,
+        _json_arg(hyperparams, {}),
+        checkpoints_root=CHECKPOINTS_ROOT,
+        datasets_root=DATASETS_ROOT,
+        timeout_s=FINETUNE_TIMEOUT_S,
+        commit=checkpoints_volume.commit,
+        reload_datasets=datasets_volume.reload,
+        progress_dict=progress_dict,
+        call_id=modal.current_function_call_id(),
+    )
 
 
 # ---------------------------------------------------------------- policy server (TDM-41)

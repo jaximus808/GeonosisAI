@@ -47,7 +47,7 @@ type Plan = {
   guardrail: { rule: string | null; required_type: string | null; why: string } | null;
   guardrail_forced: string[] | null; guardrail_agreed_first_try: boolean | null;
   budget_math: { remaining_cents: number; needed: number } | null;
-  model: { backend?: string | null; model?: string | null; requested: string | null; served: string | null; effort: string | null; attempts: unknown[] | null } | null;
+  model: { backend?: string | null; backend_model?: string | null; requested: string | null; served: string | null; effort: string | null; attempts: unknown[] | null } | null;
   data_type_override: string | null;
 };
 type Alternative = {

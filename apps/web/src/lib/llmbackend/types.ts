@@ -85,16 +85,18 @@ export interface LlmBadgeInfo {
 /**
  * Badge for a decision record. `backend` comes from the record itself; a missing or unknown value is
  * shown as such and never assumed to be the API (a Claude Code or droid decision must not pass as an
- * API one). The model shown is the one that actually ran (`model`, then `served`, then `requested`).
+ * API one). The model shown is the one that actually ran (`backend_model`, as the orchestrator's
+ * planner evidence / decision API name it, then `model`, `served`, `requested`).
  */
 export function llmBadge(rec: {
   backend?: unknown;
+  backend_model?: unknown;
   model?: unknown;
   served?: unknown;
   requested?: unknown;
 } | null | undefined): LlmBadgeInfo {
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-  const model = str(rec?.model) ?? str(rec?.served) ?? str(rec?.requested);
+  const model = str(rec?.backend_model) ?? str(rec?.model) ?? str(rec?.served) ?? str(rec?.requested);
   const raw = str(rec?.backend);
   let backend: LlmBackend | null = null;
   let label: string;

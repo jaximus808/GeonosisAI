@@ -36,7 +36,7 @@ export interface PlanView {
   approvals: { event_id: number; approved_by: string | null; approved_cents: number | null; via: string | null }[];
   planner_event: Ref;
   /** backend: api | droid | claude_code (absent on plans recorded before the switchable backend). */
-  model: { backend?: string | null; model?: string | null; requested: string | null; served: string | null; effort: string | null } | null;
+  model: { backend?: string | null; backend_model?: string | null; requested: string | null; served: string | null; effort: string | null } | null;
   guardrail: { rule?: string | null; required_type?: string | null; why?: string } | null;
   fake: boolean;
 }

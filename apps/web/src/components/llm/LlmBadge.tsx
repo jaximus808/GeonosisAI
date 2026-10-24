@@ -16,7 +16,7 @@ export function LlmBadge({
   prefix,
   className = '',
 }: {
-  rec: { backend?: unknown; model?: unknown; served?: unknown; requested?: unknown } | null | undefined;
+  rec: { backend?: unknown; backend_model?: unknown; model?: unknown; served?: unknown; requested?: unknown } | null | undefined;
   prefix?: string;
   className?: string;
 }) {

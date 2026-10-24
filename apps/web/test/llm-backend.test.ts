@@ -39,7 +39,7 @@ type Handler = (req: Request) => Promise<Response>;
 let GET: () => Promise<Response>;
 let PUT: Handler;
 let mint: () => { value: string; expiresAt: number };
-let types: typeof import('../src/lib/llmbackend/types.ts');
+let types: typeof import('@/lib/llmbackend/types');
 
 function state() {
   return {
@@ -95,7 +95,7 @@ before(async () => {
   GET = route.GET as unknown as () => Promise<Response>;
   PUT = route.PUT as unknown as Handler;
   mint = (await import('@/lib/operator/session')).mintOperatorSession;
-  types = await import('../src/lib/llmbackend/types.ts');
+  types = await import('@/lib/llmbackend/types');
 });
 
 after(() => upstream.close());
@@ -190,7 +190,7 @@ describe('decision badge (llmBadge)', () => {
   it('names each backend and the model that ran', () => {
     const api = types.llmBadge({ backend: 'api', requested: 'claude-opus-5-5', served: 'claude-opus-5-5' });
     assert.deepEqual([api.backend, api.tone, api.text], ['api', 'api', 'Claude API · claude-opus-5-5']);
-    const cc = types.llmBadge({ backend: 'claude_code', model: 'opus', requested: 'claude-opus-5-5' });
+    const cc = types.llmBadge({ backend: 'claude_code', backend_model: 'opus', requested: 'claude-opus-5-5', served: 'claude-opus-5-5' });
     assert.deepEqual([cc.backend, cc.tone, cc.text], ['claude_code', 'local', 'Claude Code (local) · opus']);
     const dr = types.llmBadge({ backend: 'droid', model: 'claude-opus-5-5' });
     assert.deepEqual([dr.backend, dr.tone, dr.text], ['droid', 'droid', 'Factory droid · claude-opus-5-5']);

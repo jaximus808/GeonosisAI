@@ -489,6 +489,7 @@ class EvalTrialRunner:
             if rec is not None and rec.recording:  # interrupted / error: keep the files locally, no outcome
                 try:
                     ep = rec.stop(success=None, note=f"{label} interrupted; not an eval outcome", upload=False)
+                    _keep_local(ep, "eval trial interrupted")  # else the boot rescan would upload it
                     _log("recording kept on disk (not uploaded)", dir=str(ep.dir))
                 except Exception:  # noqa: BLE001
                     pass

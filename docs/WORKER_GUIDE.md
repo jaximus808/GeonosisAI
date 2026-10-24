@@ -182,3 +182,7 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Local mode** (the default tonight): file edits are limited to `services/factory/work/sessions/<id>/` unless `write_roots` widens it, and commands are off unless allow-listed in `allow_commands`.
 - **Events v1:** `{v, kind, agent_session_id, role, mode, factory_session_id, turn, seq, ts_us, text, tool, data}`. They go into `event_log` as `droid.<kind>` with actor `droid:<role>`. Live status and step are in `agent_session`.
 - **Credits:** ~1–8k per turn. Keep proofs to a few turns. The model and reasoning level come from `FACTORY_MODEL` / `FACTORY_REASONING`.
+
+## Browser testing (shared Chrome)
+- Several workers drive the same Chrome at once. **Always create your own new tab** (`tabs_create_mcp`) and act only on that tab id. Never reuse an existing tab, and re-check the URL before you type. One worker's keystrokes have already landed on another worker's page.
+- Close your tab when you're done. Prefer headless checks (curl, Playwright scripts) when you don't need to see the page.

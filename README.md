@@ -31,6 +31,24 @@ Key pages (web on `http://localhost:3737`):
 | `/teleop/[taskId]`, `/reset/[taskId]` | Phone pages: drive the arm behind the task lease; do a paid reset |
 | `/robots/[id]` | Operator console: state, cameras, command queue, soft e-stop (login at `/ops/login`) |
 
+## Phone access (`make demo-public`)
+
+`make demo-public` makes the local demo reachable from phones over HTTPS, without putting the laptop on the venue
+Wi-Fi. It runs `make demo` plus a production web build behind one local edge (`scripts/demo/public_guard.py`) and
+one cloudflared tunnel. It prints the `/join` link, a terminal QR code and an **access code**, which phones enter once.
+`make demo-public-down` stops it, tunnel first.
+
+- **Quick tunnel (default):** no account needed, but you get a new `*.trycloudflare.com` URL on every run.
+- **Named tunnel:** a stable `https://app.<domain>`. One-time setup: `cloudflared tunnel login`, then `cloudflared tunnel create rdf-demo`, then `cloudflared tunnel route dns rdf-demo app.<domain>`. After that, run `RDF_PUBLIC_DOMAIN=<domain> make demo-public`.
+- **What's protected:**
+  - The access code covers pages, the API and the SpacetimeDB socket. It's on by default; set `RDF_PUBLIC_ACCESS_CODE`, or pass `--no-access-code` to turn it off.
+  - Privileged actions still need the operator login.
+  - SpacetimeDB is reachable only through an allow-list.
+  - The orchestrator isn't exposed. Browser GETs go through `/api/orch`, and `--api` adds an upload path, under a secret, for a remote Jetson.
+  - There are per-IP rate limits.
+
+Details: [docs/MORNING.md](docs/MORNING.md) ("Phone access") and the `scripts/demo/public.py` docstring.
+
 ## Submission docs
 
 - [docs/submission/devpost-draft.md](docs/submission/devpost-draft.md): Devpost write-up (honest about sim vs real; `[TODO after real run]` placeholders).

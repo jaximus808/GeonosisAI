@@ -29,6 +29,12 @@ Collected overnight from worker reports. Tick these off before starting the real
 - [x] Wire `loadEnv(webEnv, "web")` from `@rdf/env` in `apps/web`. (TDM-79: `src/instrumentation.ts`, maps the NEXT_PUBLIC_* names onto webEnv.)
 - [x] Remove the stray `.next-tdm75` include lines in `apps/web/tsconfig.json`. (TDM-79: they were never committed; `next dev` re-adds `<distDir>/types` lines whenever it runs with `NEXT_DIST_DIR`, so `git checkout apps/web/tsconfig.json` after such a run.)
 - [ ] Set `NEXT_PUBLIC_WEB_PUBLIC_URL` to the public URL, so the join QR works on phones.
+- [ ] **Phone access goes through `make demo-public`** (docs/MORNING.md, "Phone access"). It handles the QR URL, the browser's SpacetimeDB and orchestrator origins, and the stream URL. For the real run, use `ARGS="--stack attach --stdb-url https://maincloud.spacetimedb.com --db robo-factory-a706j --orch-url http://127.0.0.1:<port> --api"`.
+  - [ ] Keep the access code on, and show it on the screen next to the QR.
+  - [ ] Check `RDF_OPERATOR_PASSCODE` is set. Without it, operator routes answer 503.
+  - [ ] From a phone on cellular (not the venue Wi-Fi), open `/join`, enter the code, join, and check the marketplace goes live.
+  - [ ] Check an operator route without the login is refused: `curl -X POST https://<public>/api/tdm78/robots/1/commands` should return 401, or 401 `access_code_required` before the code is entered.
+  - [ ] Afterwards, run `make demo-public-down` and check the URL is dead.
 - [ ] Set `NEXT_PUBLIC_ORCHESTRATOR_URL` (browser GETs) and `RDF_ORCHESTRATOR_URL` (Next server: `/api/tdm64`, `/api/tdm79` proxies and the `/tickets/[id]/report` page) in `apps/web/.env.local`; port 8000 is taken on the laptop.
 - [x] (Fixed in TDM-70, 73be886: planner reads the column first.) Planner gap (TDM-79 found): `planner.py` reads `data_type_override` from `hyperparams_json` or a `planner.data_type_override` event, not the `run_settings.data_type_override` column that TDM-20's PATCH writes, so the settings editor's "Data type" choice is ignored by the planner until that is wired (the editor says so).
 

@@ -50,7 +50,14 @@ export function tdm78Env(...names: string[]): string | undefined {
 
 export function tdm78SpacetimeTarget() {
   // Same database the browser subscribes to (lib/spacetime/config.ts).
-  const host = (tdm78Env('NEXT_PUBLIC_SPACETIME_HOST', 'SPACETIME_HOST') || 'https://maincloud.spacetimedb.com').replace(/\/$/, '');
+  // RDF_SPACETIME_SERVER_HOST: the server's own (local) address when the browser uses NEXT_PUBLIC_SPACETIME_HOST=same-origin.
+  const pub = tdm78Env('NEXT_PUBLIC_SPACETIME_HOST');
+  const host = (
+    tdm78Env('RDF_SPACETIME_SERVER_HOST') ||
+    (pub && pub !== 'same-origin' ? pub : undefined) ||
+    tdm78Env('SPACETIME_HOST') ||
+    'https://maincloud.spacetimedb.com'
+  ).replace(/\/$/, '');
   const db = tdm78Env('NEXT_PUBLIC_SPACETIME_DB_NAME', 'SPACETIME_DB_NAME') || 'robo-factory-a706j';
   return { host, db, token: tdm78Env('RDF_WEB_SPACETIME_TOKEN') };
 }

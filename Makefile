@@ -191,3 +191,16 @@ jetson-logs:
 	@$(JETSON_SH) logs
 jetson-ssh:
 	@$(JETSON_SH) ssh
+
+# make demo-public: the local demo reachable from phones over HTTPS (scripts/demo/public.py; docs/MORNING.md
+# "Phone access"). One cloudflared tunnel (quick by default; RDF_PUBLIC_DOMAIN=example.com = named tunnel) to a
+# local edge (access code, rate limits, allow-lists) in front of a production web build + make demo.
+# Ports: RDF_PUBLIC_PORT (3747) + DEMO_* as for make demo, or ARGS="--port ... --stdb-port ... --demo-args '...'".
+.PHONY: demo-public demo-public-down demo-public-status
+DEMO_PUBLIC = cd services/orchestrator && uv run --quiet --with 'qrcode>=7.4' python ../../scripts/demo/public.py
+demo-public:
+	$(DEMO_PUBLIC) up $(ARGS)
+demo-public-down:
+	$(DEMO_PUBLIC) down
+demo-public-status:
+	$(DEMO_PUBLIC) status

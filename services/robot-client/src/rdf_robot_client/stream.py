@@ -905,7 +905,8 @@ class StreamHandle:
         ws = None if http is None else re.sub(r"^http", "ws", http) + WS_PATH
         info = {"transport": TRANSPORT, "url": ws, "http": http, "cams": self.server.rig.names,
                 "width": self.server.width, "fps": self.server.cfg.fps,
-                "tunnel": "cloudflared" if self.tunnel else "none", "updated_at": int(time.time())}
+                "tunnel": "cloudflared" if self.tunnel else ("external" if self.server.public_url else "none"),
+                "updated_at": int(time.time())}
         ctl = next((p for p in ("/ws/control", "/control") if p in self.server.ws_routes), None)
         if ctl:  # TDM-52 teleop control socket (same token)
             info["control_url"] = None if http is None else re.sub(r"^http", "ws", http) + ctl
@@ -949,12 +950,21 @@ def start_stream(rig: CameraRig, *, robot_id: int | None = None, robot_name: str
     ``tunnel="cloudflared"`` binds to 127.0.0.1 and blocks up to ``wait_url_s`` for the public URL
     (``info()["stream"]["url"]`` is None if it did not come up yet; ``on_url`` fires later).
     ``tunnel="none"`` binds ``host`` (default 0.0.0.0) for LAN viewers at ``ws://<lan_host>:<port>``.
+
+    ``RDF_STREAM_PUBLIC_URL`` (with ``tunnel="none"``): something else already serves this port publicly
+    (``make demo-public``'s edge at ``https://<app>/_cam``, or a named cloudflared tunnel on the Jetson).
+    The server then binds 127.0.0.1 and announces that https URL instead of a LAN address.
     """
     if tunnel not in ("cloudflared", "none"):
         raise ValueError(f"tunnel must be cloudflared|none, got {tunnel!r}")
-    bind = host or ("127.0.0.1" if tunnel == "cloudflared" else "0.0.0.0")
+    external = (os.environ.get("RDF_STREAM_PUBLIC_URL") or "").strip().rstrip("/") if tunnel == "none" else ""
+    if external and not re.match(r"^https?://[^/\s]+(/[^\s]*)?$", external):
+        raise ValueError("RDF_STREAM_PUBLIC_URL must be an http(s) URL, e.g. https://app.example.com/_cam")
+    bind = host or ("127.0.0.1" if tunnel == "cloudflared" or external else "0.0.0.0")
     server = CameraStreamServer(rig, StreamConfig(port=port, host=bind, robot_id=robot_id,
                                                   robot_name=robot_name, **cfg)).start()
+    if external:
+        server.public_url = external
     qt = QuickTunnel(server.port) if tunnel == "cloudflared" else None
     handle = StreamHandle(server, qt, lan_host or (None if qt else _lan_ip()))
     if qt:

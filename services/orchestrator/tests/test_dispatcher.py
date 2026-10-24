@@ -13,6 +13,16 @@ import pytest
 from rdf_orchestrator import dispatcher as dsp
 
 
+@pytest.fixture(autouse=True)
+def _no_page_hook():
+    """Isolate the module-global page hook: importing rdf_orchestrator.handlers (TDM-65 paging) installs
+    one, so without this the result depends on which tests ran first. Restored afterwards."""
+    saved = dsp._page_hook
+    dsp.set_page_hook(None)
+    yield
+    dsp.set_page_hook(saved)
+
+
 class FakeDB:
     """Both the Mirror (rows/get) and the Writer (call_reducer)."""
 

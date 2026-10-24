@@ -1,40 +1,81 @@
 'use client';
 
+import Link from 'next/link';
 import { fmtCents } from '@/lib/format';
+import { EpisodeVerdicts, OfferCounts, PayoutStatus, QaFlags, SlotRail } from '@/components/offers/OfferParts';
+import { neededArithmetic, OFFER_STATUS_TEXT, type OfferView } from '@/lib/tdm94/offers';
+import { useTicketOfferViews } from '@/lib/tdm94/useOfferLive';
 import { StatusPill, TestModeBadge } from './Badges';
-import { byNewest, type Contributor, type DatasetOffer } from './util';
+import type { Contributor, DatasetOffer } from './util';
 
-/** E09 slot: offers to buy episodes from a dataset seller. Renders nothing until an offer exists. */
+/**
+ * E09 dataset offers on the ticket page (TDM-75 slot, filled by TDM-94). Renders nothing until an
+ * offer exists. Live: slots fill as the seller delivers, verdicts and QA reasons land per episode,
+ * the payout follows the settle step. Same props as the TDM-75 slot, so TicketView is unchanged.
+ */
 export function OfferCard({ offers, people }: { offers: readonly DatasetOffer[]; people: Map<bigint, Contributor> }) {
+  const ticketId = offers[0]?.ticketId ?? 0n;
+  const views = useTicketOfferViews(ticketId, offers);
   if (offers.length === 0) return null;
   return (
-    <ul className="space-y-3">
-      {byNewest(offers).map((o) => {
-        const seller = people.get(o.sellerId);
-        const need = Math.max(1, o.neededCount);
-        return (
-          <li key={o.id.toString()} className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h3 className="font-semibold">{seller?.name ?? `Seller #${o.sellerId}`}</h3>
-              <StatusPill status={o.status} />
-              <TestModeBadge />
-              <span className="ml-auto text-sm tabular-nums">
-                {fmtCents(o.pricePerEpisodeCents)} per accepted episode, up to {fmtCents(o.pricePerEpisodeCents * BigInt(o.neededCount))}
-              </span>
-            </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800" role="img" aria-label={`${o.acceptedCount} accepted, ${o.ingestedCount} ingested of ${o.neededCount}`}>
-              <div className="relative h-full">
-                <div className="absolute inset-y-0 left-0 bg-zinc-400/70" style={{ width: `${Math.min(100, (o.ingestedCount / need) * 100)}%` }} />
-                <div className="absolute inset-y-0 left-0 bg-emerald-600" style={{ width: `${Math.min(100, (o.acceptedCount / need) * 100)}%` }} />
-              </div>
-            </div>
-            <p className="mt-1.5 text-xs tabular-nums text-zinc-500">
-              {o.acceptedCount} accepted, {o.ingestedCount} ingested, {o.neededCount} needed
-              {o.sourceUri && <> from <code>{o.sourceUri}</code></>}
-            </p>
-          </li>
-        );
-      })}
+    <ul className="space-y-4">
+      {views.map((v) => (
+        <OfferItem key={v.offer.id.toString()} view={v} sellerName={people.get(v.offer.sellerId)?.name} />
+      ))}
     </ul>
+  );
+}
+
+function OfferItem({ view: v, sellerName }: { view: OfferView; sellerName?: string }) {
+  const o = v.offer;
+  return (
+    <li className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h3 className="font-semibold">
+          Offer {o.id.toString()} to {sellerName ?? `seller #${o.sellerId}`}
+        </h3>
+        <StatusPill status={o.status} />
+        <span className="text-sm text-zinc-500">{OFFER_STATUS_TEXT[o.status] ?? ''}</span>
+        <Link href={`/sell/${o.id}`} className="ml-auto text-sm font-medium text-blue-700 hover:underline dark:text-blue-400">
+          Seller page
+        </Link>
+      </div>
+
+      <div className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+        <span className="text-zinc-500">Buying</span>
+        <span className="tabular-nums">
+          <strong>{o.neededCount}</strong> episode{o.neededCount === 1 ? '' : 's'}: {neededArithmetic(v)}
+        </span>
+        <span className="text-zinc-500">Price</span>
+        <span className="flex flex-wrap items-center gap-2 tabular-nums">
+          {fmtCents(o.pricePerEpisodeCents)} per accepted episode, at most {fmtCents(v.maxSpendCents)} <TestModeBadge />
+        </span>
+        <span className="text-zinc-500">Slots</span>
+        <span className="tabular-nums">
+          {v.live} of {o.neededCount} held, {v.openSlots} open
+          {o.sourceUri && (
+            <>
+              {' '}from <code className="text-xs">{o.sourceUri}</code>
+            </>
+          )}
+        </span>
+      </div>
+
+      <div className="mt-3">
+        <SlotRail view={v} size="sm" />
+      </div>
+      <div className="mt-3">
+        <OfferCounts view={v} />
+      </div>
+      <div className="mt-3">
+        <QaFlags view={v} />
+      </div>
+      <div className="mt-3">
+        <EpisodeVerdicts view={v} priceCents={o.pricePerEpisodeCents} />
+      </div>
+      <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+        <PayoutStatus view={v} />
+      </div>
+    </li>
   );
 }

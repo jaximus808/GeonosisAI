@@ -1,0 +1,973 @@
+{
+ "label": "laptop-h100",
+ "mode": "modal",
+ "n": 100,
+ "url": null,
+ "when": "2026-10-24T00:20:54-0700",
+ "host": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+ "frames": "2 x 224x224 JPEG q90 (synthetic)",
+ "jpeg_bytes_mean": 33729,
+ "request_bytes_approx": 45396,
+ "action_chunk": [
+  50,
+  8
+ ],
+ "rtt_ms": {
+  "p50": 159.1,
+  "p95": 268.6,
+  "p99": 519.5,
+  "mean": 188.7,
+  "min": 154.7,
+  "max": 606.9
+ },
+ "server_ms": {
+  "p50": 53.0,
+  "p95": 55.0,
+  "p99": 55.7,
+  "mean": 53.1,
+  "min": 50.4,
+  "max": 56.0
+ },
+ "gpu_ms": {
+  "p50": 40.7,
+  "p95": 41.1,
+  "p99": 41.2,
+  "mean": 40.7,
+  "min": 40.4,
+  "max": 42.0
+ },
+ "policy_ms": {
+  "p50": 51.8,
+  "p95": 53.4,
+  "p99": 54.3,
+  "mean": 51.8,
+  "min": 49.3,
+  "max": 54.8
+ },
+ "decode_ms": {
+  "p50": 1.2,
+  "p95": 1.5,
+  "p99": 1.6,
+  "mean": 1.2,
+  "min": 0.9,
+  "max": 1.6
+ },
+ "network_plus_proxy_ms": {
+  "p50": 105.7,
+  "p95": 217.1,
+  "p99": 467.6,
+  "mean": 135.6,
+  "min": 101.9,
+  "max": 554.2
+ },
+ "client_encode_ms": {
+  "p50": 3.8,
+  "p95": 5.8,
+  "p99": 7.9,
+  "mean": 4.1,
+  "min": 2.8,
+  "max": 9.3
+ },
+ "raw": [
+  {
+   "rtt_ms": 161.02,
+   "encode_ms": 2.92,
+   "jpeg_bytes": 33876,
+   "decode_ms": 1.48,
+   "policy_ms": 53.43,
+   "gpu_ms": 40.95,
+   "server_ms": 54.96
+  },
+  {
+   "rtt_ms": 158.78,
+   "encode_ms": 2.82,
+   "jpeg_bytes": 33652,
+   "decode_ms": 1.23,
+   "policy_ms": 51.86,
+   "gpu_ms": 40.89,
+   "server_ms": 53.14
+  },
+  {
+   "rtt_ms": 160.44,
+   "encode_ms": 4.26,
+   "jpeg_bytes": 33854,
+   "decode_ms": 1.53,
+   "policy_ms": 52.94,
+   "gpu_ms": 40.8,
+   "server_ms": 54.51
+  },
+  {
+   "rtt_ms": 162.64,
+   "encode_ms": 4.57,
+   "jpeg_bytes": 33426,
+   "decode_ms": 1.34,
+   "policy_ms": 54.31,
+   "gpu_ms": 41.1,
+   "server_ms": 55.69
+  },
+  {
+   "rtt_ms": 158.54,
+   "encode_ms": 5.84,
+   "jpeg_bytes": 33694,
+   "decode_ms": 1.42,
+   "policy_ms": 52.67,
+   "gpu_ms": 40.8,
+   "server_ms": 54.14
+  },
+  {
+   "rtt_ms": 161.12,
+   "encode_ms": 5.88,
+   "jpeg_bytes": 33687,
+   "decode_ms": 1.47,
+   "policy_ms": 52.01,
+   "gpu_ms": 40.65,
+   "server_ms": 53.52
+  },
+  {
+   "rtt_ms": 158.32,
+   "encode_ms": 4.85,
+   "jpeg_bytes": 34034,
+   "decode_ms": 1.49,
+   "policy_ms": 51.26,
+   "gpu_ms": 40.71,
+   "server_ms": 52.8
+  },
+  {
+   "rtt_ms": 160.52,
+   "encode_ms": 3.33,
+   "jpeg_bytes": 33614,
+   "decode_ms": 1.18,
+   "policy_ms": 52.6,
+   "gpu_ms": 40.93,
+   "server_ms": 53.83
+  },
+  {
+   "rtt_ms": 159.3,
+   "encode_ms": 5.5,
+   "jpeg_bytes": 33355,
+   "decode_ms": 1.22,
+   "policy_ms": 52.14,
+   "gpu_ms": 40.81,
+   "server_ms": 53.4
+  },
+  {
+   "rtt_ms": 158.24,
+   "encode_ms": 3.28,
+   "jpeg_bytes": 33458,
+   "decode_ms": 1.21,
+   "policy_ms": 52.21,
+   "gpu_ms": 41.14,
+   "server_ms": 53.47
+  },
+  {
+   "rtt_ms": 156.45,
+   "encode_ms": 6.15,
+   "jpeg_bytes": 33689,
+   "decode_ms": 1.16,
+   "policy_ms": 51.83,
+   "gpu_ms": 40.62,
+   "server_ms": 53.04
+  },
+  {
+   "rtt_ms": 156.83,
+   "encode_ms": 4.38,
+   "jpeg_bytes": 33845,
+   "decode_ms": 1.37,
+   "policy_ms": 51.66,
+   "gpu_ms": 40.97,
+   "server_ms": 53.07
+  },
+  {
+   "rtt_ms": 156.87,
+   "encode_ms": 3.21,
+   "jpeg_bytes": 33756,
+   "decode_ms": 1.12,
+   "policy_ms": 52.2,
+   "gpu_ms": 40.65,
+   "server_ms": 53.37
+  },
+  {
+   "rtt_ms": 157.45,
+   "encode_ms": 4.74,
+   "jpeg_bytes": 33817,
+   "decode_ms": 1.29,
+   "policy_ms": 51.61,
+   "gpu_ms": 40.74,
+   "server_ms": 52.94
+  },
+  {
+   "rtt_ms": 159.95,
+   "encode_ms": 3.68,
+   "jpeg_bytes": 33520,
+   "decode_ms": 1.16,
+   "policy_ms": 51.47,
+   "gpu_ms": 40.89,
+   "server_ms": 52.69
+  },
+  {
+   "rtt_ms": 157.66,
+   "encode_ms": 5.33,
+   "jpeg_bytes": 33605,
+   "decode_ms": 1.15,
+   "policy_ms": 51.55,
+   "gpu_ms": 40.82,
+   "server_ms": 52.75
+  },
+  {
+   "rtt_ms": 155.91,
+   "encode_ms": 3.33,
+   "jpeg_bytes": 32965,
+   "decode_ms": 1.47,
+   "policy_ms": 52.51,
+   "gpu_ms": 40.74,
+   "server_ms": 54.02
+  },
+  {
+   "rtt_ms": 159.83,
+   "encode_ms": 3.96,
+   "jpeg_bytes": 33669,
+   "decode_ms": 1.18,
+   "policy_ms": 52.94,
+   "gpu_ms": 40.88,
+   "server_ms": 54.16
+  },
+  {
+   "rtt_ms": 156.11,
+   "encode_ms": 2.89,
+   "jpeg_bytes": 33462,
+   "decode_ms": 1.08,
+   "policy_ms": 50.92,
+   "gpu_ms": 40.48,
+   "server_ms": 52.06
+  },
+  {
+   "rtt_ms": 180.32,
+   "encode_ms": 5.08,
+   "jpeg_bytes": 33720,
+   "decode_ms": 1.05,
+   "policy_ms": 51.14,
+   "gpu_ms": 40.51,
+   "server_ms": 52.23
+  },
+  {
+   "rtt_ms": 244.74,
+   "encode_ms": 4.98,
+   "jpeg_bytes": 33637,
+   "decode_ms": 0.98,
+   "policy_ms": 51.06,
+   "gpu_ms": 40.51,
+   "server_ms": 52.08
+  },
+  {
+   "rtt_ms": 160.49,
+   "encode_ms": 4.69,
+   "jpeg_bytes": 33125,
+   "decode_ms": 1.46,
+   "policy_ms": 52.2,
+   "gpu_ms": 40.84,
+   "server_ms": 53.71
+  },
+  {
+   "rtt_ms": 159.17,
+   "encode_ms": 5.3,
+   "jpeg_bytes": 33832,
+   "decode_ms": 1.43,
+   "policy_ms": 51.2,
+   "gpu_ms": 40.71,
+   "server_ms": 52.67
+  },
+  {
+   "rtt_ms": 159.23,
+   "encode_ms": 4.64,
+   "jpeg_bytes": 34078,
+   "decode_ms": 1.17,
+   "policy_ms": 53.81,
+   "gpu_ms": 40.95,
+   "server_ms": 55.03
+  },
+  {
+   "rtt_ms": 156.87,
+   "encode_ms": 4.98,
+   "jpeg_bytes": 33800,
+   "decode_ms": 1.3,
+   "policy_ms": 51.42,
+   "gpu_ms": 40.65,
+   "server_ms": 52.77
+  },
+  {
+   "rtt_ms": 171.2,
+   "encode_ms": 3.82,
+   "jpeg_bytes": 33629,
+   "decode_ms": 1.45,
+   "policy_ms": 52.41,
+   "gpu_ms": 42.02,
+   "server_ms": 53.89
+  },
+  {
+   "rtt_ms": 157.28,
+   "encode_ms": 2.88,
+   "jpeg_bytes": 33554,
+   "decode_ms": 1.18,
+   "policy_ms": 51.56,
+   "gpu_ms": 40.82,
+   "server_ms": 52.8
+  },
+  {
+   "rtt_ms": 157.28,
+   "encode_ms": 4.29,
+   "jpeg_bytes": 33339,
+   "decode_ms": 1.26,
+   "policy_ms": 51.84,
+   "gpu_ms": 40.56,
+   "server_ms": 53.14
+  },
+  {
+   "rtt_ms": 158.69,
+   "encode_ms": 5.09,
+   "jpeg_bytes": 34271,
+   "decode_ms": 1.19,
+   "policy_ms": 51.13,
+   "gpu_ms": 40.79,
+   "server_ms": 52.36
+  },
+  {
+   "rtt_ms": 156.58,
+   "encode_ms": 5.1,
+   "jpeg_bytes": 33443,
+   "decode_ms": 1.14,
+   "policy_ms": 51.07,
+   "gpu_ms": 40.55,
+   "server_ms": 52.26
+  },
+  {
+   "rtt_ms": 177.52,
+   "encode_ms": 3.25,
+   "jpeg_bytes": 34226,
+   "decode_ms": 1.19,
+   "policy_ms": 50.68,
+   "gpu_ms": 40.56,
+   "server_ms": 51.91
+  },
+  {
+   "rtt_ms": 156.08,
+   "encode_ms": 4.14,
+   "jpeg_bytes": 33525,
+   "decode_ms": 1.32,
+   "policy_ms": 51.76,
+   "gpu_ms": 40.54,
+   "server_ms": 53.13
+  },
+  {
+   "rtt_ms": 155.03,
+   "encode_ms": 3.03,
+   "jpeg_bytes": 33849,
+   "decode_ms": 1.31,
+   "policy_ms": 51.18,
+   "gpu_ms": 40.76,
+   "server_ms": 52.53
+  },
+  {
+   "rtt_ms": 154.71,
+   "encode_ms": 3.08,
+   "jpeg_bytes": 34008,
+   "decode_ms": 0.97,
+   "policy_ms": 50.4,
+   "gpu_ms": 40.46,
+   "server_ms": 51.41
+  },
+  {
+   "rtt_ms": 157.76,
+   "encode_ms": 3.29,
+   "jpeg_bytes": 33643,
+   "decode_ms": 1.31,
+   "policy_ms": 50.91,
+   "gpu_ms": 40.82,
+   "server_ms": 52.27
+  },
+  {
+   "rtt_ms": 161.29,
+   "encode_ms": 3.64,
+   "jpeg_bytes": 33599,
+   "decode_ms": 0.98,
+   "policy_ms": 50.22,
+   "gpu_ms": 40.49,
+   "server_ms": 51.23
+  },
+  {
+   "rtt_ms": 163.09,
+   "encode_ms": 4.1,
+   "jpeg_bytes": 34050,
+   "decode_ms": 1.28,
+   "policy_ms": 50.61,
+   "gpu_ms": 40.5,
+   "server_ms": 51.92
+  },
+  {
+   "rtt_ms": 172.14,
+   "encode_ms": 3.05,
+   "jpeg_bytes": 33941,
+   "decode_ms": 1.22,
+   "policy_ms": 51.36,
+   "gpu_ms": 40.57,
+   "server_ms": 52.61
+  },
+  {
+   "rtt_ms": 606.85,
+   "encode_ms": 2.94,
+   "jpeg_bytes": 33556,
+   "decode_ms": 1.45,
+   "policy_ms": 51.18,
+   "gpu_ms": 40.74,
+   "server_ms": 52.66
+  },
+  {
+   "rtt_ms": 187.9,
+   "encode_ms": 2.86,
+   "jpeg_bytes": 33790,
+   "decode_ms": 1.17,
+   "policy_ms": 51.2,
+   "gpu_ms": 40.93,
+   "server_ms": 52.41
+  },
+  {
+   "rtt_ms": 245.45,
+   "encode_ms": 3.2,
+   "jpeg_bytes": 33562,
+   "decode_ms": 1.18,
+   "policy_ms": 51.21,
+   "gpu_ms": 40.71,
+   "server_ms": 52.43
+  },
+  {
+   "rtt_ms": 496.17,
+   "encode_ms": 2.94,
+   "jpeg_bytes": 33836,
+   "decode_ms": 1.2,
+   "policy_ms": 52.26,
+   "gpu_ms": 40.7,
+   "server_ms": 53.5
+  },
+  {
+   "rtt_ms": 518.58,
+   "encode_ms": 3.07,
+   "jpeg_bytes": 33366,
+   "decode_ms": 1.28,
+   "policy_ms": 50.57,
+   "gpu_ms": 40.76,
+   "server_ms": 51.88
+  },
+  {
+   "rtt_ms": 216.03,
+   "encode_ms": 2.92,
+   "jpeg_bytes": 33749,
+   "decode_ms": 1.65,
+   "policy_ms": 52.36,
+   "gpu_ms": 40.93,
+   "server_ms": 54.06
+  },
+  {
+   "rtt_ms": 241.81,
+   "encode_ms": 3.3,
+   "jpeg_bytes": 33986,
+   "decode_ms": 1.23,
+   "policy_ms": 50.83,
+   "gpu_ms": 40.48,
+   "server_ms": 52.09
+  },
+  {
+   "rtt_ms": 442.78,
+   "encode_ms": 3.06,
+   "jpeg_bytes": 33800,
+   "decode_ms": 1.42,
+   "policy_ms": 51.89,
+   "gpu_ms": 40.55,
+   "server_ms": 53.37
+  },
+  {
+   "rtt_ms": 375.29,
+   "encode_ms": 2.87,
+   "jpeg_bytes": 33835,
+   "decode_ms": 1.1,
+   "policy_ms": 51.89,
+   "gpu_ms": 40.87,
+   "server_ms": 53.04
+  },
+  {
+   "rtt_ms": 156.31,
+   "encode_ms": 3.93,
+   "jpeg_bytes": 33315,
+   "decode_ms": 1.07,
+   "policy_ms": 52.21,
+   "gpu_ms": 40.96,
+   "server_ms": 53.32
+  },
+  {
+   "rtt_ms": 156.73,
+   "encode_ms": 5.54,
+   "jpeg_bytes": 34016,
+   "decode_ms": 1.17,
+   "policy_ms": 51.67,
+   "gpu_ms": 40.71,
+   "server_ms": 52.9
+  },
+  {
+   "rtt_ms": 158.56,
+   "encode_ms": 3.08,
+   "jpeg_bytes": 33828,
+   "decode_ms": 1.27,
+   "policy_ms": 52.09,
+   "gpu_ms": 40.49,
+   "server_ms": 53.4
+  },
+  {
+   "rtt_ms": 158.1,
+   "encode_ms": 4.73,
+   "jpeg_bytes": 33901,
+   "decode_ms": 1.08,
+   "policy_ms": 52.2,
+   "gpu_ms": 40.69,
+   "server_ms": 53.34
+  },
+  {
+   "rtt_ms": 155.88,
+   "encode_ms": 4.37,
+   "jpeg_bytes": 33828,
+   "decode_ms": 1.28,
+   "policy_ms": 50.91,
+   "gpu_ms": 40.58,
+   "server_ms": 52.24
+  },
+  {
+   "rtt_ms": 168.12,
+   "encode_ms": 3.72,
+   "jpeg_bytes": 33510,
+   "decode_ms": 1.14,
+   "policy_ms": 51.75,
+   "gpu_ms": 40.81,
+   "server_ms": 52.95
+  },
+  {
+   "rtt_ms": 155.84,
+   "encode_ms": 3.08,
+   "jpeg_bytes": 33274,
+   "decode_ms": 1.08,
+   "policy_ms": 51.56,
+   "gpu_ms": 40.74,
+   "server_ms": 52.68
+  },
+  {
+   "rtt_ms": 157.76,
+   "encode_ms": 4.2,
+   "jpeg_bytes": 34253,
+   "decode_ms": 1.3,
+   "policy_ms": 51.42,
+   "gpu_ms": 40.65,
+   "server_ms": 52.77
+  },
+  {
+   "rtt_ms": 159.35,
+   "encode_ms": 7.84,
+   "jpeg_bytes": 33860,
+   "decode_ms": 1.09,
+   "policy_ms": 50.6,
+   "gpu_ms": 40.6,
+   "server_ms": 51.72
+  },
+  {
+   "rtt_ms": 158.8,
+   "encode_ms": 5.72,
+   "jpeg_bytes": 33792,
+   "decode_ms": 1.24,
+   "policy_ms": 51.96,
+   "gpu_ms": 40.79,
+   "server_ms": 53.24
+  },
+  {
+   "rtt_ms": 156.93,
+   "encode_ms": 3.19,
+   "jpeg_bytes": 34267,
+   "decode_ms": 1.19,
+   "policy_ms": 51.34,
+   "gpu_ms": 40.72,
+   "server_ms": 52.58
+  },
+  {
+   "rtt_ms": 157.03,
+   "encode_ms": 3.64,
+   "jpeg_bytes": 33441,
+   "decode_ms": 1.22,
+   "policy_ms": 52.14,
+   "gpu_ms": 40.65,
+   "server_ms": 53.41
+  },
+  {
+   "rtt_ms": 158.54,
+   "encode_ms": 5.68,
+   "jpeg_bytes": 33780,
+   "decode_ms": 1.23,
+   "policy_ms": 50.93,
+   "gpu_ms": 40.43,
+   "server_ms": 52.21
+  },
+  {
+   "rtt_ms": 155.59,
+   "encode_ms": 3.15,
+   "jpeg_bytes": 33950,
+   "decode_ms": 1.3,
+   "policy_ms": 50.95,
+   "gpu_ms": 40.41,
+   "server_ms": 52.28
+  },
+  {
+   "rtt_ms": 157.03,
+   "encode_ms": 4.85,
+   "jpeg_bytes": 33792,
+   "decode_ms": 1.21,
+   "policy_ms": 50.75,
+   "gpu_ms": 40.64,
+   "server_ms": 52.02
+  },
+  {
+   "rtt_ms": 157.73,
+   "encode_ms": 2.85,
+   "jpeg_bytes": 34078,
+   "decode_ms": 1.16,
+   "policy_ms": 51.45,
+   "gpu_ms": 40.51,
+   "server_ms": 52.64
+  },
+  {
+   "rtt_ms": 157.11,
+   "encode_ms": 3.65,
+   "jpeg_bytes": 33624,
+   "decode_ms": 1.25,
+   "policy_ms": 51.83,
+   "gpu_ms": 40.54,
+   "server_ms": 53.13
+  },
+  {
+   "rtt_ms": 193.88,
+   "encode_ms": 3.05,
+   "jpeg_bytes": 33632,
+   "decode_ms": 1.15,
+   "policy_ms": 50.83,
+   "gpu_ms": 40.76,
+   "server_ms": 52.02
+  },
+  {
+   "rtt_ms": 180.55,
+   "encode_ms": 3.41,
+   "jpeg_bytes": 33861,
+   "decode_ms": 1.04,
+   "policy_ms": 49.32,
+   "gpu_ms": 40.38,
+   "server_ms": 50.39
+  },
+  {
+   "rtt_ms": 246.74,
+   "encode_ms": 9.33,
+   "jpeg_bytes": 33650,
+   "decode_ms": 1.04,
+   "policy_ms": 51.2,
+   "gpu_ms": 40.45,
+   "server_ms": 52.28
+  },
+  {
+   "rtt_ms": 263.0,
+   "encode_ms": 3.22,
+   "jpeg_bytes": 34090,
+   "decode_ms": 1.2,
+   "policy_ms": 50.17,
+   "gpu_ms": 40.57,
+   "server_ms": 51.41
+  },
+  {
+   "rtt_ms": 200.61,
+   "encode_ms": 3.6,
+   "jpeg_bytes": 33678,
+   "decode_ms": 1.5,
+   "policy_ms": 52.8,
+   "gpu_ms": 40.78,
+   "server_ms": 54.34
+  },
+  {
+   "rtt_ms": 258.87,
+   "encode_ms": 3.94,
+   "jpeg_bytes": 33812,
+   "decode_ms": 1.08,
+   "policy_ms": 52.08,
+   "gpu_ms": 40.97,
+   "server_ms": 53.2
+  },
+  {
+   "rtt_ms": 227.94,
+   "encode_ms": 2.96,
+   "jpeg_bytes": 33620,
+   "decode_ms": 1.26,
+   "policy_ms": 51.88,
+   "gpu_ms": 40.64,
+   "server_ms": 53.17
+  },
+  {
+   "rtt_ms": 233.27,
+   "encode_ms": 4.47,
+   "jpeg_bytes": 33479,
+   "decode_ms": 1.19,
+   "policy_ms": 51.28,
+   "gpu_ms": 41.09,
+   "server_ms": 52.53
+  },
+  {
+   "rtt_ms": 243.34,
+   "encode_ms": 5.75,
+   "jpeg_bytes": 33890,
+   "decode_ms": 1.35,
+   "policy_ms": 51.37,
+   "gpu_ms": 40.82,
+   "server_ms": 52.76
+  },
+  {
+   "rtt_ms": 251.27,
+   "encode_ms": 3.66,
+   "jpeg_bytes": 33885,
+   "decode_ms": 1.05,
+   "policy_ms": 50.46,
+   "gpu_ms": 40.57,
+   "server_ms": 51.57
+  },
+  {
+   "rtt_ms": 254.56,
+   "encode_ms": 4.86,
+   "jpeg_bytes": 33621,
+   "decode_ms": 1.6,
+   "policy_ms": 52.51,
+   "gpu_ms": 40.53,
+   "server_ms": 54.15
+  },
+  {
+   "rtt_ms": 197.35,
+   "encode_ms": 5.2,
+   "jpeg_bytes": 33650,
+   "decode_ms": 1.12,
+   "policy_ms": 51.04,
+   "gpu_ms": 40.65,
+   "server_ms": 52.21
+  },
+  {
+   "rtt_ms": 163.93,
+   "encode_ms": 4.17,
+   "jpeg_bytes": 33630,
+   "decode_ms": 1.25,
+   "policy_ms": 51.01,
+   "gpu_ms": 40.73,
+   "server_ms": 52.31
+  },
+  {
+   "rtt_ms": 177.74,
+   "encode_ms": 4.17,
+   "jpeg_bytes": 34003,
+   "decode_ms": 1.17,
+   "policy_ms": 54.75,
+   "gpu_ms": 40.59,
+   "server_ms": 55.96
+  },
+  {
+   "rtt_ms": 157.31,
+   "encode_ms": 3.81,
+   "jpeg_bytes": 33837,
+   "decode_ms": 1.29,
+   "policy_ms": 52.12,
+   "gpu_ms": 40.87,
+   "server_ms": 53.46
+  },
+  {
+   "rtt_ms": 158.1,
+   "encode_ms": 4.4,
+   "jpeg_bytes": 33782,
+   "decode_ms": 1.17,
+   "policy_ms": 52.28,
+   "gpu_ms": 40.75,
+   "server_ms": 53.5
+  },
+  {
+   "rtt_ms": 160.08,
+   "encode_ms": 2.85,
+   "jpeg_bytes": 33775,
+   "decode_ms": 1.26,
+   "policy_ms": 52.01,
+   "gpu_ms": 40.68,
+   "server_ms": 53.33
+  },
+  {
+   "rtt_ms": 192.74,
+   "encode_ms": 3.88,
+   "jpeg_bytes": 33329,
+   "decode_ms": 1.31,
+   "policy_ms": 53.9,
+   "gpu_ms": 41.07,
+   "server_ms": 55.26
+  },
+  {
+   "rtt_ms": 158.03,
+   "encode_ms": 2.97,
+   "jpeg_bytes": 33947,
+   "decode_ms": 1.23,
+   "policy_ms": 51.89,
+   "gpu_ms": 40.65,
+   "server_ms": 53.17
+  },
+  {
+   "rtt_ms": 155.07,
+   "encode_ms": 4.05,
+   "jpeg_bytes": 33878,
+   "decode_ms": 0.95,
+   "policy_ms": 50.9,
+   "gpu_ms": 40.58,
+   "server_ms": 51.89
+  },
+  {
+   "rtt_ms": 159.02,
+   "encode_ms": 3.59,
+   "jpeg_bytes": 33971,
+   "decode_ms": 1.32,
+   "policy_ms": 51.27,
+   "gpu_ms": 40.98,
+   "server_ms": 52.64
+  },
+  {
+   "rtt_ms": 198.44,
+   "encode_ms": 3.67,
+   "jpeg_bytes": 33647,
+   "decode_ms": 1.13,
+   "policy_ms": 52.44,
+   "gpu_ms": 40.94,
+   "server_ms": 53.62
+  },
+  {
+   "rtt_ms": 185.43,
+   "encode_ms": 3.21,
+   "jpeg_bytes": 33578,
+   "decode_ms": 1.2,
+   "policy_ms": 51.96,
+   "gpu_ms": 40.74,
+   "server_ms": 53.21
+  },
+  {
+   "rtt_ms": 158.5,
+   "encode_ms": 4.44,
+   "jpeg_bytes": 33646,
+   "decode_ms": 1.11,
+   "policy_ms": 53.19,
+   "gpu_ms": 41.24,
+   "server_ms": 54.35
+  },
+  {
+   "rtt_ms": 155.84,
+   "encode_ms": 3.68,
+   "jpeg_bytes": 33768,
+   "decode_ms": 1.23,
+   "policy_ms": 51.47,
+   "gpu_ms": 40.75,
+   "server_ms": 52.75
+  },
+  {
+   "rtt_ms": 158.36,
+   "encode_ms": 3.78,
+   "jpeg_bytes": 33801,
+   "decode_ms": 1.37,
+   "policy_ms": 51.82,
+   "gpu_ms": 41.18,
+   "server_ms": 53.25
+  },
+  {
+   "rtt_ms": 157.73,
+   "encode_ms": 4.05,
+   "jpeg_bytes": 33542,
+   "decode_ms": 1.19,
+   "policy_ms": 52.27,
+   "gpu_ms": 40.65,
+   "server_ms": 53.52
+  },
+  {
+   "rtt_ms": 159.59,
+   "encode_ms": 5.2,
+   "jpeg_bytes": 33691,
+   "decode_ms": 1.63,
+   "policy_ms": 53.1,
+   "gpu_ms": 40.75,
+   "server_ms": 54.77
+  },
+  {
+   "rtt_ms": 160.33,
+   "encode_ms": 5.39,
+   "jpeg_bytes": 34030,
+   "decode_ms": 1.37,
+   "policy_ms": 53.4,
+   "gpu_ms": 41.2,
+   "server_ms": 54.82
+  },
+  {
+   "rtt_ms": 157.82,
+   "encode_ms": 7.37,
+   "jpeg_bytes": 33581,
+   "decode_ms": 1.08,
+   "policy_ms": 51.66,
+   "gpu_ms": 40.81,
+   "server_ms": 52.79
+  },
+  {
+   "rtt_ms": 160.33,
+   "encode_ms": 3.34,
+   "jpeg_bytes": 33399,
+   "decode_ms": 0.97,
+   "policy_ms": 53.95,
+   "gpu_ms": 40.73,
+   "server_ms": 54.97
+  },
+  {
+   "rtt_ms": 157.78,
+   "encode_ms": 3.1,
+   "jpeg_bytes": 33615,
+   "decode_ms": 1.5,
+   "policy_ms": 52.47,
+   "gpu_ms": 40.76,
+   "server_ms": 54.02
+  },
+  {
+   "rtt_ms": 158.35,
+   "encode_ms": 2.91,
+   "jpeg_bytes": 33521,
+   "decode_ms": 1.29,
+   "policy_ms": 52.27,
+   "gpu_ms": 40.89,
+   "server_ms": 53.61
+  },
+  {
+   "rtt_ms": 157.39,
+   "encode_ms": 3.02,
+   "jpeg_bytes": 33818,
+   "decode_ms": 1.09,
+   "policy_ms": 51.84,
+   "gpu_ms": 40.93,
+   "server_ms": 52.97
+  },
+  {
+   "rtt_ms": 158.87,
+   "encode_ms": 4.58,
+   "jpeg_bytes": 34101,
+   "decode_ms": 1.26,
+   "policy_ms": 51.64,
+   "gpu_ms": 40.77,
+   "server_ms": 52.94
+  },
+  {
+   "rtt_ms": 157.3,
+   "encode_ms": 2.82,
+   "jpeg_bytes": 33932,
+   "decode_ms": 1.15,
+   "policy_ms": 51.83,
+   "gpu_ms": 40.63,
+   "server_ms": 53.02
+  }
+ ]
+}

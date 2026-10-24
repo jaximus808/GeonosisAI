@@ -113,3 +113,14 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Latency on H100:** p50 157 ms, p95 183 ms (websocket), of which 41 ms is GPU. Cold start is ~33 s.
 - **Spike endpoint:** `POLICY_ENDPOINT_URL` (Modal app `rdf-s05b-policy`, us-west, H100→A100→L40S). It scales to zero; warm it with `spikes/tdm-37-latency/warm.py up` and stop it with `down`. **It has no auth yet.**
 - The base π0.5 actions don't mean anything for the YAM until the fine-tuned config defines the YAM state/action mapping.
+
+## Publishing to maincloud from a clean checkout (preferred)
+- The shared working tree often holds other tickets' half-finished reducer files. Publish from a clean worktree of HEAD instead:
+  - `git worktree add --detach $TMPDIR/<ticket>-pub HEAD`
+  - symlink `spacetime/spacetimedb/node_modules` into it
+  - `npx tsc --noEmit`
+  - take the lock
+  - `spacetime publish` from `$TMPDIR/<ticket>-pub/spacetime`
+  - release the lock and remove the worktree
+- That means **commit your reducer first, then publish**.
+- If a publish is refused by a permission prompt, release the lock and note it in your result; the orchestrator session will publish.

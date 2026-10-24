@@ -48,7 +48,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import io
+import subprocess
 import json
 import os
 import re
@@ -94,7 +96,8 @@ class DropSettings(RdfSettings):
     rdf_drop_dir: str | None = None
     rdf_drop_types: str = "clean_teleop,recovery_takeover,reset"
     rdf_drop_show_access_code: bool = False
-    rdf_drop_frame: Literal["auto", "sketch", "none"] = "auto"
+    rdf_drop_frame: Literal["auto", "render", "sketch", "none"] = "auto"  # auto: photo > MuJoCo render > sketch
+    rdf_drop_still_python: str | None = None  # python with mujoco (default: services/robot-client/.venv)
     rdf_web_public_url: str | None = None
     rdf_public_root: str | None = None
     rdf_public_access_code: SecretStr | None = None
@@ -153,6 +156,27 @@ def public_base(s: DropSettings) -> str:
     except (OSError, ValueError):
         pass
     return "http://localhost:3000"
+
+
+LOCAL_HOSTS = ("localhost", "0.0.0.0", "::1", "[::1]")
+
+
+def is_public_url(base: str) -> bool:
+    """A link phones can open: https, and not a loopback / LAN-only / .local host."""
+    from urllib.parse import urlparse
+
+    try:
+        u = urlparse(base)
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    if u.scheme != "https" or not host or host in LOCAL_HOSTS or host.startswith("127."):
+        return False
+    if host.endswith((".local", ".localhost", ".internal", ".lan")) or "." not in host:
+        return False
+    if re.fullmatch(r"(10|192\.168|172\.(1[6-9]|2\d|3[01]))(\.\d+){2,3}", host):
+        return False
+    return True
 
 
 def access_code(s: DropSettings) -> str | None:
@@ -279,7 +303,8 @@ class Drop:
     created_at: float
     mode: str
     sample: bool = False
-    frame: str = ""  # photo | sketch | none
+    frame: str = ""  # photo | render | sketch | none
+    public_url_ok: bool = False
     channels: dict[str, dict] = field(default_factory=dict)  # name -> {state, link, card, text, post_url, ...}
     share: dict[str, str] = field(default_factory=dict)
 
@@ -359,7 +384,8 @@ class Dropper:
     def __init__(self, settings: DropSettings | None = None, *, store: DropStore | None = None,
                  http: httpx.Client | None = None, append: Append | None = None,
                  photo: Callable[[int], bytes | None] | None = None, clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep, inline: bool = False) -> None:
+                 sleep: Callable[[float], None] = time.sleep, inline: bool = False,
+                 still_runner: Callable[[dict, list, list], bool] | None = None) -> None:
         self.s = settings or DropSettings()
         self.store = store or DropStore(self.s.rdf_drop_dir or DEFAULT_DIR)
         self.http = http or httpx.Client(timeout=20.0, follow_redirects=False)
@@ -372,6 +398,10 @@ class Dropper:
         self._lock = threading.RLock()
         self._dropped: set[int] = set()  # task ids already given a drop (this process)
         self._claims_logged: set[int] = set()  # task ids whose claim src is already logged
+        self.still_runner = still_runner or (lambda spec, sizes, outs: run_still_subprocess(
+            spec, sizes, outs, python=self.s.rdf_drop_still_python))
+        self._still_failed: set[str] = set()  # scenes MuJoCo could not render: sketch, don't retry
+        self._still_lock = threading.Lock()  # one render at a time (the laptop is busy)
 
     # ---- plumbing
     @property
@@ -418,8 +448,46 @@ class Dropper:
             from rdf_common import scene_spec as ss
 
             spec = ss.default_spec()
-        label = "SIM SCENE  TOP VIEW" if (f.sim or f.sample) else "SCENE SKETCH  TOP VIEW"
-        return (lambda w, h: card.scene_sketch(spec, w, h)), label, "sketch"
+        sketch_label = "SIM SCENE  TOP VIEW" if (f.sim or f.sample) else "SCENE SKETCH  TOP VIEW"
+        want_render = self.s.rdf_drop_frame in ("auto", "render") and spec is not None
+        used: dict[str, str] = {}
+
+        def draw(w: int, h: int) -> tuple[Any, str]:
+            if want_render:
+                im = self.render_still(spec, w, h)
+                if im is not None:
+                    used["kind"] = "render"
+                    return im, "SIM RENDER  TOP CAMERA"
+            used.setdefault("kind", "sketch")
+            return card.scene_sketch(spec, w, h), sketch_label
+
+        draw.used = used  # type: ignore[attr-defined]  # build() reads which source was used
+        return draw, sketch_label, "render" if want_render else "sketch"
+
+    # ---- MuJoCo still (rendered once per scene + size, cached on disk)
+    def render_still(self, spec: dict, w: int, h: int) -> Any:
+        from PIL import Image
+
+        key = hashlib.sha256(json.dumps(spec, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        out = self.store.root / "_stills" / f"{key}-{int(w)}x{int(h)}.png"
+        if not out.exists():
+            if key in self._still_failed:
+                return None
+            with self._still_lock:
+                if not out.exists():
+                    ok = False
+                    try:
+                        ok = bool(self.still_runner(spec, [(int(w), int(h))], [out]))
+                    except Exception as e:  # noqa: BLE001 - fall back to the sketch
+                        log.warning("job_drop.still_failed", extra={"fields": {"error": type(e).__name__}})
+                    if not ok or not out.exists():
+                        self._still_failed.add(key)
+                        return None
+        try:
+            with Image.open(out) as im:
+                return im.convert("RGB")
+        except OSError:
+            return None
 
     # ---- building
     def card_info(self, f: DropFacts) -> card.CardInfo:
@@ -440,6 +508,7 @@ class Dropper:
 
     def build(self, f: DropFacts) -> Drop:
         base, code = public_base(self.s), access_code(self.s)
+        public_ok = is_public_url(base)
         tid = f.task_ids[0] if f.task_ids else 0
         drop_id = f"task-{tid}" if not f.sample else f"sample-{int(self.clock() * 1000)}"
         old = self.store.load(drop_id)
@@ -456,7 +525,7 @@ class Dropper:
             prev = drop.channels.get(name) or {}
             if prev.get("state") == "posted":
                 continue
-            link = task_link(base, tid, name, code)
+            link = task_link(base, tid, name, code) if public_ok else ""  # never print a localhost link
             png = card.render_card(info, size=ch.size, link=link, short=_short(link), frame=frame, frame_label=label)
             text = ch.text(self.post_of(f, link))
             p = self.store.write(drop_id, f"card-{name}.png", png)
@@ -466,6 +535,10 @@ class Dropper:
                                    "configured": bool(ch.configured)}
             if name == "x":
                 drop.channels[name]["cost_estimate_usd"] = ch.cost(text)
+        used = getattr(getattr(frame, "__wrapped_draw__", None), "used", None) or {}
+        if used.get("kind"):
+            drop.frame = used["kind"]
+        drop.public_url_ok = public_ok
         self.store.save(drop)
         return drop
 
@@ -528,6 +601,19 @@ class Dropper:
         if self.mode != "live":
             return {n: {"state": "dry_run"} for n in (only or drop.channels)}
         f = f or self._facts_of(drop)
+        targets = [n for n, c in self.channels.items() if c.configured and (not only or n in only)]
+        if not is_public_url(public_base(self.s)):
+            # a live post must carry a link phones can open: no RDF_WEB_PUBLIC_URL / demo-public -> no post
+            for n in targets:
+                if drop.channels.get(n, {}).get("state") != "posted":
+                    drop.channels.setdefault(n, {})["state"] = "no_public_url"
+            self.store.save(drop)
+            self.event(EV_SKIPPED, {"drop_id": drop.drop_id, "task_id": drop.task_id, "reason": "no_public_url",
+                                    "channels": targets, "public_url": public_base(self.s)})
+            return {n: {"state": "no_public_url"} for n in targets}
+        if any(not drop.channels.get(n, {}).get("link") for n in targets
+               if drop.channels.get(n, {}).get("state") != "posted"):
+            drop = self.build(f)  # built while there was no public URL: re-render with the real link
         with self._lock:
             already_out = any(c.get("state") == "posted" for c in drop.channels.values())
             if not manual and not already_out and self.posted_last_hour() >= self.s.rdf_drop_max_per_hour:
@@ -596,6 +682,10 @@ class Dropper:
                     "The user switches it to live in .env."}
         if not self.channels[channel].configured:
             return {"ok": False, "code": "not_configured", "detail": f"{channel} has no credentials set"}
+        if not is_public_url(public_base(self.s)):
+            self.publish(drop, only=[channel], manual=True)  # logs job_drop.skipped reason=no_public_url
+            return {"ok": False, "code": "no_public_url", "detail": "No public web URL: set RDF_WEB_PUBLIC_URL "
+                    "(https) or run make demo-public. A localhost link is never posted."}
         res = self.publish(drop, only=[channel], manual=True)
         return {"ok": res.get(channel, {}).get("state") == "posted", **res.get(channel, {})}
 
@@ -625,7 +715,40 @@ def _memo_frame(draw: Callable[[int, int], Any]) -> Callable[[int, int], Any]:
             cache[(w, h)] = draw(w, h)
         return cache[(w, h)]
 
+    get.__wrapped_draw__ = draw  # type: ignore[attr-defined]
     return get
+
+
+ROBOT_CLIENT = Path(__file__).resolve().parents[3] / "robot-client"
+
+
+def run_still_subprocess(spec: dict, sizes: list[tuple[int, int]], outs: list[Path], *, python: str | None = None,
+                         timeout: float = 60.0) -> bool:
+    """Render MuJoCo stills with the robot client's venv (it has mujoco; the orchestrator does not), at low
+    CPU priority. ``python -m rdf_robot_client.tdm108_still``; True when every PNG was written."""
+    py = python or (str(ROBOT_CLIENT / ".venv" / "bin" / "python")
+                    if (ROBOT_CLIENT / ".venv" / "bin" / "python").exists() else None)
+    cmd = [py, "-m"] if py else ["uv", "run", "--quiet", "--project", str(ROBOT_CLIENT), "python", "-m"]
+    outs[0].parent.mkdir(parents=True, exist_ok=True)
+    spec_path = outs[0].with_suffix(".spec.json")
+    spec_path.write_text(json.dumps(spec, default=str))
+    args = ["rdf_robot_client.tdm108_still", "--spec", str(spec_path)]
+    for (w, h), o in zip(sizes, outs):
+        args += ["--size", f"{w}x{h}", "--out", str(o)]
+    env = {**os.environ}
+    env.setdefault("MUJOCO_GL", "cgl" if sys.platform == "darwin" else "egl")
+    try:
+        r = subprocess.run(cmd + args, cwd=str(ROBOT_CLIENT), env=env, capture_output=True, timeout=timeout,
+                           preexec_fn=(lambda: os.nice(10)) if hasattr(os, "nice") else None)  # noqa: PLW1509
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("job_drop.still_failed", extra={"fields": {"error": type(e).__name__}})
+        return False
+    finally:
+        spec_path.unlink(missing_ok=True)
+    if r.returncode != 0:
+        log.warning("job_drop.still_failed", extra={"fields": {"rc": r.returncode,
+                                                               "stderr": r.stderr.decode(errors="replace")[-300:]}})
+    return r.returncode == 0 and all(o.exists() for o in outs)
 
 
 def _short(link: str) -> str:

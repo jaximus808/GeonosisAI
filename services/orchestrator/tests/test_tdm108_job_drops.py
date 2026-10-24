@@ -195,6 +195,7 @@ def test_discord_bot_live_posts_card_once(tmp_path):
     assert {"name": "Pay", "value": "$3.50 (test mode)", "inline": True} in emb["fields"]
     assert body["components"][0]["components"][0]["url"] == f"{BASE}/j/12/discord"
     assert body["allowed_mentions"] == {"parse": []}
+    assert emb["footer"]["text"].startswith("GeonosisAI · task #12")  # the real task number, not #0
     assert b'name="files[0]"; filename="card.png"' in req.content and b"\x89PNG" in req.content
     assert "!" not in body["content"]  # voice: no exclamation marks
     posted = [p for t, p in events if t == "job_drop.posted"]
@@ -486,3 +487,56 @@ def test_discord_check_and_invite_url_are_read_only(tmp_path):
     assert all(r.method == "GET" for r in http.calls)
     assert jd.discord_invite_url(s) == ("https://discord.com/oauth2/authorize?client_id=123456789012345678"
                                         "&scope=bot&permissions=52224")
+
+
+def test_no_public_url_never_posts_a_localhost_link(tmp_path):
+    http = Tdm108Http()  # any request raises
+    d, events = tdm108_dropper(tmp_path, http, rdf_drop_mode="live", discord_bot_token=BOT,
+                               rdf_drop_discord_channel_id="42", rdf_web_public_url="http://localhost:3000")
+    assert not jd.is_public_url("http://localhost:3000") and not jd.is_public_url("https://192.168.1.4")
+    assert jd.is_public_url("https://geonosis.jaxonp.com")
+    d.on_page(tdm108_req(), tdm108_rows())
+    assert http.calls == []
+    drop = d.store.load("task-12")
+    assert drop.public_url_ok is False
+    assert drop.channels["discord"]["state"] == "no_public_url" and drop.channels["discord"]["link"] == ""
+    assert "localhost" not in json.dumps(drop.public()) and "Link coming soon." in drop.channels["bluesky"]["text"]
+    (sk,) = [p for t, p in events if t == "job_drop.skipped"]
+    assert sk["reason"] == "no_public_url" and sk["channels"] == ["discord"]
+    assert d.post_now("task-12", "discord")["code"] == "no_public_url" and http.calls == []
+    # once a public URL exists, the drop is re-rendered with the real link before it posts
+    http.routes[("POST", "/channels/42/messages")] = discord_ok
+    d.s.rdf_web_public_url = BASE
+    assert d.post_now("task-12", "discord")["ok"] is True
+    assert multipart_json(http.calls[0], "payload_json")["embeds"][0]["url"] == f"{BASE}/j/12/discord"
+
+
+def test_mujoco_still_is_rendered_once_per_scene_and_size_and_falls_back(tmp_path):
+    calls = []
+
+    def runner(spec, sizes, outs):
+        calls.append(sizes)
+        for (w, h), o in zip(sizes, outs):
+            o.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (w, h), (200, 30, 30)).save(o)
+        return True
+
+    s = tdm108_settings(tmp_path, rdf_drop_frame="auto")
+    d = jd.Dropper(s, http=Tdm108Http().client(), append=lambda t, p: None, inline=True, photo=lambda rid: None,
+                   still_runner=runner)
+    d.on_page(tdm108_req(), tdm108_rows())
+    assert d.store.load("task-12").frame == "render"
+    assert len(calls) == 2  # one per well size (wide, square), not one per channel
+    with Image.open(d.store.dir("task-12") / "card-discord.png") as im:
+        assert im.convert("RGB").getpixel((540, 560)) == (200, 30, 30)  # the render fills the well
+    rows = tdm108_rows([{"id": 13, "ticket_id": 4, "robot_id": 2, "type": "reset", "status": "open",
+                         "price_cents": 200, "instructions": ""}])
+    d.on_page(tdm108_req([13], "reset", 200), rows)
+    assert len(calls) == 2  # same scene: cached on disk
+
+    fails = []
+    d2 = jd.Dropper(tdm108_settings(tmp_path / "b", rdf_drop_frame="auto"), http=Tdm108Http().client(),
+                    append=lambda t, p: None, inline=True, photo=lambda rid: None,
+                    still_runner=lambda *a: fails.append(1) or False)
+    d2.on_page(tdm108_req(), tdm108_rows())
+    assert d2.store.load("task-12").frame == "sketch" and len(fails) == 1  # failed once: not retried

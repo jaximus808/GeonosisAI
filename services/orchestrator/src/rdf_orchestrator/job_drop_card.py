@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Union
 
@@ -189,34 +190,46 @@ def _short_label(text: str, limit: int = 16) -> str:
     return out or text[:limit]
 
 
+def _obj_radius(o: Mapping[str, Any]) -> float:
+    try:
+        if o.get("radius"):
+            return float(o["radius"])
+        size = o.get("size") or [0.04]
+        return max(float(v) for v in size[:2]) / 2
+    except (TypeError, ValueError):
+        return 0.03
+
+
 def scene_sketch(spec: Mapping[str, Any] | None, w: int, h: int, theme: CardTheme | None = None) -> Image.Image:
-    """Top-down sketch of a scene spec v1 (robot base at the bottom centre, forward = up)."""
+    """Top-down sketch of a scene spec v1 (robot base at the bottom centre, forward = up). The fallback
+    when no MuJoCo render is available. Fills the whole well (the table colour runs edge to edge) and
+    places each label where it collides with no object and no other label, or leaves it out."""
     theme = theme or load_theme()
-    img = Image.new("RGB", (w, h), theme.c("surface-sunken"))
+    img = Image.new("RGB", (w, h), theme.c("surface"))
     d = ImageDraw.Draw(img)
     spec = spec or {}
     table = spec.get("table") or {"center": [0.30, 0.0], "size": [0.96, 0.96]}
     (cx, cy), (sx, sy) = table.get("center", [0.30, 0.0]), table.get("size", [0.96, 0.96])
-    # world (x fwd, y left) -> image (u right, v down): u = -y, v = -x. Zoom to the work area (the arm's
-    # base, every object and region), not the whole table, so small objects stay readable.
-    xs, ys = [-0.06, 0.06], [-0.06, 0.06]
+    objs = []
     for o in spec.get("objects") or []:
         try:
-            r = float(o.get("radius") or max(o.get("size") or [0.03]) / 2 or 0.03)
-            xs += [float(o["pose"]["pos"][0]) - r, float(o["pose"]["pos"][0]) + r]
-            ys += [float(o["pose"]["pos"][1]) - r, float(o["pose"]["pos"][1]) + r]
+            objs.append((o, float(o["pose"]["pos"][0]), float(o["pose"]["pos"][1]), _obj_radius(o)))
         except (KeyError, TypeError, ValueError, IndexError):
             continue
-    for r in (spec.get("regions") or {}).values():
+    # world (x fwd, y left) -> image (u right, v down): u = -y, v = -x. Zoom to the work area (arm base,
+    # objects, regions), then widen to the well's aspect so it is filled edge to edge.
+    xs, ys = [-0.06, 0.08], [-0.06, 0.06]
+    for _, x, y, r in objs:
+        xs += [x - r, x + r]
+        ys += [y - r, y + r]
+    for rg in (spec.get("regions") or {}).values():
         try:
-            xs += [float(v) for v in r["x"]]
-            ys += [float(v) for v in r["y"]]
+            xs += [float(v) for v in rg["x"]]
+            ys += [float(v) for v in rg["y"]]
         except (KeyError, TypeError, ValueError):
             continue
-    m = 0.07
-    x_lo, x_hi = max(min(xs) - m, cx - sx / 2 - 0.02), min(max(xs) + m, cx + sx / 2 + 0.02)
-    y_lo, y_hi = max(min(ys) - m, cy - sy / 2 - 0.02), min(max(ys) + m, cy + sy / 2 + 0.02)
-    # keep the well's aspect so the sketch fills it
+    m = 0.06
+    x_lo, x_hi, y_lo, y_hi = min(xs) - m, max(xs) + m, min(ys) - m, max(ys) + m
     span_u, span_v = y_hi - y_lo, x_hi - x_lo
     if span_u / span_v < w / h:
         grow = (span_v * w / h - span_u) / 2
@@ -224,8 +237,7 @@ def scene_sketch(spec: Mapping[str, Any] | None, w: int, h: int, theme: CardThem
     else:
         grow = (span_u * h / w - span_v) / 2
         x_lo, x_hi = x_lo - grow, x_hi + grow
-    pad = 0.04 * min(w, h)
-    s = min((w - 2 * pad) / (y_hi - y_lo), (h - 2 * pad) / (x_hi - x_lo))
+    s = min(w / (y_hi - y_lo), h / (x_hi - x_lo))
     u0 = w / 2 + (y_hi + y_lo) / 2 * s
     v0 = h / 2 + (x_hi + x_lo) / 2 * s
 
@@ -237,27 +249,25 @@ def scene_sketch(spec: Mapping[str, Any] | None, w: int, h: int, theme: CardThem
             return tuple(int(max(0.0, min(1.0, float(v))) * 255) for v in c[:3])
         return theme.c(fallback)
 
+    # one surface edge to edge (no dark side panels); the table's edges are a hairline where they show
     a, b = P(cx + sx / 2, cy + sy / 2), P(cx - sx / 2, cy - sy / 2)
-    d.rectangle([min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1])], fill=theme.c("surface"),
-                outline=theme.c("line-strong"), width=2)
-    # reach band (dotted arc at the max reach)
-    rmax = 0.55
-    for deg in range(-80, 81, 4):
+    tb = [min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1])]
+    d.rectangle(tb, outline=theme.c("line"), width=1)
+    # reach arc, dotted
+    for deg in range(-90, 91, 3):
         t = math.radians(deg)
-        u, v = P(rmax * math.cos(t), rmax * math.sin(t))
+        u, v = P(0.55 * math.cos(t), 0.55 * math.sin(t))
         d.rectangle([u - 1.5, v - 1.5, u + 1.5, v + 1.5], fill=theme.c("line-strong"))
-    label_font = theme.font("mono-regular", max(13, min(20, int(h * 0.05))))
-    placed: list[tuple[float, float, float, float]] = []
-    region_labels: list[tuple[tuple[float, float], str]] = []  # drawn after the objects' labels
-    for name, r in (spec.get("regions") or {}).items():
+    font = theme.font("mono-regular", max(13, min(20, int(h * 0.055))))
+    placed: list[tuple[float, float, float, float]] = []  # labels AND object footprints
+    for rg_name, rg in (spec.get("regions") or {}).items():
         try:
-            (xa, xb), (ya, yb) = r["x"], r["y"]
+            (xa, xb), (ya, yb) = rg["x"], rg["y"]
         except (KeyError, TypeError, ValueError):
             continue
         p, q = P(xb, yb), P(xa, ya)
-        box = [min(p[0], q[0]), min(p[1], q[1]), max(p[0], q[0]), max(p[1], q[1])]
-        col = rgb(r.get("color"), "steel")
-        # dashed outline
+        box = (min(p[0], q[0]), min(p[1], q[1]), max(p[0], q[0]), max(p[1], q[1]))
+        col = rgb(rg.get("color"), "steel")
         for (u1, v1, u2, v2) in ((box[0], box[1], box[2], box[1]), (box[2], box[1], box[2], box[3]),
                                  (box[2], box[3], box[0], box[3]), (box[0], box[3], box[0], box[1])):
             n = max(1, int(math.hypot(u2 - u1, v2 - v1) // 10))
@@ -265,53 +275,52 @@ def scene_sketch(spec: Mapping[str, Any] | None, w: int, h: int, theme: CardThem
                 t1, t2 = i / n, min(1.0, (i + 1) / n)
                 d.line([u1 + (u2 - u1) * t1, v1 + (v2 - v1) * t1, u1 + (u2 - u1) * t2, v1 + (v2 - v1) * t2],
                        fill=col, width=2)
-        region_labels.append(((box[0] + 4, box[3] - 3), str(r.get("label") or name).replace("_", " ")))
-    for o in spec.get("objects") or []:
-        try:
-            x, y = float(o["pose"]["pos"][0]), float(o["pose"]["pos"][1])
-        except (KeyError, TypeError, ValueError, IndexError):
-            continue
+    # the arm: base block at the origin and a link pointing forward
+    bu, bv = P(0.0, 0.0)
+    br = 0.045 * s
+    d.line([bu, bv, *P(0.20, 0.0)], fill=theme.c("steel"), width=max(4, int(0.03 * s)))
+    d.rectangle([bu - br, bv - br, bu + br, bv + br], fill=theme.c("steel"), outline=theme.c("ink"))
+    placed.append((bu - br, bv - br, bu + br, bv + br))
+    for o, x, y, r in objs:
         col = rgb(o.get("color"), "steel")
-        prim = o.get("primitive")
-        if prim == "box":
+        u, v = P(x, y)
+        rp = r * s
+        if o.get("primitive") == "box":
             hx, hy = float(o["size"][0]) / 2, float(o["size"][1]) / 2
             yaw = float(o["pose"].get("yaw") or 0.0)
-            pts = []
-            for dx, dy in ((hx, hy), (hx, -hy), (-hx, -hy), (-hx, hy)):
-                pts.append(P(x + dx * math.cos(yaw) - dy * math.sin(yaw), y + dx * math.sin(yaw) + dy * math.cos(yaw)))
+            pts = [P(x + dx * math.cos(yaw) - dy * math.sin(yaw), y + dx * math.sin(yaw) + dy * math.cos(yaw))
+                   for dx, dy in ((hx, hy), (hx, -hy), (-hx, -hy), (-hx, hy))]
             d.polygon(pts, fill=col, outline=theme.c("ink"))
+        elif o.get("primitive") == "plate":
+            d.ellipse([u - rp, v - rp, u + rp, v + rp], fill=rgb(o.get("rim_color") or o.get("color"), "steel"),
+                      outline=theme.c("ink"), width=2)
+            ri = rp * 0.72
+            d.ellipse([u - ri, v - ri, u + ri, v + ri], fill=col)
         else:
-            rad = float(o.get("radius") or 0.03) * s
-            u, v = P(x, y)
-            if prim == "plate":
-                d.ellipse([u - rad, v - rad, u + rad, v + rad], fill=rgb(o.get("rim_color") or o.get("color"), "steel"),
-                          outline=theme.c("ink"), width=2)
-                ri = rad * 0.72
-                d.ellipse([u - ri, v - ri, u + ri, v + ri], fill=col)
-            else:
-                d.ellipse([u - rad, v - rad, u + rad, v + rad], fill=col, outline=theme.c("ink"))
-        u, v = P(x, y)
+            d.ellipse([u - rp, v - rp, u + rp, v + rp], fill=col, outline=theme.c("ink"))
+        placed.append((u - rp, v - rp, u + rp, v + rp))
+    # labels last, biggest objects first (a cylinder sitting on a plate shares the plate's label slot)
+    for o, x, y, r in sorted(objs, key=lambda t: -t[3]):
         full = str(o.get("label") or o.get("id") or "")
         lab = _short_label(full)
         if len(lab) < len(full.removeprefix("the ").strip()) and o.get("id"):
-            lab = _short_label(str(o["id"]))  # a cut-off label reads worse than the id ("full plate")
-        if lab:
-            ry = float(o.get("radius") or max(o.get("size") or [0.03]) / 2 or 0.03) * s
-            box = d.textbbox((u, v + ry + 6), lab, font=label_font, anchor="mt")
-            if not any(_hit(box, b2) for b2 in placed):
-                placed.append(box)
-                d.text((u, v + ry + 6), lab, font=label_font, fill=theme.c("ink"), anchor="mt")
-    for at, text in region_labels:
-        lb = d.textbbox(at, text, font=label_font, anchor="lb")
-        if not any(_hit(lb, b2) for b2 in placed):
-            placed.append(lb)
-            d.text(at, text, font=label_font, fill=theme.c("ink-muted"), anchor="lb")
-    # the arm: base block at the origin and a link pointing forward
-    bu, bv = P(0.0, 0.0)
-    r = 0.045 * s
-    d.line([bu, bv, *P(0.20, 0.0)], fill=theme.c("steel"), width=max(4, int(0.03 * s)))
-    d.rectangle([bu - r, bv - r, bu + r, bv + r], fill=theme.c("steel"), outline=theme.c("ink"))
-    d.text((bu + r + 6, bv), "arm", font=label_font, fill=theme.c("ink-muted"), anchor="lm")
+            lab = _short_label(str(o["id"]))
+        if not lab:
+            continue
+        u, v = P(x, y)
+        rp = r * s
+        tw, th = d.textlength(lab, font=font), font.size * 1.1 if hasattr(font, "size") else 16
+        for (lu, lv) in ((u - tw / 2, v + rp + 4), (u - tw / 2, v - rp - 4 - th), (u + rp + 6, v - th / 2),
+                         (u - rp - 6 - tw, v - th / 2)):
+            box = (lu, lv, lu + tw, lv + th)
+            if box[0] < 2 or box[2] > w - 2 or box[1] < 2 or box[3] > h - 2:
+                continue
+            if any(_hit(box, b2, 3) for b2 in placed if b2 != (u - rp, v - rp, u + rp, v + rp)):
+                continue
+            placed.append(box)
+            d.rectangle([box[0] - 3, box[1] - 1, box[2] + 3, box[3] + 1], fill=theme.c("ground"))  # a chip: readable over lines
+            d.text((lu, lv), lab, font=font, fill=theme.c("ink"))
+            break
     return img
 
 
@@ -339,7 +348,7 @@ def render_card(info: CardInfo, *, size: str = "wide", link: str, short: str, fr
     rule_y = foot_mid - 28
     bottom = rule_y - 22  # content ends here
     qr_px = 216 if size == "wide" else 240
-    qr_side = qr_side_px(link, qr_px)
+    qr_side = qr_side_px(link, qr_px) if link else qr_px
 
     if size == "wide":
         right_w = 440
@@ -371,13 +380,13 @@ def render_card(info: CardInfo, *, size: str = "wide", link: str, short: str, fr
     else:
         col_w = W - 2 * M
         x, y = M, top
-        tfnt, tlines, ts = _fit(d, theme, "display", info.title, col_w, 2, (78, 70, 62, 56, 50))
+        tfnt, tlines, ts = _fit(d, theme, "display", info.title, col_w, 2, (70, 64, 58, 52, 48))
         for ln in tlines:
             d.text((x, y), ln, font=tfnt, fill=theme.c("ink"))
             y += int(ts * 1.0)
         y += 12
         body = theme.font("sans", 28)
-        for ln in wrap(d, info.instructions, body, col_w, 2):
+        for ln in wrap(d, info.instructions, body, col_w, 1):  # one line: the picture gets the height
             d.text((x, y), ln, font=body, fill=theme.c("ink-muted"))
             y += 38
         y += 14
@@ -422,8 +431,10 @@ def _frame(img: Image.Image, d: ImageDraw.ImageDraw, theme: CardTheme, frame: Fr
            x: int, y: int, w: int, h: int) -> None:
     h = max(60, h)
     d.rounded_rectangle([x, y, x + w, y + h], radius=4, fill=theme.c("surface-sunken"), outline=theme.c("line"))
-    if callable(frame):  # drawn for this exact well (the scene sketch), so nothing is cropped
+    if callable(frame):  # drawn for this exact well (render / sketch), so nothing is cropped
         frame = frame(w - 2, h - 2)
+        if isinstance(frame, tuple):  # (image, label): the source decides its own label (render vs sketch)
+            frame, label = frame
     if frame is not None:
         _rounded_paste(img, _cover(frame, w - 2, h - 2), (x + 1, y + 1), 4)
     if label:
@@ -435,6 +446,15 @@ def _frame(img: Image.Image, d: ImageDraw.ImageDraw, theme: CardTheme, frame: Fr
 
 def _qr_block(img: Image.Image, d: ImageDraw.ImageDraw, theme: CardTheme, link: str, short: str, x: int, y: int,
               w: int, qr_px: int, info: CardInfo) -> None:
+    if not link:  # no public URL yet: never print a link a phone can't open
+        d.rectangle([x, y, x + qr_px, y + qr_px], fill=theme.c("surface-sunken"), outline=theme.c("line-strong"))
+        f = theme.font("display-bold", 30)
+        d.text((x + qr_px / 2, y + qr_px / 2 - 18), "LINK", font=f, fill=theme.c("ink-muted"), anchor="mm")
+        d.text((x + qr_px / 2, y + qr_px / 2 + 18), "COMING SOON", font=f, fill=theme.c("ink-muted"), anchor="mm")
+        tx = x + qr_px + 22
+        d.text((tx, y + 4), "FIND IT ON THE", font=theme.font("display-bold", 26), fill=theme.c("ink"))
+        d.text((tx, y + 36), "MARKETPLACE", font=theme.font("display-bold", 26), fill=theme.c("ink"))
+        return
     q = qr_image(link, qr_px, theme.rgb("ground"), theme.rgb("ink"))
     img.paste(q, (x, y))
     tx = x + q.width + 22
@@ -451,12 +471,23 @@ def _qr_block(img: Image.Image, d: ImageDraw.ImageDraw, theme: CardTheme, link: 
 
 
 def _split_link(s: str, d: ImageDraw.ImageDraw, f, width: float) -> list[str]:
+    """Wrap a link at "/" and "." boundaries where possible (character breaks only for a too-long piece)."""
+    parts = [p for p in re.split(r"(?<=[/.])", s) if p]
     out, cur = [], ""
-    for ch in s:
-        if _w(d, cur + ch, f) > width and cur:
+    for p in parts:
+        if _w(d, cur + p, f) <= width:
+            cur += p
+            continue
+        if cur:
             out.append(cur)
             cur = ""
-        cur += ch
+        while _w(d, p, f) > width and len(p) > 1:
+            cut = len(p)
+            while cut > 1 and _w(d, p[:cut], f) > width:
+                cut -= 1
+            out.append(p[:cut])
+            p = p[cut:]
+        cur = p
     if cur:
         out.append(cur)
     return out[:4]

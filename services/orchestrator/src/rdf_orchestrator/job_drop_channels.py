@@ -188,6 +188,8 @@ class Discord:
 
     def text(self, p: DropPost) -> str:
         lines = [headline(p)]
+        if not p.link:
+            lines.append("Link coming soon.")
         if p.sample:
             lines.insert(0, "Sample post from GeonosisAI. There is no task behind it.")
         if access_line(p):
@@ -198,7 +200,7 @@ class Discord:
         desc = _first_sentence(p.instructions, 300)
         embed = {
             "title": p.title[:256],
-            "url": p.link,
+            **({"url": p.link} if p.link else {}),
             "description": desc,
             "color": self.s.discord_color,
             "fields": [
@@ -267,6 +269,8 @@ def link_facets(text: str, links: list[str]) -> list[dict]:
     out = []
     b = text.encode("utf-8")
     for link in links:
+        if not link:
+            continue
         i = b.find(link.encode("utf-8"))
         if i < 0:
             continue
@@ -291,7 +295,7 @@ class Bluesky:
         head = headline(p)
         if p.sample:
             head = "Sample post, no task behind it. " + head
-        tail = [x for x in (access_line(p), f"Claim it: {p.link}") if x]
+        tail = [x for x in (access_line(p), f"Claim it: {p.link}" if p.link else "Link coming soon.") if x]
         fixed = "\n".join(tail)
         room = BSKY_MAX_GRAPHEMES - graphemes(head) - graphemes(fixed) - 2
         middle = _first_sentence(p.title.rstrip(".") + ".", max(0, room)) if room > 20 else ""
@@ -418,7 +422,10 @@ class X:
             lines.append(_first_sentence(title.rstrip(".") + ".", 120))
         if access_line(p):
             lines.append(access_line(p))
-        lines.append(f"Claim it: {p.link}" if self.includes_link() else "Scan the QR code on the card to claim it.")
+        if not p.link:
+            lines.append("Link coming soon.")
+        else:
+            lines.append(f"Claim it: {p.link}" if self.includes_link() else "Scan the QR code on the card to claim it.")
         return "\n".join(lines)[:280]
 
     def cost(self, text: str) -> float:
@@ -480,7 +487,7 @@ class Telegram:
                  _first_sentence(p.instructions, 300)]
         if access_line(p):
             lines.append(access_line(p))
-        lines.append(f"Claim it: {p.link}")
+        lines.append(f"Claim it: {p.link}" if p.link else "Link coming soon.")
         return "\n".join(x for x in lines if x)[:TELEGRAM_MAX_CAPTION]
 
     def post(self, http: httpx.Client, p: DropPost, png: bytes) -> PostResult:

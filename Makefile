@@ -141,3 +141,17 @@ policy-down:
 	$(POLICY_CTL) down
 policy-status:
 	$(POLICY_CTL) status
+
+# TDM-6: CI. One definition in scripts/ci/run.sh, used by .github/workflows/ci.yml and these targets.
+# Fake env only (scripts/ci/fake.env), live/maincloud tests skip, the spacetime CLI is hidden from unit tests.
+#   make ci                      every unit step, keeps going, prints a PASS/FAIL summary
+#   make ci-py SERVICE=orchestrator   one Python service (uv sync + pytest)
+#   make ci-ts / ci-stdb / ci-lint / ci-evlog
+#   make ci-integration          optional: TDM-28 harness + TDM-48/49 tests on a local SpacetimeDB
+.PHONY: ci ci-py ci-ts ci-stdb ci-lint ci-evlog ci-integration
+ci:
+	@scripts/ci/run.sh all
+ci-py:
+	@scripts/ci/run.sh $(if $(SERVICE),py $(SERVICE),py-all)
+ci-ts ci-stdb ci-lint ci-evlog ci-integration:
+	@scripts/ci/run.sh $(patsubst ci-%,%,$@)

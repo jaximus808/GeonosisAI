@@ -1,0 +1,113 @@
+# TDM-6: minimal CI. Every job calls scripts/ci/run.sh, the same script `make ci` runs locally, so a red
+# check reproduces with `make ci` (or `make ci-py SERVICE=<svc>`, `make ci-ts`, ...).
+# No secrets: settings come from scripts/ci/fake.env. No deploys (those stay `make deploy*` by hand).
+# Tests that need Claude / Stripe / Modal / maincloud are opt-in (RDF_LIVE_*, TDM20_STDB_HOST) and skip here.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "true"
+  UV_PYTHON: "3.11"
+  FORCE_COLOR: "1"
+
+jobs:
+  python:
+    name: py ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [common, orchestrator, factory, training, robot-client, payments]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/${{ matrix.service }}/uv.lock
+      - name: ffmpeg (video fixtures in orchestrator tests)
+        if: matrix.service == 'orchestrator' || matrix.service == 'robot-client'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: scripts/ci/run.sh py ${{ matrix.service }}
+
+  ts:
+    name: ts typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: scripts/ci/run.sh ts
+
+  spacetime-module:
+    name: spacetime module tsc + event_log audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: spacetime/spacetimedb/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: scripts/ci/run.sh stdb
+      - run: scripts/ci/run.sh evlog
+
+  lint:
+    name: ruff (minimal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: scripts/ci/run.sh lint
+
+  # OPTIONAL: boots a throwaway local SpacetimeDB with the spacetime CLI (TDM-28 harness, TDM-48/49
+  # recorder + loop tests). Never touches maincloud, never calls Claude (scripted driver). It does not block
+  # the other checks; run it by hand from the Actions tab (workflow_dispatch) or let it ride on pushes to main.
+  integration:
+    name: integration (optional, spacetime CLI)
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: spacetime/spacetimedb/package-lock.json
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: spacetime CLI 2.13
+        # Installer flags are untested in Actions (no remote yet); if this step breaks, check
+        # https://spacetimedb.com/install. The job is continue-on-error, so it cannot turn CI red.
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- --yes
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/spacetime" version install 2.13.0 --use || true
+          "$HOME/.local/bin/spacetime" --version
+      - run: scripts/ci/run.sh integration

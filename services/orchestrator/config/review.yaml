@@ -1,0 +1,42 @@
+# TDM-25 reviewer thresholds. Read by rdf_common.review_checks.ReviewThresholds.from_yaml (every
+# section except `claude`) and by rdf_orchestrator.reviewer (the `claude` section). Unknown keys
+# are an error. Dataset-purchase QA (TDM-92) reads the same file.
+version: 1
+
+duration:
+  min_s: 2.0          # shorter is not a demonstration
+  max_s: 120.0        # longer is a stuck or forgotten recording
+  tolerance_s: 0.5    # episode.duration_ms vs the actions parquet's timestamp span
+
+frame_drops:
+  max_ratio: 0.02     # reject at >= 2% missing ticks (actions stream) or video frames (any camera)
+  max_frame_count_mismatch: 2   # episode.frame_count vs rows in the parquet
+
+jerk:
+  # RMS joint jerk in rad/s^3, Savitzky-Golay cubic third derivative over `window` ticks at the
+  # recording fps (30 Hz). Calibrated on the TDM-25 synthetic fixtures with YAM-like encoder noise:
+  # smooth min-jerk demo 4.7, 2 mrad 4-7 Hz tremor 13, 10 mrad tremor 60, 20 mrad tremor 120.
+  # A fast smooth move (1 rad in 1 s) peaks near 60 but its episode RMS stays well below.
+  # RE-TUNE on the first real YAM recordings (print metrics_json.jerk for a few good demos).
+  max_rms_rad_s3: 60.0
+  window: 9
+
+takeover:
+  kinds: [recovery_takeover]
+  min_pre_takeover_s: 0.5            # policy-failure frames that must precede takeover_ts (cut by the Data Droid)
+  min_takeover_s: 1.0                # shortest human segment worth paying for
+  ts_tolerance_s: 0.5                # takeover/handback may sit this far outside the recorded span
+  min_control_source_agreement: 0.9  # control_source must agree with the timestamps on >= 90% of frames
+
+success:
+  required_kinds: [clean_teleop, recovery_takeover, purchased]
+
+fixtures:
+  allow: false        # parquet metadata fixture:true (synthetic test data) is rejected in production
+
+claude:
+  enabled: true
+  model: claude-opus-5-5
+  effort: high
+  frames: 3           # keyframes sent per episode (from the preferred camera)
+  frame_width: 512

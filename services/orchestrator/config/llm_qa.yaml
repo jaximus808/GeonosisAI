@@ -1,0 +1,28 @@
+# TDM-93 LLM QA for PURCHASED (dataset-offer) episodes. Read by rdf_orchestrator.llm_qa.load_config.
+# Unknown keys are an error. Runs only after TDM-92's deterministic checks pass (see `gate`).
+version: 1
+
+gate:
+  # TDM-92 writes this summary qa_result LAST, passed=true only when every deterministic check
+  # passed. LLM QA never runs on an episode without it, or while any other latest qa_result failed.
+  summary_check: deterministic_qa
+
+claude:
+  model: claude-opus-5-5
+  effort: high
+  cameras: 2               # exo-like camera + wrist camera (rdf_orchestrator.reviewer.CAMERA_PREFERENCE)
+  points: [0.03, 0.5, 0.97]  # start / middle / end, as a fraction of the episode: 3 x 2 = 6 frames
+  frame_width: 448
+  min_quality: 3           # accept = on_task AND task_succeeded == yes AND quality >= min_quality
+
+cost:
+  # One Claude call per episode, all frames batched into it. Per-offer cap: retries after outages
+  # count too, so a flapping API cannot burn money on one offer.
+  max_calls_per_offer_factor: 2.0   # cap = max(min, ceil(needed_count * factor))
+  max_calls_per_offer_min: 4
+
+guard:
+  # Approve-everything detector: after each verdict, log qa.acceptance_rate for the offer and set
+  # suspect=true when the rate exceeds max_rate over at least min_reviews purchased episodes.
+  max_rate: 0.95
+  min_reviews: 5

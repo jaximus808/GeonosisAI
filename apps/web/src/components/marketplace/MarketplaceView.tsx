@@ -168,7 +168,7 @@ export function MarketplaceView() {
   }, [tasks, tasksReady]);
 
   useEffect(() => {
-    document.title = open.length ? `(${open.length}) Paid tasks · Robot Deployment Factory` : 'Paid tasks · Robot Deployment Factory';
+    document.title = open.length ? `(${open.length}) Paid tasks · GeonosisAI` : 'Paid tasks · GeonosisAI';
   }, [open.length]);
 
   useEffect(() => {

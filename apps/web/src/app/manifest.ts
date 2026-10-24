@@ -6,16 +6,16 @@ import type { MetadataRoute } from 'next';
 // get pushes from the normal tab. Start URL is the marketplace (the claim page).
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Robot Deployment Factory: paid tasks',
-    short_name: 'Robot tasks',
-    description: 'Paid robot resets, takeovers and teleop demos. Get notified when the factory posts one.',
+    name: 'GeonosisAI: paid tasks',
+    short_name: 'GeonosisAI',
+    description: 'Paid robot resets, takeovers and teleop demos. Get notified when the foundry posts one.',
     id: '/marketplace',
     start_url: '/marketplace?src=pwa',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',
-    background_color: '#18212e',
-    theme_color: '#18212e',
+    background_color: '#13110f',
+    theme_color: '#13110f',
     icons: [
       { src: '/tdm65/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/tdm65/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

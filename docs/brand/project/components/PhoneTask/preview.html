@@ -1,0 +1,48 @@
+<!-- @dsCard group="Mocks" height=780 width=390 subtitle="/marketplace on a contributor's phone" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone task</title>
+<style>
+  .pt { max-width: 390px; margin: 0 auto; }
+  .pt-bar { display: flex; justify-content: space-between; align-items: center; padding: var(--space-3) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--line); }
+  .pt-body { padding: var(--space-4); display: grid; gap: var(--space-4); }
+  .pt-earn { display: flex; justify-content: space-between; align-items: baseline; }
+  .pt-earn strong { font-family: var(--font-mono); font-weight: 500; font-size: 28px; line-height: 32px; color: var(--ochre); font-variant-numeric: tabular-nums; }
+  .pt-h { font-family: var(--font-display); font-weight: 700; font-size: 20px; line-height: 24px; margin: var(--space-2) 0 0; }
+</style>
+</head>
+<body>
+<div class="pt">
+  <header class="pt-bar">
+    <span class="gx-wordmark gx-wordmark-sm">Geonosis<b>AI</b></span>
+    <span class="gx-live"><i class="gx-rivet"></i>yam-01 live</span>
+  </header>
+  <div class="pt-body">
+    <div class="pt-earn"><span class="gx-label">Earned today</span><strong>$12.50</strong></div>
+    <h2 class="pt-h">Open tasks</h2>
+    <article class="gx-task">
+      <div class="gx-row" style="justify-content: space-between;">
+        <span class="gx-tag gx-tag-money"><i class="gx-rivet"></i>Recovery takeover</span>
+        <span class="gx-price">$3.50</span>
+      </div>
+      <h3 class="gx-task-title">Catch the cup at the bin rim</h3>
+      <p style="margin: 0;">The robot drives. When it pauses at the bin, you take over and finish the drop.</p>
+      <div class="gx-facts"><span>About 90 s</span><span>yam-01</span><span>3 of 8 left</span></div>
+      <button class="gx-btn gx-btn-primary gx-btn-block" type="button">Claim task</button>
+    </article>
+    <article class="gx-task">
+      <div class="gx-row" style="justify-content: space-between;">
+        <span class="gx-tag gx-tag-money"><i class="gx-rivet"></i>Reset</span>
+        <span class="gx-price">$1.00</span>
+      </div>
+      <h3 class="gx-task-title">Put the cup back on the start mark</h3>
+      <div class="gx-facts"><span>About 20 s</span><span>yam-01</span><span>In person</span></div>
+      <button class="gx-btn gx-btn-block" type="button">Claim task</button>
+    </article>
+    <p class="gx-small" style="margin: 0;">Test mode. No real money moves.</p>
+  </div>
+</div>
+</body>
+</html>

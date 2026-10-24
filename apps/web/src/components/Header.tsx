@@ -1,6 +1,11 @@
+'use client';
+
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { ConnectionStatus } from './ConnectionStatus';
 import { LlmBackendChip } from './llm/LlmBackendChip';
+import { ThemeToggle } from './brand/ThemeToggle';
+import { Wordmark } from './brand/Wordmark';
 
 const NAV = [
   { href: '/', label: 'Tickets' },
@@ -11,23 +16,65 @@ const NAV = [
   { href: '/earnings', label: 'Earnings' }, // TDM-64
 ];
 
+/** Contributor phone pages get the compact PhoneTask header (TDM-109). */
+const PHONE_PREFIXES = ['/marketplace', '/join', '/earnings', '/teleop', '/reset', '/practice', '/sell'];
+const PHONE_NAV = [
+  { href: '/marketplace', label: 'Tasks' },
+  { href: '/earnings', label: 'Earnings' },
+];
+
+function isActive(path: string, href: string) {
+  if (href === '/') return path === '/' || (path.startsWith('/tickets/') && !path.startsWith('/tickets/new'));
+  return path === href || path.startsWith(`${href}/`);
+}
+
+/** TDM-109: GeonosisAI header bar. Wordmark left, nav with a melt underline on the current page. */
 export function Header() {
+  const path = usePathname() ?? '/';
+  const phone = PHONE_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+  if (phone) {
+    return (
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-[1120px] items-center gap-4 px-4 py-3">
+          <Link href="/marketplace" className="no-underline" aria-label="GeonosisAI tasks">
+            <Wordmark size="sm" />
+          </Link>
+          <nav className="flex gap-4 text-sm text-ink-muted" aria-label="Contributor">
+            {PHONE_NAV.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                aria-current={isActive(path, n.href) ? 'page' : undefined}
+                className="hover:text-ink aria-[current]:text-ink"
+              >
+                {n.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="ml-auto flex items-center gap-3">
+            <ConnectionStatus />
+          </div>
+        </div>
+      </header>
+    );
+  }
   return (
-    <header className="border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-        <Link href="/" className="font-semibold tracking-tight">
-          Robot Deployment Factory
+    <header className="border-b border-line bg-surface">
+      <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-x-6 gap-y-1 px-4 sm:px-8">
+        <Link href="/" className="py-3 no-underline" aria-label="GeonosisAI home">
+          <Wordmark size="sm" />
         </Link>
-        <nav className="flex flex-wrap gap-4 text-sm text-zinc-600 dark:text-zinc-400">
+        <nav className="gx-nav" aria-label="Main">
           {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className="hover:text-zinc-900 dark:hover:text-zinc-100">
+            <Link key={n.href} href={n.href} aria-current={isActive(path, n.href) ? 'page' : undefined}>
               {n.label}
             </Link>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-3 py-2">
           <LlmBackendChip />
           <ConnectionStatus />
+          <ThemeToggle />
         </div>
       </div>
     </header>

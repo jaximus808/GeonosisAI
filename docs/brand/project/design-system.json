@@ -1,0 +1,14 @@
+{
+  "v": 3,
+  "layout": "files",
+  "createdOnFiles": { "v": 1, "at": "2026-10-24T18:00:00Z" },
+  "title": "GeonosisAI",
+  "namespace": "GeonosisAI",
+  "libraries": [],
+  "sections": {},
+  "groups": [],
+  "assetGroups": {},
+  "blobs": {},
+  "docs": { "readme": "project/README.md", "sections": [] },
+  "lastChange": { "by": "Jaxon Poentis", "at": "2026-10-24T18:00:00Z", "via": "Claude Code", "note": "First GeonosisAI brand system: tokens, brand book, six components and two page mocks." }
+}

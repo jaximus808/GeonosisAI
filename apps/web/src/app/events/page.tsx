@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { EventLogExplorer } from '@/components/eventlog/EventLogExplorer';
 
-export const metadata = { title: 'Event log · Robot Deployment Factory' };
+export const metadata = { title: 'Event log · GeonosisAI' };
 
 export default function EventsPage() {
   return (

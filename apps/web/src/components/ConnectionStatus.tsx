@@ -3,10 +3,16 @@
 import { useConnectionStatus } from '@/lib/spacetime/hooks';
 import { SPACETIME_DB_NAME } from '@/lib/spacetime/config';
 
-const DOT: Record<string, string> = {
-  connected: 'bg-emerald-500',
-  connecting: 'bg-amber-400 animate-pulse',
-  disconnected: 'bg-red-500',
+/** TDM-109: brand live indicator. Arc rivet when live, steel while connecting, slag when down. */
+const TONE: Record<string, string> = {
+  connected: '',
+  connecting: 'is-connecting',
+  disconnected: 'is-down',
+};
+const WORD: Record<string, string> = {
+  connected: 'live',
+  connecting: 'connecting',
+  disconnected: 'offline',
 };
 
 export function ConnectionStatus() {
@@ -18,10 +24,10 @@ export function ConnectionStatus() {
         ? `Disconnected: ${error ?? 'unknown error'} (retrying)`
         : `Connecting to ${SPACETIME_DB_NAME}…`;
   return (
-    <span className="inline-flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400" title={title} data-status={status}>
-      <span className={`h-2 w-2 rounded-full ${DOT[status]}`} />
-      {status}
-      <span className="hidden font-mono text-zinc-400 sm:inline">{SPACETIME_DB_NAME}</span>
+    <span className={`gx-live ${TONE[status] ?? ''}`} title={title} data-status={status}>
+      <i className={`gx-rivet ${status === 'connecting' ? 'animate-pulse' : ''}`} aria-hidden />
+      <span className="hidden text-ink-muted sm:inline">{SPACETIME_DB_NAME} ·</span>
+      {WORD[status] ?? status}
     </span>
   );
 }

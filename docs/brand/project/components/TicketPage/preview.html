@@ -1,0 +1,102 @@
+<!-- @dsCard group="Mocks" height=860 width=1200 subtitle="/tickets/[id], desktop, iteration 2 at eval" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ticket page</title>
+<style>
+  .tp-main { max-width: 1120px; margin: 0 auto; padding: var(--space-8); display: grid; gap: var(--space-6); }
+  .tp-title { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-6); flex-wrap: wrap; }
+  .tp-title h1 { font-family: var(--font-display); font-weight: 800; font-size: 34px; line-height: 36px; margin: var(--space-1) 0 var(--space-2); text-wrap: balance; }
+  .tp-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+  .tp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-6); }
+  .tp-ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-6); }
+  .tp-decision { display: grid; gap: var(--space-3); }
+  .tp-decision p { margin: 0; }
+  .tp-kv { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2) var(--space-4); align-items: baseline; }
+  .tp-eps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-3); }
+  .tp-ep { display: grid; gap: var(--space-1); }
+  .tp-ep .gx-well { aspect-ratio: 4 / 3; display: grid; place-items: end start; padding: var(--space-1) var(--space-2); }
+  .tp-cams { display: flex; gap: var(--space-2); }
+  .tp-cams .gx-well { flex: 1; aspect-ratio: 4 / 3; display: grid; place-items: end start; padding: var(--space-1) var(--space-2); }
+</style>
+</head>
+<body>
+<header class="gx-bar">
+  <span class="gx-wordmark gx-wordmark-sm">Geonosis<b>AI</b></span>
+  <nav class="gx-nav"><a href="#" aria-current="page">Tickets</a><a href="#">Robots</a><a href="#">Marketplace</a><a href="#">Agents</a><a href="#">Events</a></nav>
+  <span style="flex: 1;"></span>
+  <span class="gx-live"><i class="gx-rivet"></i>Maincloud · live</span>
+</header>
+
+<main class="tp-main">
+  <div class="tp-title">
+    <div>
+      <div class="gx-row" style="gap: var(--space-2);"><span class="gx-id">TKT-0007</span><span class="gx-tag gx-tag-running"><i class="gx-rivet"></i>Eval</span><span class="gx-small">Iteration 2 of 3</span></div>
+      <h1>Put the cup in the bin</h1>
+      <div class="tp-meta gx-small"><span>Robot <span class="gx-data" style="color: var(--ink);">yam-01</span> on Jetson Orin</span><span>Target 80%</span><span>Policy π0.5</span></div>
+    </div>
+    <div class="gx-row">
+      <button class="gx-btn" type="button">View report</button>
+      <button class="gx-btn gx-btn-primary" type="button">Ship checkpoint</button>
+    </div>
+  </div>
+
+  <section class="gx-plate" aria-label="Line">
+    <ol class="gx-line" style="--stations: 8;">
+      <li class="gx-station is-done"><span class="gx-station-name">Baseline</span><span class="gx-station-note">3/10</span></li>
+      <li class="gx-station is-done"><span class="gx-station-name">Diagnose</span><span class="gx-station-note">2 clusters</span></li>
+      <li class="gx-station is-done"><span class="gx-station-name">Plan data</span><span class="gx-station-note">8 takeovers</span></li>
+      <li class="gx-station is-done"><span class="gx-station-name">Collect</span><span class="gx-station-note">8/8</span></li>
+      <li class="gx-station is-done"><span class="gx-station-name">Review</span><span class="gx-station-note">7 accepted</span></li>
+      <li class="gx-station is-done"><span class="gx-station-name">Train</span><span class="gx-station-note">4,000 steps</span></li>
+      <li class="gx-station is-current" aria-current="step"><span class="gx-station-name">Eval</span><span class="gx-station-note">9/10</span></li>
+      <li class="gx-station"><span class="gx-station-name">Ship</span><span class="gx-station-note">target 80%</span></li>
+    </ol>
+  </section>
+
+  <div class="tp-grid">
+    <section class="gx-plate">
+      <div class="gx-plate-head"><h2 class="gx-heading">Before and after</h2><span class="gx-id">Wilson 95%</span></div>
+      <div class="tp-ba">
+        <div class="gx-readout">
+          <span class="gx-label">Baseline · pi05-base</span>
+          <div class="gx-readout-num">30%<small>3/10</small></div>
+          <div class="gx-track"><div class="gx-track-ci" style="left: 11%; width: 49%;"></div><div class="gx-track-point" style="left: 30%;"></div><div class="gx-track-target" style="left: 80%;"></div></div>
+          <span class="gx-id">11–60%</span>
+        </div>
+        <div class="gx-readout">
+          <span class="gx-label">Iteration 2 · pi05-cup-bin-it2</span>
+          <div class="gx-readout-num">90%<small>9/10</small></div>
+          <div class="gx-track"><div class="gx-track-ci is-pass" style="left: 60%; width: 38%;"></div><div class="gx-track-point" style="left: 90%;"></div><div class="gx-track-target" style="left: 80%;"></div></div>
+          <span class="gx-id">60–98%</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="gx-plate tp-decision">
+      <div class="gx-plate-head" style="margin: 0;"><h2 class="gx-heading">Planner decision</h2><span class="gx-tag"><i class="gx-rivet"></i>Claude</span></div>
+      <p>6 of 7 baseline failures happen in the last 5 cm: the gripper closes before the cup is centred and the cup slips at the bin rim. 1 of 7 knocks the cup over on approach.</p>
+      <p class="gx-stack" style="gap: 0;"><strong style="font-weight: 600;">Buy recovery takeovers, not clean demos.</strong><span class="gx-small">The policy already reaches the cup. Takeovers start at the moment it fails.</span></p>
+      <div class="tp-kv gx-small">
+        <span>Bought</span><span class="gx-data" style="color: var(--ink);">8 takeovers × $3.50 · 7 accepted, 1 rejected</span>
+        <span>Spent</span><span class="gx-data" style="color: var(--ochre);">$31.50 of $50.00</span>
+      </div>
+      <div class="gx-meter" role="img" aria-label="Spent 31.50 of 50 dollars"><span style="width: 63%;"></span></div>
+    </section>
+  </div>
+
+  <section class="gx-plate">
+    <div class="gx-plate-head"><h2 class="gx-heading">Purchased episodes</h2><span class="gx-small">Test mode. No real money moves.</span></div>
+    <div class="tp-eps">
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0041</span><span class="gx-tag gx-tag-shipped" style="justify-self: start;"><i class="gx-rivet"></i>Accepted</span></div>
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0042</span><span class="gx-tag gx-tag-shipped" style="justify-self: start;"><i class="gx-rivet"></i>Accepted</span></div>
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0043</span><span class="gx-tag gx-tag-failed" style="justify-self: start;"><i class="gx-rivet"></i>Rejected</span></div>
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0044</span><span class="gx-tag gx-tag-shipped" style="justify-self: start;"><i class="gx-rivet"></i>Accepted</span></div>
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0045</span><span class="gx-tag gx-tag-shipped" style="justify-self: start;"><i class="gx-rivet"></i>Accepted</span></div>
+      <div class="tp-ep"><div class="gx-well"><span class="gx-id">exo</span></div><span class="gx-id">EP-0046</span><span class="gx-tag gx-tag-shipped" style="justify-self: start;"><i class="gx-rivet"></i>Accepted</span></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

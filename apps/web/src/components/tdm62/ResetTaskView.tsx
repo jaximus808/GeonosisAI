@@ -193,7 +193,7 @@ export function ResetTaskView({ taskId }: { taskId: bigint }) {
   const moving = v.armSafety === 'moving' || v.armSafety === 'stopped';
 
   useEffect(() => {
-    document.title = t ? `Reset #${t.id} · ${fmtPrice(t.priceCents)} · Robot Deployment Factory` : 'Scene reset · Robot Deployment Factory';
+    document.title = t ? `Reset #${t.id} · ${fmtPrice(t.priceCents)} · GeonosisAI` : 'Scene reset · GeonosisAI';
   }, [t]);
 
   async function onJoinAndClaim(e: FormEvent) {

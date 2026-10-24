@@ -1,0 +1,49 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GeonosisAI</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--ground); color: var(--ink); font-family: var(--font-sans); overflow: hidden; }
+  .cover { position: relative; height: 288px; overflow: hidden; }
+  .art { position: absolute; top: 0; left: 480px; width: 480px; height: 288px; overflow: hidden; }
+  .art svg { display: block; width: 480px; height: 288px; }
+  .melt { fill: var(--melt); }
+  .ochre { fill: var(--ochre); }
+  .steel { fill: var(--steel); }
+  .arc { fill: var(--arc); }
+  .cut { fill: var(--ground); font-family: var(--font-stencil); font-weight: 800; }
+  .plate { rx: var(--radius-sm); }
+  .words { position: absolute; left: var(--space-8); right: var(--space-8); bottom: var(--space-8); max-width: 440px; }
+  .name { margin: 0; font-family: var(--font-stencil); font-size: 72px; line-height: .92; font-weight: 800; letter-spacing: .01em; color: var(--ink); }
+  .name b { font-weight: 800; color: var(--melt); }
+  .tag { margin: var(--space-2) 0 0 3px; font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      melt 208×272 slab bleeding off the top (the brand, largest) · ochre 112×160 (rock, the data market) · steel 120×216 bleeding off the right (droid steel) · arc 48×32 once (it only ever means pass and live) — about a third of 960×288
+  arrangement one tall slab with satellites on a shared floor line space-8 above the bottom edge, space-4 gutters, like plates on a foundry floor
+  pattern     one oversized stencil G in the stencil face, cut out of the melt slab in ground and clipped by it, from "the letters stamped on a droid casing"
+  scales      sides in space-4 multiples; gutters space-4; floor space-8; corners radius-sm on every plate
+-->
+<defs><clipPath id="slab"><rect x="0" y="-8" width="208" height="264"/></clipPath></defs>
+<rect class="melt plate" x="0" y="-8" width="208" height="264" rx="2"/>
+<text class="cut" x="-14" y="300" font-size="360" clip-path="url(#slab)">G</text>
+<rect class="ochre plate" x="224" y="96" width="112" height="160" rx="2"/>
+<rect class="arc plate" x="224" y="48" width="48" height="32" rx="2"/>
+<rect class="steel plate" x="352" y="40" width="144" height="216" rx="2"/>
+</svg>
+</div>
+<div class="words">
+<h1 class="name">Geonosis<b>AI</b></h1>
+<p class="tag">The droid foundry for real robots. Ticket in, deployed robot out.</p>
+</div>
+</div>
+</body>
+</html>

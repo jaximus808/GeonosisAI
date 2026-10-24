@@ -46,6 +46,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     from .tickets_api import router as tickets_router  # TDM-19
 
     app.include_router(tickets_router)
+    from .run_settings_api import run_settings_router  # TDM-20
+    app.include_router(run_settings_router)
 
     @app.get("/healthz")
     def healthz(request: Request) -> dict:

@@ -77,6 +77,7 @@ const runSettings = table(
     max_iterations: t.u32(),
     hyperparams_json: t.string(), // {lr, steps, batch_size, lora_rank, prompt}
     updated_at: t.timestamp(),
+    data_type_override: t.string().default(''), // TDM-20: '' (planner decides) | clean_teleop | recovery_takeover
   }
 );
 

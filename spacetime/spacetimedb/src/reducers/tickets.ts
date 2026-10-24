@@ -87,7 +87,11 @@ type Tdm9Settings = {
   target_episodes: number;
   max_iterations: number;
   hyperparams: Record<string, unknown>;
+  data_type_override: string; // TDM-20: '' = planner decides
 };
+
+// TDM-20: data types a human may force the planner to pick ('' / null = no override).
+const TDM20_DATA_TYPE_OVERRIDES = ['clean_teleop', 'recovery_takeover'] as const;
 
 const TDM9_HYPERPARAM_CHECKS: Record<string, (v: unknown) => unknown> = {
   lr: (v) => {
@@ -110,7 +114,8 @@ const TDM9_HYPERPARAM_CHECKS: Record<string, (v: unknown) => unknown> = {
  * eval_trials (1-50), success_threshold (0-1), require_ci_low (bool),
  * budget_cents (integer >= 0, only when allowBudget), target_episodes (1-10000),
  * max_iterations (1-20), hyperparams (object merged key-by-key into the current
- * hyperparams: lr, steps, batch_size, lora_rank, prompt).
+ * hyperparams: lr, steps, batch_size, lora_rank, prompt), data_type_override
+ * (TDM-20: null or '' = planner decides, else clean_teleop|recovery_takeover).
  */
 function tdm9ApplyPatch(s: Tdm9Settings, patch: Record<string, unknown>, allowBudget: boolean): Tdm9Settings {
   for (const [key, v] of Object.entries(patch)) {
@@ -154,10 +159,21 @@ function tdm9ApplyPatch(s: Tdm9Settings, patch: Record<string, unknown>, allowBu
         s.hyperparams = merged;
         break;
       }
+      case 'data_type_override':
+        if (v === null || v === '') {
+          s.data_type_override = '';
+        } else if (typeof v === 'string' && (TDM20_DATA_TYPE_OVERRIDES as readonly string[]).includes(v)) {
+          s.data_type_override = v;
+        } else {
+          throw new SenderError(
+            `data_type_override must be null or one of ${TDM20_DATA_TYPE_OVERRIDES.join('|')}, got ${JSON.stringify(v)}`
+          );
+        }
+        break;
       default:
         throw new SenderError(
           `unknown run setting "${key}" (allowed: eval_trials|success_threshold|require_ci_low|` +
-            `${allowBudget ? 'budget_cents|' : ''}target_episodes|max_iterations|hyperparams)`
+            `${allowBudget ? 'budget_cents|' : ''}target_episodes|max_iterations|hyperparams|data_type_override)`
         );
     }
   }
@@ -279,6 +295,7 @@ export const create_ticket = spacetimedb.reducer(
         target_episodes: DEFAULT_RUN_SETTINGS.target_episodes,
         max_iterations: DEFAULT_RUN_SETTINGS.max_iterations,
         hyperparams: JSON.parse(DEFAULT_RUN_SETTINGS.hyperparams_json) as Record<string, unknown>,
+        data_type_override: '',
       },
       overrides,
       false
@@ -320,6 +337,7 @@ export const create_ticket = spacetimedb.reducer(
       max_iterations: settings.max_iterations,
       hyperparams_json,
       updated_at: ctx.timestamp,
+      data_type_override: settings.data_type_override,
     });
     tdm9Log(ctx, role, 'ticket.created', {
       ticket_id: ticket.id,
@@ -337,7 +355,8 @@ export const create_ticket = spacetimedb.reducer(
 // patch_json: JSON object with any of eval_trials (1-50), success_threshold
 // (0-1), require_ci_low, budget_cents (>= 0 and >= what the ticket already
 // approved/spent; mirrored onto ticket.budget_cents), target_episodes,
-// max_iterations, hyperparams (merged). Refused on shipped/failed/cancelled.
+// max_iterations, hyperparams (merged), data_type_override (TDM-20: null|''
+// clears it, else clean_teleop|recovery_takeover). Refused on shipped/failed/cancelled.
 export const update_run_settings = spacetimedb.reducer(
   { ticket_id: t.u64(), patch_json: t.string() },
   (ctx, { ticket_id, patch_json }) => {
@@ -360,6 +379,7 @@ export const update_run_settings = spacetimedb.reducer(
       target_episodes: current.target_episodes,
       max_iterations: current.max_iterations,
       hyperparams: JSON.parse(current.hyperparams_json) as Record<string, unknown>,
+      data_type_override: current.data_type_override,
     };
     const next = tdm9ApplyPatch({ ...before }, patch, true);
     const committed = ticket.approved_cents > ticket.spent_cents ? ticket.approved_cents : ticket.spent_cents;
@@ -384,6 +404,7 @@ export const update_run_settings = spacetimedb.reducer(
       max_iterations: next.max_iterations,
       hyperparams_json,
       updated_at: ctx.timestamp,
+      data_type_override: next.data_type_override,
     });
     if (next.budget_cents !== ticket.budget_cents) {
       ctx.db.ticket.id.update({ ...ticket, budget_cents: next.budget_cents, updated_at: ctx.timestamp });

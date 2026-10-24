@@ -1,0 +1,11 @@
+# TDM-81: build context allow-list for apps/mcp/Dockerfile (BuildKit picks this file up next to the
+# Dockerfile; Fly: --ignorefile apps/mcp/Dockerfile.dockerignore). Everything else stays out, .env included.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!packages/env/package.json
+!packages/env/index.ts
+!apps/mcp/package.json
+!apps/mcp/src/
+!apps/mcp/scripts/

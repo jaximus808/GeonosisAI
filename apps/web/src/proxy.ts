@@ -8,6 +8,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { TDM110_ACCESS_COOKIE, tdm110AccessDecision, tdm110GateCode } from '@/lib/tdm110/access';
+import { OPERATOR_COOKIE, verifyOperatorSession } from '@/lib/operator/session';
 
 export function proxy(req: NextRequest) {
   const code = tdm110GateCode(process.env);
@@ -18,6 +19,8 @@ export function proxy(req: NextRequest) {
     method: req.method,
     accept: req.headers.get('accept') ?? '',
     cookie: req.cookies.get(TDM110_ACCESS_COOKIE)?.value,
+    // TDM-111: a logged-in operator never needs the contributor code
+    operator: verifyOperatorSession(req.cookies.get(OPERATOR_COOKIE)?.value) != null,
   });
   if (d.action === 'redirect') return NextResponse.redirect(new URL(d.to, req.url));
   if (d.action === 'deny') {

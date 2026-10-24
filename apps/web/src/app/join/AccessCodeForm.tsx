@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 
 // make demo-public: the public link asks for the short code shown next to the QR, once per browser.
@@ -29,6 +30,11 @@ function prefillCode(next: string | undefined): string {
   }
 }
 
+/** TDM-111: what the box holds: uppercase, no spaces (codes are 6 letters and digits). */
+function tdm111CleanCode(v: string): string {
+  return v.replace(/\s+/g, '').toUpperCase();
+}
+
 export function AccessCodeForm({ next }: { next?: string }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +53,7 @@ export function AccessCodeForm({ next }: { next?: string }) {
       const r = await fetch('/_rdf/access', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: tdm111CleanCode(code) }),
         cache: 'no-store',
       });
       const b = (await r.json().catch(() => ({}))) as { detail?: string };
@@ -64,12 +70,14 @@ export function AccessCodeForm({ next }: { next?: string }) {
       <label htmlFor="rdf-access-code" className="block text-sm font-medium">
         Access code
       </label>
-      <p className="text-sm text-zinc-500">It is on the screen next to the QR code. You only enter it once on this phone.</p>
+      <p className="text-sm text-zinc-500">
+        6 letters and digits, on the screen next to the QR code. You only enter it once on this phone.
+      </p>
       <input
         id="rdf-access-code"
         className={input}
         value={code}
-        onChange={(e) => setCode(e.target.value)}
+        onChange={(e) => setCode(tdm111CleanCode(e.target.value))}
         autoComplete="one-time-code"
         autoCapitalize="characters"
         autoCorrect="off"
@@ -87,6 +95,12 @@ export function AccessCodeForm({ next }: { next?: string }) {
       >
         {busy ? 'Checking…' : 'Continue'}
       </button>
+      <p className="pt-1 text-center text-sm text-zinc-500">
+        Operator?{' '}
+        <Link href={`/ops/login${safeNext(next) ? `?next=${encodeURIComponent(safeNext(next) as string)}` : ''}`} className="underline">
+          Log in
+        </Link>
+      </p>
     </form>
   );
 }

@@ -21,9 +21,11 @@ Routes (by path):
   /_api/<secret>/...        the orchestrator, only for a REMOTE Jetson / Modal (--api): healthz, uploads/sign,
                             uploads/sign-batch, modal/progress, modal/callback. The secret path is the
                             capability (JETSON_ORCHESTRATOR_URL=https://<app>/_api/<secret>). Off by default.
-  everything else           the Next.js app (``next start``). Needs the access cookie, except /join (which shows
-                            the code form), /_next/static and the icons. Without the cookie: pages redirect
-                            to /join?next=..., API and WebSocket calls get 401.
+  everything else           the Next.js app (``next start``). Needs the access cookie, except PUBLIC_OPEN (TDM-111:
+                            the landing page /, /join, /ops/login and its POST, /j/<task>/<channel>),
+                            /_next/static and the icons. Without the cookie: pages redirect to /join?next=...,
+                            API and WebSocket calls get 401. A 200 from POST /api/ops/session (operator login)
+                            also sets the access cookie, so an operator never needs the contributor code.
 
 TDM-110 hybrid backend edge (``make demo-hybrid``: the web app is on Vercel, this edge has no --web):
   /_rdf/proof?nonce=N       200 {v, url, proof}, proof = hex HMAC-SHA256(RDF_EDGE_SECRET,
@@ -73,7 +75,19 @@ WS_HANDSHAKE = {"sec-websocket-key", "sec-websocket-version", "sec-websocket-ext
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 EDGE_SECRET_HEADER = "x-rdf-edge-secret"
 PROOF_LABEL = "rdf-edge-proof-v1"
-STATIC_OPEN = re.compile(r"^/(_next/static/|favicon\.ico$|icon|apple-icon|manifest\.webmanifest$)")
+STATIC_OPEN = re.compile(r"^/(_next/static/|_next/image|favicon\.ico$|icon|apple-icon|manifest\.webmanifest$|robots\.txt$)")
+# TDM-111: pages and routes anyone may open without the access cookie: the landing page, the operator login (page
+# and its POST, so an operator is never trapped on /join), the code form, the backend health, and the
+# /j/<task>/<channel> short links (they 302 to /marketplace, which is gated, so they still end on /join?next=).
+# Same list as apps/web/src/lib/tdm110/access.ts tdm110AccessOpen.
+PUBLIC_OPEN = frozenset({"/", "/join", "/ops/login", "/api/ops/session", "/api/tdm110/access", "/api/tdm110/backend"})
+SHORT_LINK = re.compile(r"^/j/[^/]+/[^/]+/?$")
+OPERATOR_LOGIN = "/api/ops/session"
+
+
+def public_open(path: str) -> bool:
+    """True for a path the gate lets through without the access cookie (TDM-111)."""
+    return path in PUBLIC_OPEN or bool(SHORT_LINK.match(path) or STATIC_OPEN.match(path))
 API_ALLOW = {("GET", "/healthz"), ("POST", "/uploads/sign"), ("POST", "/uploads/sign-batch"),
              ("POST", "/modal/progress"), ("POST", "/modal/callback")}
 
@@ -321,7 +335,7 @@ class Guard:
             access = "ok"
         else:
             access = "required"
-            if not (path == "/join" or STATIC_OPEN.match(path)):
+            if not public_open(path):
                 self.stats["refused_access"] += 1
                 if method in ("GET", "HEAD") and not ws and not path.startswith("/api/") \
                         and "text/html" in req.headers.get("accept", ""):
@@ -329,7 +343,15 @@ class Guard:
                     # a raw Location (web.HTTPFound runs it through yarl, which un-escapes the %3F)
                     return web.Response(status=302, headers={"location": f"/join?next={nxt}", "cache-control": "no-store"})
                 return self.jerr(401, "access_code_required", "Enter the access code at /join first.")
-        return await self.proxy(req, self.cfg.web, path, tunneled, access=access)
+        # TDM-111: a successful operator login also gets the access cookie, so the operator never needs the code
+        grant = gate and access == "required" and method == "POST" and path == OPERATOR_LOGIN
+        return await self.proxy(req, self.cfg.web, path, tunneled, access=access,
+                                grant_access_on_ok=grant)
+
+    def access_cookie(self, tunneled: bool) -> str:
+        return "; ".join([
+            f"{ACCESS_COOKIE}={mint_access(self.cfg.access_code)}", "Path=/", f"Max-Age={ACCESS_TTL_S}", "HttpOnly",
+            "SameSite=Lax", *(["Secure"] if tunneled else [])])
 
     # -- /_rdf/access
     async def access(self, req: web.Request, tunneled: bool) -> web.Response:
@@ -351,11 +373,9 @@ class Guard:
         cand = b.get("code") if isinstance(b, dict) else None
         if not code_matches(self.cfg.access_code, cand):
             log.info("wrong access code from %s", self.client_ip(req) if tunneled else "local")
-            return self.jerr(401, "bad_code", "That code is not right. It is on the screen next to the QR code.")
+            return self.jerr(401, "bad_code", "That code is not right. It is 6 characters, on the screen next to the QR code.")
         resp = web.json_response({"ok": True}, headers={"cache-control": "no-store"})
-        resp.headers["set-cookie"] = "; ".join([
-            f"{ACCESS_COOKIE}={mint_access(self.cfg.access_code)}", "Path=/", f"Max-Age={ACCESS_TTL_S}", "HttpOnly",
-            "SameSite=Lax", *(["Secure"] if tunneled else [])])
+        resp.headers["set-cookie"] = self.access_cookie(tunneled)
         return resp
 
     # -- /_rdf/proof (TDM-110)
@@ -394,7 +414,7 @@ class Guard:
         return h
 
     async def proxy(self, req: web.Request, base: str, path: str, tunneled: bool, *, access: str,
-                    ws_limit: bool = False) -> web.StreamResponse:
+                    ws_limit: bool = False, grant_access_on_ok: bool = False) -> web.StreamResponse:
         assert self.session is not None
         qs = req.query_string
         url = base.rstrip("/") + path + (f"?{qs}" if qs else "")
@@ -410,6 +430,8 @@ class Guard:
                 for k, v in up.headers.items():
                     if k.lower() not in HOP:
                         resp.headers.add(k, v)
+                if grant_access_on_ok and up.status == 200:
+                    resp.headers.add("set-cookie", self.access_cookie(tunneled))
                 if up.headers.get("content-length"):  # bodies pass through still encoded (auto_decompress=False)
                     resp.content_length = int(up.headers["content-length"])
                 await resp.prepare(req)

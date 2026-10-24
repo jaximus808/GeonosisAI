@@ -8,7 +8,7 @@ import { ThemeToggle } from './brand/ThemeToggle';
 import { Wordmark } from './brand/Wordmark';
 
 const NAV = [
-  { href: '/', label: 'Tickets' },
+  { href: '/dashboard', label: 'Tickets' }, // TDM-111: `/` is the public landing page
   { href: '/tickets/new', label: 'New ticket' },
   { href: '/agents', label: 'Agents' },
   { href: '/events', label: 'Event log' },
@@ -24,7 +24,7 @@ const PHONE_NAV = [
 ];
 
 function isActive(path: string, href: string) {
-  if (href === '/') return path === '/' || (path.startsWith('/tickets/') && !path.startsWith('/tickets/new'));
+  if (href === '/dashboard') return path === '/dashboard' || (path.startsWith('/tickets/') && !path.startsWith('/tickets/new'));
   return path === href || path.startsWith(`${href}/`);
 }
 
@@ -32,6 +32,27 @@ function isActive(path: string, href: string) {
 export function Header() {
   const path = usePathname() ?? '/';
   const phone = PHONE_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+  if (path === '/') {
+    // TDM-111: the public landing page. No operator nav (those pages need the code or a login).
+    return (
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-[1120px] items-center gap-4 px-4 py-3 sm:px-8">
+          <Link href="/" className="no-underline" aria-label="GeonosisAI home">
+            <Wordmark size="sm" />
+          </Link>
+          <nav className="ml-auto flex items-center gap-4 text-sm text-ink-muted" aria-label="Landing">
+            <Link href="/live" className="hidden whitespace-nowrap hover:text-ink sm:inline">
+              Watch live
+            </Link>
+            <Link href="/ops/login?next=/dashboard" className="whitespace-nowrap hover:text-ink">
+              Operator login
+            </Link>
+            <ThemeToggle />
+          </nav>
+        </div>
+      </header>
+    );
+  }
   if (phone) {
     return (
       <header className="border-b border-line bg-surface">
@@ -61,7 +82,7 @@ export function Header() {
   return (
     <header className="border-b border-line bg-surface">
       <div className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-x-6 gap-y-1 px-4 sm:px-8">
-        <Link href="/" className="py-3 no-underline" aria-label="GeonosisAI home">
+        <Link href="/dashboard" className="py-3 no-underline" aria-label="GeonosisAI dashboard">
           <Wordmark size="sm" />
         </Link>
         <nav className="gx-nav" aria-label="Main">

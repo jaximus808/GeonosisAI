@@ -9,7 +9,7 @@ export default async function OpsLoginPage({
 }) {
   const raw = (await searchParams).next;
   // Same-origin paths only (no "//host" or "/\host" open redirects).
-  const next = typeof raw === 'string' && /^\/(?![/\\])/.test(raw) ? raw : '/';
+  const next = typeof raw === 'string' && /^\/(?![/\\])/.test(raw) ? raw : '/dashboard';
   return (
     <div className="mx-auto max-w-sm">
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">Operator login</h1>

@@ -17,6 +17,7 @@ import {
   operatorCookieHeader,
   operatorSessionOf,
 } from '@/lib/operator/session';
+import { tdm111AccessCookieForOperator } from '@/lib/tdm111/operatorAccess';
 
 const NO_STORE = { 'cache-control': 'no-store' };
 
@@ -44,10 +45,12 @@ export async function POST(req: Request) {
   }
   clearLoginFailures(req);
   const s = mintOperatorSession();
-  return Response.json(
-    { ok: true, operator: true, expiresAt: s.expiresAt },
-    { headers: { ...NO_STORE, 'set-cookie': operatorCookieHeader(req, s.value) } },
-  );
+  // TDM-111: the operator also gets the contributor access cookie, so the access gate never sends them to /join.
+  const headers = new Headers(NO_STORE);
+  headers.append('set-cookie', operatorCookieHeader(req, s.value));
+  const access = tdm111AccessCookieForOperator(req, process.env);
+  if (access) headers.append('set-cookie', access);
+  return Response.json({ ok: true, operator: true, expiresAt: s.expiresAt }, { headers });
 }
 
 export function DELETE(req: Request) {

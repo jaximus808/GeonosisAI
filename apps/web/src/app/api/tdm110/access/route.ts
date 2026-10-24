@@ -65,7 +65,7 @@ export async function POST(req: Request) {
   if (!tdm110CodeMatches(code, b?.code)) {
     noteFail(req);
     return Response.json(
-      { code: 'bad_code', detail: 'That code is not right. It is on the screen next to the QR code.' },
+      { code: 'bad_code', detail: 'That code is not right. It is 6 characters, on the screen next to the QR code.' },
       { status: 401, headers: NO_STORE },
     );
   }

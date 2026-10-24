@@ -699,7 +699,7 @@ function LiveKioskBody({ ticketParam }: { ticketParam: string | null }) {
             {flash}
           </span>
         )}
-        <a href="/" className="ml-auto underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arc)]">
+        <a href="/dashboard" className="ml-auto underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arc)]">
           Leave the kiosk
         </a>
       </footer>

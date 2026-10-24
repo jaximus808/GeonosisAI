@@ -70,6 +70,8 @@ def _echo_app(tag: str) -> web.Application:
     async def any_(req: web.Request) -> web.Response:
         if req.headers.get("upgrade", "").lower() == "websocket":
             return await ws(req)
+        if req.path == "/api/ops/session" and req.headers.get("x-tdm111-wrong-passcode"):
+            return web.json_response({"code": "bad_passcode"}, status=401)
         return web.json_response({"tag": tag, "path": req.path, "qs": req.query_string, "method": req.method,
                                   "access": req.headers.get("x-rdf-access"), "host": req.headers.get("host"),
                                   "proto": req.headers.get("x-forwarded-proto")})
@@ -204,4 +206,30 @@ def test_rate_limit_on_access_code(run):
         r = await c.post("/_rdf/access", json={"code": CODE}, headers=CF)
         assert r.status == 429 and int(r.headers["retry-after"]) > 0, "even the right code waits out the window"
         assert (await c.post("/_rdf/access", json={"code": CODE}, headers={**CF, "cf-connecting-ip": "198.51.100.7"})).status == 200
+    run(t)
+
+
+def test_tdm111_public_pages_and_operator_login(run):
+    """TDM-111: landing, operator login and short links open without the code; the rest stays gated."""
+    assert g.public_open("/") and g.public_open("/ops/login") and g.public_open("/j/12/discord")
+    assert not g.public_open("/marketplace") and not g.public_open("/tickets/1") and not g.public_open("/j/12")
+    assert not g.public_open("/ops/settings") and not g.public_open("/api/tdm74/tickets")
+
+    async def t(c: TestClient):
+        for p in ("/", "/join", "/ops/login", "/j/12/discord"):
+            r = await c.get(p, headers={**CF, **HTML}, allow_redirects=False)
+            assert r.status == 200 and (await r.json())["access"] == "required", p
+        for p in ("/marketplace", "/tickets/1", "/live", "/ops/settings"):
+            r = await c.get(p, headers={**CF, **HTML}, allow_redirects=False)
+            assert r.status == 302 and r.headers["location"].startswith("/join?next="), p
+        assert (await c.get("/api/tdm64/payments/mode", headers=CF)).status == 401
+
+        r = await c.post("/api/ops/session", json={"passcode": "x"}, headers={**CF, "x-tdm111-wrong-passcode": "1"})
+        assert r.status == 401 and "set-cookie" not in r.headers, "a wrong passcode gets no access cookie"
+        r = await c.post("/api/ops/session", json={"passcode": "x"}, headers=CF)
+        assert r.status == 200
+        sc = [v for v in r.headers.getall("set-cookie") if v.startswith(g.ACCESS_COOKIE + "=")]
+        assert sc and "HttpOnly" in sc[0] and "Secure" in sc[0]
+        r = await c.get("/marketplace", headers={**CF, **HTML, "cookie": sc[0].split(";")[0]}, allow_redirects=False)
+        assert r.status == 200 and (await r.json())["access"] == "ok", "the operator now has access"
     run(t)

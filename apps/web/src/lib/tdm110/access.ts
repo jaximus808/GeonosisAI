@@ -48,24 +48,35 @@ export function tdm110CodeMatches(code: string, candidate: unknown): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Paths a phone without the cookie may still open (the code form and what it needs to render). */
+/**
+ * Paths anyone may open without the cookie. TDM-111: the public landing page (/), the operator login (page
+ * and its POST) so an operator is never trapped on /join, the code form and what it needs to render, the
+ * landing page's anonymous numbers, and the /j/<task>/<channel> short links (they 302 to /marketplace,
+ * which is gated, so a phone without the code still lands on /join?next=...). Same list as
+ * scripts/demo/public_guard.py PUBLIC_OPEN.
+ */
 export function tdm110AccessOpen(path: string): boolean {
   return (
+    path === '/' ||
     path === '/join' ||
+    path === '/ops/login' ||
+    path === '/api/ops/session' ||
     path === '/_rdf/access' ||
     path === '/api/tdm110/access' ||
     path === '/api/tdm110/backend' ||
-    /^\/(_next\/static\/|_next\/image|favicon\.ico$|icon|apple-icon|manifest\.webmanifest$)/.test(path)
+    /^\/j\/[^/]+\/[^/]+\/?$/.test(path) ||
+    /^\/(_next\/static\/|_next\/image|favicon\.ico$|icon|apple-icon|manifest\.webmanifest$|robots\.txt$)/.test(path)
   );
 }
 
 /** What the gate does with a request: pass (with the x-rdf-access value to forward), redirect, or 401. */
 export function tdm110AccessDecision(
   code: string,
-  req: { path: string; search: string; method: string; accept: string; cookie: string | undefined },
+  // operator: the request carries a valid operator session (rdf_op); TDM-111 counts it as access.
+  req: { path: string; search: string; method: string; accept: string; cookie: string | undefined; operator?: boolean },
 ): { action: 'pass'; access: 'off' | 'ok' | 'required' } | { action: 'redirect'; to: string } | { action: 'deny' } {
   if (!code) return { action: 'pass', access: 'off' };
-  if (tdm110VerifyAccess(code, req.cookie)) return { action: 'pass', access: 'ok' };
+  if (req.operator || tdm110VerifyAccess(code, req.cookie)) return { action: 'pass', access: 'ok' };
   if (tdm110AccessOpen(req.path)) return { action: 'pass', access: 'required' };
   if ((req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api/') && req.accept.includes('text/html')) {
     return { action: 'redirect', to: `/join?next=${encodeURIComponent(req.path + req.search).replace(/%2F/g, '/')}` };

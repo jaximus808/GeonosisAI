@@ -94,3 +94,9 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - Port 8000 on this laptop is taken by an unrelated project. Use another port.
 - Maincloud already holds test robot `test.tdm19-yam` (id 1) and ticket 1. Names starting `test.` are ignored by robot auto-selection.
 - **Committing only your hunks of a shared file** (with a temporary `GIT_INDEX_FILE`): build that index from the *current* HEAD immediately before you commit (`GIT_INDEX_FILE=$t git read-tree HEAD`), apply only your hunks, commit, and delete it. A stale private index already reverted another ticket's files once tonight. **After every commit, check `git show --stat HEAD`:** no deletions, and only your files. If anything else shows up, fix it immediately with a follow-up commit and say so in your result.
+
+## Episode media storage (TDM-4 decision)
+- Media lives on Modal Volume `rdf-media`, behind a signed-URL app at `https://jaxonp808--rdf-media.modal.run`. Modal jobs mount the same Volume at `/media`, with no copy.
+- In Python, use `services/orchestrator/src/rdf_orchestrator/storage.py`: `get_backend()` → `signed_put(key, content_type)`, `signed_get(uri_or_key)`, `put(key, bytes|Path)`, `list(prefix)`. Build keys with `episode_key(ticket, episode, filename)`, which gives `tickets/{t}/episodes/{e}/{file}`. URIs look like `modal-vol://rdf-media/<key>`.
+- Over HTTP, through the orchestrator: `POST /uploads/sign`, `POST /uploads/sign-batch`, `GET /media/sign?uri=`, `GET /media/list?ticket_id=&episode_id=`.
+- The Modal app must not use `from __future__ import annotations`, because FastAPI then misreads `Request`.

@@ -1,0 +1,38 @@
+# TDM-44: robot client service. Rendered by bootstrap.sh (@USER@, @APP@) into
+# /etc/systemd/system/robot-client.service. Enabled/started by deploy.sh per /etc/rdf/robot-client.mode.
+# Logs: journalctl -u robot-client (make jetson-logs from the laptop).
+[Unit]
+Description=RDF robot client: YAM arm, cameras, SpacetimeDB command loop
+Documentation=file://@APP@/services/robot-client/docs/jetson-bootstrap-checklist.md
+Wants=network-online.target rdf-can.service
+After=network-online.target time-sync.target rdf-can.service
+# crash loop guard: at most 20 starts per 10 min, then systemd gives up (systemctl reset-failed)
+StartLimitIntervalSec=600
+StartLimitBurst=20
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+SupplementaryGroups=video dialout plugdev
+WorkingDirectory=@APP@/services/robot-client
+# order matters: later files win. local = Jetson-only settings, env = pushed from the laptop
+# (make jetson-env), mode = written by deploy.sh (RDF_ROBOT_CLIENT_ARGS).
+EnvironmentFile=/etc/rdf/robot-client.local.env
+EnvironmentFile=/etc/rdf/robot-client.env
+EnvironmentFile=-/etc/rdf/robot-client.mode
+Environment=PYTHONUNBUFFERED=1 RDF_ENV_FILE=/etc/rdf/robot-client.env
+ExecStart=@APP@/services/robot-client/.venv/bin/rdf-robot-client $RDF_ROBOT_CLIENT_ARGS
+Restart=on-failure
+RestartSec=3
+# SIGTERM -> main.py stops the arm and the command loop; SIGKILL after 20 s
+KillSignal=SIGTERM
+TimeoutStopSec=20
+# the 30 Hz control loop should not lose the CPU to background jobs
+Nice=-10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=robot-client
+
+[Install]
+WantedBy=multi-user.target

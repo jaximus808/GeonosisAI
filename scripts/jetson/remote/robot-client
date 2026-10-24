@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# TDM-44: `robot-client` CLI on the Jetson (installed to /usr/local/bin by bootstrap.sh).
+# @APP@ / @USER@ are filled in at install time.
+#
+#   robot-client status | logs [-f] | start | stop | restart
+#   robot-client run [args]          foreground client with the service's env (stops the service first)
+#   robot-client check [args]        connectivity: SpacetimeDB, policy latency, media upload, orchestrator
+#   robot-client cameras-list        python -m rdf_robot_client.cameras list --formats
+#   robot-client cameras-check [a]   python -m rdf_robot_client.cameras check (TDM-47 done-when)
+#   robot-client cameras-serve [a]   MJPEG preview on :8090 (TDM-47/55)
+#   robot-client can                 CAN interface state (ip -details link) + candump hint
+#   robot-client home                home the arm (needs TDM-46; today: issue `home` from the dashboard)
+#   robot-client record-test         record a short test episode (needs TDM-48)
+#   robot-client env                 key names in the env files (never values)
+#   robot-client python [args]       the venv's python with the service env
+set -euo pipefail
+
+APP="@APP@"
+RC="$APP/services/robot-client"
+PY="$RC/.venv/bin/python"
+ENV_FILES=(/etc/rdf/robot-client.local.env /etc/rdf/robot-client.env /etc/rdf/robot-client.mode)
+export PATH="$HOME/.local/bin:$PATH"
+
+# Load KEY=VALUE files without eval (values may hold tokens; never echo them).
+load_env() {
+  local f k v
+  for f in "${ENV_FILES[@]}"; do
+    [ -r "$f" ] || continue
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in ''|'#'*) continue ;; esac
+      k="${line%%=*}"; v="${line#*=}"
+      [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      if [[ "$v" == \"*\" && ${#v} -ge 2 ]]; then v="${v:1:${#v}-2}"; elif [[ "$v" == \'*\' && ${#v} -ge 2 ]]; then v="${v:1:${#v}-2}"; fi
+      export "$k=$v"
+    done <"$f"
+  done
+  [ -r /etc/rdf/robot-client.env ] || echo "warning: /etc/rdf/robot-client.env not readable (run make jetson-env from the laptop)" >&2
+}
+need_venv() { [ -x "$PY" ] || { echo "no venv at $RC/.venv: run make jetson-deploy from the laptop" >&2; exit 3; }; }
+sctl() { sudo /usr/bin/systemctl "$@"; }
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  status)
+    cat "$APP/DEPLOYED_REV" 2>/dev/null || true
+    grep -v '^#' /etc/rdf/robot-client.mode 2>/dev/null || true
+    systemctl status robot-client rdf-can --no-pager -n 20 || true ;;
+  logs)    exec journalctl -u robot-client -n 200 -o short-iso "$@" ;;
+  start|stop|restart) sctl "$cmd" robot-client ;;
+  run)
+    need_venv; load_env
+    if systemctl is-active --quiet robot-client 2>/dev/null; then
+      echo "stopping the robot-client service so only one client drives the arm" >&2; sctl stop robot-client
+    fi
+    cd "$RC"
+    # shellcheck disable=SC2086  # RDF_ROBOT_CLIENT_ARGS is a word list by design
+    if [ $# -eq 0 ]; then exec "$RC/.venv/bin/rdf-robot-client" ${RDF_ROBOT_CLIENT_ARGS:-}; fi
+    exec "$RC/.venv/bin/rdf-robot-client" "$@" ;;
+  check)   need_venv; load_env; cd "$RC"; exec "$PY" "$APP/scripts/jetson/connectivity_check.py" "$@" ;;
+  cameras-list)  need_venv; load_env; cd "$RC"; exec "$PY" -m rdf_robot_client.cameras list --formats "$@" ;;
+  cameras-check) need_venv; load_env; cd "$RC"; exec "$PY" -m rdf_robot_client.cameras check "$@" ;;
+  cameras-serve) need_venv; load_env; cd "$RC"; exec "$PY" -m rdf_robot_client.cameras serve --host 0.0.0.0 --port 8090 "$@" ;;
+  can)
+    ip -details -statistics link show type can 2>/dev/null || echo "no CAN interfaces (adapter plugged in? lsusb; dmesg | grep -i can)"
+    echo "watch traffic: candump -td ${RDF_CAN_IFACES:-can0}   restart: sudo systemctl restart rdf-can" ;;
+  home)
+    echo "Local homing needs the TDM-46 YAM adapter. Until then: issue 'home' from the dashboard" >&2
+    echo "(robot_command type=home), with a human at the physical e-stop. See services/robot-client/docs/robot-loop-jetson-checklist.md step 3." >&2
+    exit 2 ;;
+  record-test)
+    echo "Needs the TDM-48 recorder (not landed yet). Until then: robot-client cameras-check --seconds 10 -v" >&2
+    exit 2 ;;
+  env)
+    for f in "${ENV_FILES[@]}"; do
+      [ -r "$f" ] || { echo "$f: (missing or unreadable)"; continue; }
+      echo "$f:"; grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$f" | while IFS= read -r l; do
+        k="${l%%=*}"; v="${l#*=}"; [ -n "$v" ] && echo "  set    $k" || echo "  blank  $k"; done
+    done ;;
+  python) need_venv; load_env; cd "$RC"; exec "$PY" "$@" ;;
+  help|-h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "unknown command: $cmd (robot-client help)" >&2; exit 2 ;;
+esac

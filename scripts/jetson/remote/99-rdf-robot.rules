@@ -1,0 +1,25 @@
+# TDM-44: stable device names for the robot client. Installed to /etc/udev/rules.d/ by bootstrap.sh.
+# EVERY VALUE MARKED TO_VERIFY IS A PLACEHOLDER. Until edited these rules match nothing, which is
+# harmless. Fill them in on the Jetson (services/robot-client/docs/jetson-bootstrap-checklist.md):
+#   udevadm info -a -n /dev/video0 | grep -E 'idVendor|idProduct|serial|KERNELS' | head
+#   udevadm info -a -p /sys/class/net/can0 | grep -E 'idVendor|idProduct|serial' | head
+# then: make jetson-bootstrap   (re-installs only changed rules and reloads udev)
+# Edit this file in the repo (scripts/jetson/remote/99-rdf-robot.rules), not on the Jetson.
+
+# ---------- cameras -> /dev/rdf-cam-top, /dev/rdf-cam-wrist (point config/cameras.yaml at these) ----------
+# ATTR{index}=="0" picks the capture node; UVC cameras also expose a metadata node (index 1).
+# Option A (cameras have distinct serials): match on serial.
+SUBSYSTEM=="video4linux", ATTR{index}=="0", ATTRS{idVendor}=="TO_VERIFY_VID", ATTRS{idProduct}=="TO_VERIFY_PID", ATTRS{serial}=="TO_VERIFY_TOP_SERIAL", SYMLINK+="rdf-cam-top", GROUP="video", MODE="0660"
+SUBSYSTEM=="video4linux", ATTR{index}=="0", ATTRS{idVendor}=="TO_VERIFY_VID", ATTRS{idProduct}=="TO_VERIFY_PID", ATTRS{serial}=="TO_VERIFY_WRIST_SERIAL", SYMLINK+="rdf-cam-wrist", GROUP="video", MODE="0660"
+# Option B (two identical cameras without serials): match on the USB port path, and label the ports.
+#SUBSYSTEM=="video4linux", ATTR{index}=="0", KERNELS=="TO_VERIFY_e.g._1-2.1:1.0", SYMLINK+="rdf-cam-top"
+#SUBSYSTEM=="video4linux", ATTR{index}=="0", KERNELS=="TO_VERIFY_e.g._1-2.2:1.0", SYMLINK+="rdf-cam-wrist"
+
+# ---------- YAM arm CAN adapter -> fixed interface name ----------
+# Most USB-CAN adapters (candleLight / CANable, gs_usb driver) are 1d50:606f. TO VERIFY with lsusb.
+# NAME must match RDF_CAN_IFACES in /etc/rdf/robot-client.local.env and what the I2RT SDK opens.
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", ATTRS{serial}=="TO_VERIFY_CAN_SERIAL", NAME="can0"
+# Bring the interface up (bitrate, txqueuelen) whenever a CAN adapter appears.
+SUBSYSTEM=="net", ACTION=="add", KERNEL=="can*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="rdf-can.service"
+# Raw USB access for adapter tools (firmware flashing, slcan) without root.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", GROUP="plugdev", MODE="0660"

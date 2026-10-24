@@ -1,0 +1,14 @@
+# TDM-44: bring up SocketCAN for the YAM arm before robot-client starts (and on USB-CAN hotplug).
+[Unit]
+Description=RDF: SocketCAN up for the YAM arm
+After=systemd-modules-load.service
+Before=robot-client.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/rdf/robot-client.local.env
+ExecStart=/usr/local/lib/rdf/can-up.sh
+
+[Install]
+WantedBy=multi-user.target

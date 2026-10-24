@@ -34,6 +34,8 @@ help:
 	@echo "make policy-up / policy-down / policy-status  warm, cool, inspect the policy server (TDM-41)"
 	@echo "make test-loop  full-loop integration tests: local SpacetimeDB + fake robot, no arm (TDM-28)"
 	@echo "make fake-stack boot local SpacetimeDB + fake robot and keep them running (TDM-28)"
+	@echo "make jetson-bootstrap JETSON_HOST=<ip>  set up the Jetson over ssh (TDM-44; DRY_RUN=1 to preview)"
+	@echo "make jetson-deploy / jetson-env / jetson-check / jetson-status / jetson-logs  Jetson code update, env, checks, logs"
 
 install:
 	pnpm install
@@ -155,3 +157,30 @@ ci-py:
 	@scripts/ci/run.sh $(if $(SERVICE),py $(SERVICE),py-all)
 ci-ts ci-stdb ci-lint ci-evlog ci-integration:
 	@scripts/ci/run.sh $(patsubst ci-%,%,$@)
+
+# TDM-44: Jetson bootstrap / deploy over ssh (scripts/jetson/jetson.sh, checklist
+# services/robot-client/docs/jetson-bootstrap-checklist.md). JETSON_HOST/JETSON_USER/JETSON_PORT come
+# from the command line or .env. DRY_RUN=1 changes nothing (fully offline plan when no host is set).
+#   make jetson-bootstrap JETSON_HOST=10.0.0.42 JETSON_USER=nvidia
+#   make jetson-deploy [JETSON_SERVICE_MODE=auto|yam|sim|off] [ARGS=--restart]
+#   make jetson-check [ARGS=--no-policy]   make jetson-logs [FOLLOW=0 LINES=500]
+.PHONY: jetson-bootstrap jetson-plan jetson-deploy jetson-env jetson-check jetson-status jetson-logs jetson-ssh
+JETSON_SH = JETSON_HOST="$(JETSON_HOST)" JETSON_USER="$(JETSON_USER)" JETSON_PORT="$(JETSON_PORT)" \
+  JETSON_SRC="$(JETSON_SRC)" JETSON_SERVICE_MODE="$(JETSON_SERVICE_MODE)" RDF_DRY_RUN="$(DRY_RUN)" \
+  ./scripts/jetson/jetson.sh
+jetson-bootstrap:
+	@$(JETSON_SH) bootstrap $(ARGS)
+jetson-plan:
+	@$(JETSON_SH) plan $(ARGS)
+jetson-deploy:
+	@$(JETSON_SH) deploy $(ARGS)
+jetson-env:
+	@$(JETSON_SH) env $(ARGS)
+jetson-check:
+	@$(JETSON_SH) check $(ARGS)
+jetson-status:
+	@$(JETSON_SH) status
+jetson-logs:
+	@$(JETSON_SH) logs
+jetson-ssh:
+	@$(JETSON_SH) ssh

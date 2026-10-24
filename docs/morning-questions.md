@@ -9,6 +9,12 @@ Work kept going around each of these. Answer in any order.
      - Optionally, run `scripts/jetson/jetson.sh mint-identity --yes`. It gives the Jetson its own `robot_client` identity instead of the owner token, and writes to maincloud `service_identity`.
    - To confirm on the arm: which CAN adapter or interface the YAM uses (`YAM_CAN_CHANNEL`), and the gripper model. The I2RT SDK is pinned to TDM-46's `120c3c8`.
    - The service starts in mode `off`. After the SDK-alone bring-up (`yam-sdk-notes.md` §8), run `make jetson-deploy JETSON_SERVICE_MODE=yam`.
+   - **Then it's one command (TDM-44):** `make jetson-bootstrap JETSON_HOST=<ip> JETSON_USER=<user>`. Preview it with `DRY_RUN=1`. The checklist is `services/robot-client/docs/jetson-bootstrap-checklist.md`.
+   - Two things to set in `.env` first:
+     - `JETSON_ORCHESTRATOR_URL`: how the office Jetson reaches the orchestrator (laptop LAN IP or a tunnel). It's needed for episode uploads.
+     - Optionally, run `scripts/jetson/jetson.sh mint-identity --yes`. It gives the Jetson its own `robot_client` identity instead of the owner token, and writes to maincloud `service_identity`.
+   - To confirm on the arm: which CAN adapter or interface the YAM uses (`YAM_CAN_CHANNEL`), and the gripper model. The I2RT SDK is pinned to TDM-46's `120c3c8`.
+   - The service starts in mode `off`. After the SDK-alone bring-up (`yam-sdk-notes.md` §8), run `make jetson-deploy JETSON_SERVICE_MODE=yam`.
 2. **GitHub remote**: `brew install gh && gh auth login`, and pick a repo name (needed for Devpost). Until then, commits stay local on `main`.
 3. **Fly secrets**: you'll add them in the morning, then we deploy (TDM-5 is held until then).
 4. **Easy task choice (TDM-82)**: which task, which objects are on the table.

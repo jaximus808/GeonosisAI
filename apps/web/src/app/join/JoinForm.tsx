@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useContributor, useContributorPresence, type ContributorKind } from '@/lib/contributor/hooks';
+import { PushOptIn } from '@/components/tdm65/PushOptIn';
 
 const DEVICES: { id: string; label: string }[] = [
   { id: 'phone', label: 'Phone' },
@@ -87,9 +88,11 @@ export function JoinForm({ ticket }: { ticket?: string }) {
             {contributor.kind === 'dataset_seller' ? ' · dataset seller' : ''}
           </p>
           <p className="mt-2 text-xs text-emerald-800/80 dark:text-emerald-300/80">
-            This browser remembers you. Keep this tab or the tasks page open to receive tasks.
+            This browser remembers you. Turn on task alerts below, or keep this tab or the tasks page open to see new tasks.
           </p>
         </div>
+        {/* TDM-65: paid-task push alerts. */}
+        <PushOptIn />
         <div className="flex flex-wrap gap-3">
           <Link href="/marketplace" className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
             See paid tasks

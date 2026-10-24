@@ -394,6 +394,7 @@ function TaskTicket({
   const text = cleanInstructions(task.instructions);
   return (
     <li
+      id={`task-${task.id}`} // TDM-65 push deep link (/marketplace?task=N)
       className={`tdm61-motion relative overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${busy ? 'opacity-80' : ''}`}
       style={fresh ? { animation: 'tdm61-arrive 2.4s ease-out' } : undefined}
     >

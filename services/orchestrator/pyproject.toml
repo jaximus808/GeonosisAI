@@ -15,6 +15,7 @@ dependencies = [
     "rdf-payments",  # TDM-63 Stripe test-mode payouts
     "modal>=1.6.0",
     "rdf-factory",  # TDM-27 resume bridge -> TDM-30 FactoryClient.resume
+    "pywebpush>=2.0",  # TDM-65 web push (VAPID) paging
     "rdf-training",  # TDM-42 checkpoint registry + Modal cost (rdf_training.registry / cost)
 ]
 

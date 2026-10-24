@@ -26,6 +26,9 @@ def _default_client() -> BusClient:
 
 
 def create_app(*, client: BusClient | None = None, registry: Registry | None = None, workers: int = 8) -> FastAPI:
+    from rdf_common.llm import startup_check
+
+    startup_check("orchestrator")  # exits if a production/cloud deploy asks for a non-api LLM backend
     if registry is None:
         from . import handlers  # noqa: F401 - registers the handlers on the default registry
 
@@ -35,11 +38,21 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     async def lifespan(app: FastAPI):
         bus = Bus(registry, client or _default_client(), workers=workers)
         app.state.bus = bus
+        call_events = None
+        if client is None:  # the real run: llm.call records -> event_log (admin_llm_api.CallEventWriter)
+            from .admin_llm_api import start_call_events
+
+            call_events = start_call_events()
         await bus.start()
         try:
             yield
         finally:
             await bus.stop()
+            if call_events is not None:
+                from rdf_common.llm import remove_call_sink
+
+                remove_call_sink(call_events)
+                call_events.stop()
             log.info("app.stopped")
 
     app = FastAPI(title="rdf-orchestrator", lifespan=lifespan)
@@ -84,6 +97,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(robot_commands_router)
     from .reset_api import reset_router  # TDM-62: GET /resets/{id}, POST /resets/{id}/photo (reset task page)
     app.include_router(reset_router)
+    from .admin_llm_api import admin_llm_router  # GET/PUT /admin/llm: switch the LLM backend (locked to api in production)
+    app.include_router(admin_llm_router)
     # TDM-68: the dashboard (apps/web, :3737) reads GET routes from the browser (decision trail,
     # /media/sign). GET only, listed origins only (RDF_WEB_ORIGINS adds more, comma-separated).
     import os

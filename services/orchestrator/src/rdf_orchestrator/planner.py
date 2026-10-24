@@ -402,32 +402,36 @@ def violations(d: dict, inp: PlannerInputs, g: Guardrail, b: Budget) -> list[str
 
 
 def _call(client: Any, messages: list[dict]) -> tuple[dict, Any]:
-    resp = client.beta.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        betas=[FALLBACK_BETA],
-        fallbacks="default",
-        thinking={"type": "adaptive"},
-        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-    if resp.stop_reason == "refusal":
-        cat = getattr(getattr(resp, "stop_details", None), "category", None)
-        raise PlannerError(f"Claude declined to plan (refusal, category={cat})")
-    if resp.stop_reason == "max_tokens":
-        raise PlannerError("Claude hit max_tokens before finishing the plan")
-    text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), None)
-    if text is None:
-        raise PlannerError(f"no text block in Claude's answer (stop_reason={resp.stop_reason})")
+    """One structured call through ``rdf_common.llm`` (RDF_LLM_BACKEND: api | droid | claude_code; on the
+    API with the server-side refusal fallback). ``client``: an Anthropic-like client (pins api), an
+    ``rdf_common.llm.LLM``, or None for the shared switchable client. Returns (plan dict, LLMResult)."""
+    from rdf_common.llm import LLMError, as_llm
+
     try:
-        d = json.loads(text)
-    except ValueError as e:
-        raise PlannerError(f"Claude's answer is not JSON: {e}") from e
-    return d, resp
+        r = as_llm(client).complete_structured(
+            step="planner", system=SYSTEM_PROMPT, messages=messages, schema=OUTPUT_SCHEMA, model=MODEL,
+            effort=EFFORT, max_tokens=MAX_TOKENS, thinking=True)
+    except LLMError as e:
+        if e.reason == "refusal":
+            raise PlannerError(f"Claude declined to plan (refusal, category={e.category})") from e
+        if e.reason == "max_tokens":
+            raise PlannerError("Claude hit max_tokens before finishing the plan") from e
+        if e.reason == "no_output":
+            raise PlannerError(f"no text block in Claude's answer ({e})") from e
+        if e.reason in ("bad_json", "schema"):
+            raise PlannerError(f"Claude's answer is not JSON: {e}") from e
+        raise PlannerError(f"planner LLM call failed ({e.backend}): {e}") from e
+    if not isinstance(r.parsed, dict):
+        raise PlannerError(f"Claude's answer is not a JSON object: {r.text[:200]!r}")
+    return r.parsed, r
 
 
 def _usage(resp: Any) -> dict:
+    from rdf_common.llm import LLMResult, usage_summary
+
+    if isinstance(resp, LLMResult):
+        u = usage_summary(resp)
+        return {k: v for k, v in u.items() if k != "model"}
     u = getattr(resp, "usage", None)
     return {k: getattr(u, k, None) for k in ("input_tokens", "output_tokens")} if u else {}
 
@@ -536,7 +540,11 @@ def plan(inp: PlannerInputs, client: Any, *, log: Callable[[str, dict], None] | 
             "max_price_per_episode_cents": price if offer else 0,
             "max_episodes": b.needed,  # TDM-14 create_dataset_offer pays only for N - already uploaded
         },
+        # Honesty: which transport produced this decision (api | droid | claude_code) and the model it ran.
         "model": {"requested": MODEL, "effort": EFFORT, "served": getattr(resp, "model", None),
+                  "backend": getattr(resp, "backend", None) or "api",
+                  "backend_label": (getattr(resp, "meta", None) or {}).get("backend_label", "Claude API"),
+                  "backend_model": (getattr(resp, "meta", None) or {}).get("model", MODEL),
                   "attempts": attempts},
         "guardrail_forced": forced,
         "guardrail_agreed_first_try": not attempts[0]["violations"],
@@ -718,13 +726,9 @@ def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
 
 
 def anthropic_client() -> Any:
-    """The real client: API key from env / repo .env (rdf_common settings), never printed."""
-    import anthropic
-    from pydantic import Field, SecretStr
-    from rdf_common.settings import RdfSettings, load_settings
+    """The real client: ``rdf_common.llm``'s shared switchable client. The backend (RDF_LLM_BACKEND / the
+    runtime switch, ``api`` in production) is resolved on every call; the API key comes from env / repo
+    .env (rdf_common settings) and is never printed."""
+    from rdf_common.llm import default_llm
 
-    class _Tdm24ClaudeSettings(RdfSettings):
-        anthropic_api_key: SecretStr = Field(min_length=1)
-
-    s = load_settings(_Tdm24ClaudeSettings, "orchestrator.planner")
-    return anthropic.Anthropic(api_key=s.anthropic_api_key.get_secret_value(), max_retries=3, timeout=600)
+    return default_llm

@@ -295,66 +295,61 @@ class Judge(Protocol):
     def judge(self, messages: list[dict]) -> Judgement: ...
 
 
-def _api_key() -> str | None:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return None  # the SDK reads it from the environment
-    try:
-        from rdf_common.settings import OrchestratorSettings, load_settings
-
-        return load_settings(OrchestratorSettings, "orchestrator.reviewer").anthropic_api_key.get_secret_value()
-    except BaseException:  # noqa: BLE001 - load_settings exits on missing env; fall back to SDK defaults
-        return None
-
-
 class ClaudeJudge:
-    """One structured-output Messages call with vision. Server-side fallback is on for refusals."""
+    """One structured-output call with vision through ``rdf_common.llm`` (RDF_LLM_BACKEND: api | droid |
+    claude_code). On the API: server-side fallback is on for refusals. ``client``: an Anthropic-like client
+    (pins api) or an ``rdf_common.llm.LLM``; None = the shared switchable client."""
+
+    step = "review"
+    what = "the review"
 
     def __init__(self, config: ReviewConfig | None = None, client: Any = None):
         cfg = config or ReviewConfig()
-        self.model, self.effort = cfg.model, cfg.effort
+        self.requested_model, self.effort = cfg.model, cfg.effort
         self._client = client
         self.last_usage: dict | None = None
+        self.last_meta: dict | None = None
 
     @property
-    def client(self):
-        if self._client is None:
-            import anthropic
+    def model(self) -> str:
+        """The requested model; after a call, the model that answered (with the backend if not the API)."""
+        from rdf_common.llm import describe_result
 
-            key = _api_key()
-            self._client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
-        return self._client
+        return describe_result(self.last_meta) if self.last_meta else self.requested_model
+
+    @model.setter
+    def model(self, v: str) -> None:
+        self.requested_model = v
+
+    def _structured(self, messages: list[dict], *, system: str, schema: dict, err: type[Exception], out: Any) -> Any:
+        import anthropic
+        from rdf_common.llm import LLMError, as_llm, usage_summary
+
+        try:
+            r = as_llm(self._client).complete_structured(
+                step=self.step, system=system, messages=messages, schema=schema, model=self.requested_model,
+                effort=self.effort, max_tokens=16000, thinking=True)
+        except anthropic.APIError as e:
+            raise err(f"Claude API error: {type(e).__name__}: {e}") from e
+        except LLMError as e:
+            self.last_usage, self.last_meta = usage_summary(e), getattr(e, "meta", None)
+            if e.reason == "refusal":
+                raise err(f"Claude refused {self.what} (category={e.category})") from e
+            if e.reason == "max_tokens":
+                raise err("Claude output hit max_tokens") from e
+            if e.reason in ("bad_json", "schema"):
+                raise err(f"Claude structured output did not validate: {e}") from e
+            raise err(f"Claude {e.backend or 'LLM'} error: {e}") from e
+        self.last_usage, self.last_meta = usage_summary(r), r.meta
+        if not r.text:
+            raise err(f"no text block in Claude response (stop_reason={r.meta.get('stop_reason')})")
+        try:
+            return out.model_validate_json(r.text)
+        except ValidationError as e:
+            raise err(f"Claude structured output did not validate: {e}") from e
 
     def judge(self, messages: list[dict]) -> Judgement:
-        import anthropic
-
-        try:
-            resp = self.client.beta.messages.create(
-                model=self.model,
-                max_tokens=16000,
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
-                thinking={"type": "adaptive"},
-                output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": JUDGEMENT_SCHEMA}},
-                system=SYSTEM_PROMPT,
-                messages=messages,
-            )
-        except anthropic.APIError as e:
-            raise ReviewError(f"Claude API error: {type(e).__name__}: {e}") from e
-        u = getattr(resp, "usage", None)
-        self.last_usage = {"input_tokens": getattr(u, "input_tokens", None),
-                           "output_tokens": getattr(u, "output_tokens", None), "model": getattr(resp, "model", None)}
-        if resp.stop_reason == "refusal":
-            cat = getattr(getattr(resp, "stop_details", None), "category", None)
-            raise ReviewError(f"Claude refused the review (category={cat})")
-        if resp.stop_reason == "max_tokens":
-            raise ReviewError("Claude output hit max_tokens")
-        text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), None)
-        if not text:
-            raise ReviewError(f"no text block in Claude response (stop_reason={resp.stop_reason})")
-        try:
-            return Judgement.model_validate_json(text)
-        except ValidationError as e:
-            raise ReviewError(f"Claude structured output did not validate: {e}") from e
+        return self._structured(messages, system=SYSTEM_PROMPT, schema=JUDGEMENT_SCHEMA, err=ReviewError, out=Judgement)
 
 
 def _summary(ticket: Any, episode: Any, report: ChecksReport) -> str:

@@ -16,6 +16,12 @@ export SPACETIME_LOCAL_PORT
 SPACETIME_LOCAL_DB ?= robo-factory-a706j
 COMPOSE ?= docker compose
 
+# LLM backend for every target (rdf_common.llm): make test-loop LLM=claude_code | LLM=droid | LLM=api.
+# Unset = RDF_LLM_BACKEND from the env / .env (default api). Production/cloud deploys are locked to api.
+ifdef LLM
+export RDF_LLM_BACKEND := $(LLM)
+endif
+
 help:
 	@echo "make install    pnpm install + uv sync in each Python service"
 	@echo "make dev        docker compose up: orchestrator, web, mcp against Maincloud SpacetimeDB"
@@ -28,6 +34,7 @@ help:
 	@echo "make deploy     deploy the backend (stub)"
 	@echo "make env-check  report which .env keys are set (never prints values)"
 	@echo "make deploy-modal  modal deploy services/training/modal_app.py (app rdf-training, TDM-38)"
+	@echo "LLM=api|droid|claude_code  pick the Claude transport for any target, e.g. make test-loop DRIVER=orchestrator LLM=claude_code"
 	@echo "make modal-secrets create/refresh Modal secret rdf-training from .env (names only printed)"
 	@echo "make checkpoints [TICKET=42]  checkpoint registry on rdf-checkpoints (TDM-42); make checkpoint-cleanup = dry run (APPLY=1 deletes)"
 	@echo "make download-checkpoint TICKET=42 [WHICH=latest|deployed] [URI=modal-vol://...] [DEST=dir]  local-serving backup (TDM-42)"

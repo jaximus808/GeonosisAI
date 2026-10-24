@@ -156,14 +156,17 @@ def main() -> None:
     inputs.fixture = FIXTURE_LABEL
     g = P.guardrail(inputs)
     print(f"== guardrail: {g.rule} -> {g.required_type}  ({g.why})")
-    print(f"== calling {P.MODEL} (effort {P.EFFORT}) ...")
+    from rdf_common.llm import current
+
+    print(f"== calling {P.MODEL} (effort {P.EFFORT}) via LLM backend {current().backend} (RDF_LLM_BACKEND) ...")
     out = P.plan(inputs, P.anthropic_client(), log=lambda m, f: print(f"   {m}: {f}"))
     if out.blocked:
         sys.exit(f"blocked: {out.blocked}")
     ev = out.evidence
     print(f"\nDECISION (fixture): {out.data_type} x {out.amount} @ {out.unit_price_cents}c "
           f"(clusters {out.failure_cluster_ids}); dataset offer: {ev['dataset_offer']}")
-    print(f"served by {ev['model']['served']}; attempts: "
+    print(f"served by {ev['model']['served']} via {ev['model'].get('backend_label')} "
+          f"(backend model {ev['model'].get('backend_model')}); attempts: "
           + json.dumps([{k: x[k] for k in ('message_id', 'data_type', 'amount', 'violations', 'usage')}
                         for x in ev['model']['attempts']]))
     print("REASONING:\n" + textwrap.fill(out.reasoning, 100))

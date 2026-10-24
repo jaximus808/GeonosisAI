@@ -50,7 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Literal, Protocol
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from rdf_common.episode_format import EpisodeActions, cameras_from_json
 from rdf_common.review_checks import FAIL, PASS, CheckResult
 
@@ -375,43 +375,18 @@ class Judge(Protocol):
 
 class ClaudeLlmQaJudge(rv.ClaudeJudge):
     """The TDM-25 call shape (structured output + vision + server-side refusal fallback, adaptive
-    thinking), with the TDM-93 schema and prompt. Reuses ClaudeJudge's client and API-key handling."""
+    thinking), with the TDM-93 schema and prompt. Reuses ClaudeJudge's transport (``rdf_common.llm``)."""
+
+    step = "llm_qa"
+    what = "the QA call"
 
     def __init__(self, cfg: LlmQaConfig | None = None, client: Any = None):
         c = cfg or LlmQaConfig()
         super().__init__(rv.ReviewConfig(model=c.model, effort=c.effort), client)
 
     def judge(self, messages: list[dict]) -> LlmJudgement:  # type: ignore[override]
-        import anthropic
-
-        try:
-            resp = self.client.beta.messages.create(
-                model=self.model,
-                max_tokens=16000,
-                betas=[rv.FALLBACK_BETA],
-                fallbacks="default",
-                thinking={"type": "adaptive"},
-                output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": JUDGEMENT_SCHEMA}},
-                system=SYSTEM_PROMPT,
-                messages=messages,
-            )
-        except anthropic.APIError as e:
-            raise LlmQaError(f"Claude API error: {type(e).__name__}: {e}") from e
-        u = getattr(resp, "usage", None)
-        self.last_usage = {"input_tokens": getattr(u, "input_tokens", None),
-                           "output_tokens": getattr(u, "output_tokens", None), "model": getattr(resp, "model", None)}
-        if resp.stop_reason == "refusal":
-            cat = getattr(getattr(resp, "stop_details", None), "category", None)
-            raise LlmQaError(f"Claude refused the QA call (category={cat})")
-        if resp.stop_reason == "max_tokens":
-            raise LlmQaError("Claude output hit max_tokens")
-        text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), None)
-        if not text:
-            raise LlmQaError(f"no text block in Claude response (stop_reason={resp.stop_reason})")
-        try:
-            return LlmJudgement.model_validate_json(text)
-        except ValidationError as e:
-            raise LlmQaError(f"Claude structured output did not validate: {e}") from e
+        return self._structured(messages, system=SYSTEM_PROMPT, schema=JUDGEMENT_SCHEMA, err=LlmQaError,
+                                out=LlmJudgement)
 
 
 def build_messages(ticket: Any, episode: Any, summary: dict, frames: Frames, prompt: str | None = None) -> list[dict]:

@@ -93,11 +93,15 @@ Null when no budget is given. Never invent one.
 
 
 class TicketPromptParser:
-    """Claude call: prompt -> ParsedTicket. Lazily builds an ``AsyncAnthropic`` client."""
+    """Claude call: prompt -> ParsedTicket, through ``rdf_common.llm`` (RDF_LLM_BACKEND: api | droid |
+    claude_code; on the API ``beta.messages.parse`` with the refusal fallback). ``api_key`` pins an
+    ``AsyncAnthropic`` client with that key for the api backend; the CLI backends ignore it."""
 
     def __init__(self, api_key: str | None = None, model: str = MODEL) -> None:
         self._api_key, self.model = api_key, model
         self._client = None
+        self._llm = None
+        self.last_meta: dict | None = None
 
     def _anthropic(self):
         if self._client is None:
@@ -106,32 +110,48 @@ class TicketPromptParser:
             self._client = anthropic.AsyncAnthropic(api_key=self._api_key) if self._api_key else anthropic.AsyncAnthropic()
         return self._client
 
+    def _shared(self):
+        if self._llm is None:
+            from rdf_common.llm import LLM
+
+            # api: the AsyncAnthropic client above (built lazily on first api call); droid / claude_code: CLIs.
+            parser = self
+
+            class _Lazy:
+                @property
+                def beta(self):
+                    return parser._anthropic().beta
+
+            self._llm = LLM(async_api_client=_Lazy())
+        return self._llm
+
     async def parse(self, prompt: str) -> ParsedTicket:
         import anthropic
+        from rdf_common.llm import LLMError
 
         try:
-            resp = await self._anthropic().beta.messages.parse(
-                model=self.model,
-                max_tokens=4096,
-                system=PARSER_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
-                output_format=ParsedTicket,
-                output_config={"effort": "low"},  # simple extraction
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",  # a classifier decline re-runs on Anthropic's recommended model
-            )
+            r = await self._shared().acomplete_structured(
+                step="ticket_parse", system=PARSER_SYSTEM, messages=[{"role": "user", "content": prompt}],
+                output_model=ParsedTicket, model=self.model, effort="low",  # simple extraction
+                max_tokens=4096, thinking=False)  # api: fallbacks="default" re-runs a classifier decline
         except anthropic.RateLimitError as e:
             raise TicketError(503, "parser_rate_limited", "The ticket parser is rate limited; retry shortly.") from e
         except anthropic.APIStatusError as e:
             raise TicketError(502, "parser_failed", f"Claude API error {e.status_code}.") from e
         except anthropic.APIConnectionError as e:
             raise TicketError(502, "parser_unreachable", "Could not reach the Claude API.") from e
-        if resp.stop_reason == "refusal":
-            raise TicketError(422, "prompt_refused", "The ticket parser declined this prompt.")
-        if resp.parsed_output is None:
-            raise TicketError(502, "parser_no_output", f"The ticket parser returned no ticket (stop_reason={resp.stop_reason}).")
-        log.info("tickets.parsed", extra={"fields": {"model": resp.model, "stop_reason": resp.stop_reason}})
-        return resp.parsed_output
+        except LLMError as e:
+            if e.reason == "refusal":
+                raise TicketError(422, "prompt_refused", "The ticket parser declined this prompt.") from e
+            if e.llm_kind == "transient":
+                raise TicketError(503, "parser_unavailable", f"The ticket parser ({e.backend}) is busy or timed out; retry shortly.") from e
+            raise TicketError(502, "parser_no_output", f"The ticket parser returned no ticket ({e.backend}: {e.reason}).") from e
+        self.last_meta = r.meta
+        if r.parsed is None:
+            raise TicketError(502, "parser_no_output", f"The ticket parser returned no ticket (stop_reason={r.meta.get('stop_reason')}).")
+        log.info("tickets.parsed", extra={"fields": {"model": r.model, "backend": r.backend,
+                                                     "stop_reason": r.meta.get("stop_reason")}})
+        return r.parsed
 
 
 # --------------------------------------------------------------------------- service

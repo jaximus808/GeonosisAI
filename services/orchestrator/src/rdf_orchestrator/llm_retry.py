@@ -90,7 +90,9 @@ def _chain(exc: BaseException) -> Iterable[BaseException]:
 
 
 def classify(exc: BaseException) -> str:
-    """``refusal`` | ``transient`` (connection, timeout, 408/409/429/5xx/overloaded) | ``error``."""
+    """``refusal`` | ``transient`` (connection, timeout, 408/409/429/5xx/overloaded) | ``error``.
+
+    An ``rdf_common.llm.LLMError`` in the chain decides by its ``llm_kind`` (a CLI timeout is transient)."""
     try:
         import anthropic
 
@@ -103,6 +105,10 @@ def classify(exc: BaseException) -> str:
         msg = str(e).lower()
         if "refus" in msg and "category=" in msg:  # stop_reason=refusal, not "connection refused"
             return REFUSAL
+    for e in _chain(exc):  # rdf_common.llm.LLMError (droid / claude_code / api) states its own kind
+        k = getattr(e, "llm_kind", None)
+        if k in (REFUSAL, TRANSIENT, ERROR):
+            return k
     for e in _chain(exc):
         if transient_types and isinstance(e, transient_types):
             return TRANSIENT

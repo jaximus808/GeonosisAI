@@ -413,7 +413,9 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
                 "created_at": _i(plan.get("created_at")),
                 "planner_event": _ref(pe[-1][0]) if pe else None,
                 "planner": evid.get("planner"),
-                "model": {k: model.get(k) for k in ("requested", "served", "effort")} if model else None,
+                # backend: api | droid | claude_code (rdf_common.llm); absent on plans made before the switch existed
+                "model": {k: model.get(k) for k in ("requested", "served", "effort", "backend", "backend_model")
+                          if k in model or k in ("requested", "served", "effort")} if model else None,
                 "guardrail": evid.get("guardrail"), "budget_math": evid.get("budget_math"),
                 # A stand-in decision (the TDM-28 scripted driver tags its reasoning "[FAKE ...]"),
                 # as opposed to a real planner run that merely quotes [FAKE] trial notes.
@@ -460,6 +462,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
             "iteration": it,
             "diagnosis": {
                 "event": _ref(de), "model": dp.get("model"), "reasoning": dp.get("reasoning"),
+                "backend": (dp.get("usage") or {}).get("backend") if isinstance(dp.get("usage"), dict) else None,
                 "source_eval_run_id": dp.get("eval_run_id"),
                 "clusters": [{"failure_cluster_id": _i(c["id"]), "label": c.get("label"), "count": _i(c.get("count")),
                               "description": c.get("description") or None,
@@ -694,6 +697,10 @@ def _md_text(s: Any) -> str:
     return str(s or "").replace("\r", "").strip()
 
 
+def _llm_label(backend: str) -> str:
+    return {"api": "Claude API", "droid": "Factory droid", "claude_code": "Claude Code (local)"}.get(backend, backend)
+
+
 def render_markdown(r: dict) -> str:
     out: list[str] = []
     add = out.append
@@ -753,7 +760,9 @@ def render_markdown(r: dict) -> str:
                     + (f" (examples: episodes {', '.join(map(str, c['example_episode_ids']))})" if c["example_episode_ids"] else ""))
             add("")
         if dg["reasoning"]:
-            add(f"Diagnosis reasoning ({dg['model'] or 'model n/a'}, event {dg['event']['event_id']}):")
+            add(f"Diagnosis reasoning ({dg['model'] or 'model n/a'}"
+                + (f", backend {_llm_label(dg['backend'])}" if dg.get("backend") else "")
+                + f", event {dg['event']['event_id']}):")
             add("")
             add("> " + _md_text(dg["reasoning"]).replace("\n", "\n> "))
             add("")
@@ -762,7 +771,9 @@ def render_markdown(r: dict) -> str:
             add(f"**Decision:** buy {p['amount']} x `{p['data_type']}` at {usd(p['unit_price_cents'])} each "
                 f"(estimated {usd(p['est_cost_cents'])}); data_plan {p['data_plan_id']}, status {p['status']}, "
                 f"approved {usd(p['approved_cents'])} by {p['approved_by'] or 'nobody yet'}."
-                + (f" Planner model: {p['model'].get('served') or p['model'].get('requested')}." if p.get("model") else "")
+                + (f" Planner model: {p['model'].get('served') or p['model'].get('requested')}"
+                   + (f" via {_llm_label(p['model']['backend'])}" if p["model"].get("backend") else "") + "."
+                   if p.get("model") else "")
                 + (" **[FAKE: scripted stand-in, not a planner decision]**" if p["fake"] else ""))
             add("")
             add("Planner reasoning (verbatim from data_plan.reasoning):")

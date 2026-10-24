@@ -338,6 +338,7 @@ def _decision(it, tid, mine, events, first, all_of, evals_by_id, eval_views, tri
     diagnosis = None
     if diag_e is not None:
         diagnosis = {"event": _ref(diag_e), "model": diag_p.get("model"), "reasoning": diag_p.get("reasoning"),
+                     "backend": (diag_p.get("usage") or {}).get("backend") if isinstance(diag_p.get("usage"), dict) else None,
                      "eval_run_id": diag_p.get("eval_run_id"), "eval_kind": diag_p.get("eval_kind"),
                      "trials": diag_p.get("trials"), "successes": diag_p.get("successes"),
                      "failures": diag_p.get("failures"), "recoverable_failures": diag_p.get("recoverable_failures"),
@@ -384,7 +385,9 @@ def _decision(it, tid, mine, events, first, all_of, evals_by_id, eval_views, tri
             "dataset_offer": evid.get("dataset_offer"),
             "dataset_offer_decision": _tdm95_offer_decision(all_of, pid),
             "model": {"requested": model.get("requested"), "served": model.get("served"), "effort": model.get("effort"),
-                      "attempts": model.get("attempts")} if model else None,
+                      "attempts": model.get("attempts"),
+                      # rdf_common.llm transport (api | droid | claude_code); None on plans from before the switch
+                      "backend": model.get("backend"), "backend_model": model.get("backend_model")} if model else None,
             "data_type_override": (evid.get("inputs") or {}).get("data_type_override"),
             "inputs_eval": (evid.get("inputs") or {}).get("latest_eval"),
         }

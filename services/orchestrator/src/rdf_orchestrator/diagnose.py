@@ -371,60 +371,51 @@ class Clusterer(Protocol):
     def cluster(self, messages: list[dict]) -> ModelDiagnosis: ...
 
 
-def _api_key() -> str | None:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return None  # the SDK reads it from the environment
-    try:
-        from rdf_common.settings import OrchestratorSettings, load_settings
-
-        return load_settings(OrchestratorSettings, "orchestrator.diagnose").anthropic_api_key.get_secret_value()
-    except BaseException:  # noqa: BLE001 - load_settings exits on missing env; fall back to SDK defaults
-        return None
-
-
 class ClaudeClusterer:
-    """One structured-output Messages call. Server-side fallback is on for refusals."""
+    """One structured-output call through ``rdf_common.llm`` (RDF_LLM_BACKEND: api | droid | claude_code).
+    On the API: server-side fallback is on for refusals. ``client``: an Anthropic-like client (pins api)
+    or an ``rdf_common.llm.LLM``; None = the shared switchable client."""
 
     def __init__(self, model: str = DIAGNOSE_MODEL, effort: str = DIAGNOSE_EFFORT, client: Any = None):
-        self.model, self.effort = model, effort
+        self.requested_model, self.effort = model, effort
         self._client = client
         self.last_usage: dict | None = None
         self.last_request_id: str | None = None
+        self.last_meta: dict | None = None
 
     @property
-    def client(self):
-        if self._client is None:
-            import anthropic
+    def model(self) -> str:
+        """The requested model; after a call, the model that answered (with the backend if not the API)."""
+        from rdf_common.llm import describe_result
 
-            key = _api_key()
-            self._client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
-        return self._client
+        return describe_result(self.last_meta) if self.last_meta else self.requested_model
+
+    @model.setter
+    def model(self, v: str) -> None:
+        self.requested_model = v
 
     def cluster(self, messages: list[dict]) -> ModelDiagnosis:
-        resp = self.client.beta.messages.create(
-            model=self.model,
-            max_tokens=16000,
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": DIAGNOSIS_SCHEMA}},
-            system=SYSTEM_PROMPT,
-            messages=messages,
-        )
-        self.last_request_id = getattr(resp, "_request_id", None)
-        u = getattr(resp, "usage", None)
-        self.last_usage = {"input_tokens": getattr(u, "input_tokens", None),
-                           "output_tokens": getattr(u, "output_tokens", None), "model": getattr(resp, "model", None)}
-        if resp.stop_reason == "refusal":
-            cat = getattr(getattr(resp, "stop_details", None), "category", None)
-            raise DiagnoseError(f"model refused (category={cat})")
-        if resp.stop_reason == "max_tokens":
-            raise DiagnoseError("model output hit max_tokens")
-        text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), None)
-        if not text:
-            raise DiagnoseError(f"no text block in response (stop_reason={resp.stop_reason})")
+        from rdf_common.llm import LLMError, as_llm, usage_summary
+
         try:
-            return ModelDiagnosis.model_validate_json(text)
+            r = as_llm(self._client).complete_structured(
+                step="diagnose", system=SYSTEM_PROMPT, messages=messages, schema=DIAGNOSIS_SCHEMA,
+                model=self.requested_model, effort=self.effort, max_tokens=16000, thinking=True)
+        except LLMError as e:
+            self.last_usage, self.last_meta = usage_summary(e), getattr(e, "meta", None)
+            if e.reason == "refusal":
+                raise DiagnoseError(f"model refused (category={e.category})") from e
+            if e.reason == "max_tokens":
+                raise DiagnoseError("model output hit max_tokens") from e
+            if e.reason in ("bad_json", "schema"):
+                raise DiagnoseError(f"structured output did not validate: {e}") from e
+            raise DiagnoseError(str(e)) from e
+        self.last_request_id = r.meta.get("request_id")
+        self.last_usage, self.last_meta = usage_summary(r), r.meta
+        if not r.text:
+            raise DiagnoseError(f"no text block in response (stop_reason={r.meta.get('stop_reason')})")
+        try:
+            return ModelDiagnosis.model_validate_json(r.text)
         except ValidationError as e:
             raise DiagnoseError(f"structured output did not validate: {e}") from e
 

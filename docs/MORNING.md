@@ -11,6 +11,15 @@ The build ran overnight from the Tandem board (`HL4RZKEQ`, http://127.0.0.1:7891
 - **Claude connector:** MCP with OAuth, tested locally and through the Docker image. Deploy-ready.
 - **CI:** `make ci` is green on a clean checkout.
 
+## LLM backend switch (new): spend API credits only on the real run
+- `RDF_LLM_BACKEND` = `api` (default) | `droid` | `claude_code`, read on every Claude call (`services/common/src/rdf_common/llm.py`).
+  - **Local heavy testing:** put `RDF_LLM_BACKEND=claude_code` in `.env`, or run `make test-loop DRIVER=orchestrator LLM=claude_code`. It runs your local `claude -p` with no tools, in a scratch dir, on your Claude Code login (the API key is stripped from its env).
+  - **Testing compute on Factory credits:** `LLM=droid` (`droid exec`, read-only, Read tool only; ~28k credits per planner call).
+  - **Real demo / E2E:** `api`. Cloud deploys (`FLY_APP_NAME`, `RDF_DEPLOY_ENV=production|cloud`) are locked to `api`: startup fails otherwise and `PUT /admin/llm` answers 403.
+- **Switch live** from `/ops/settings` (operator login) or the header chip; it applies to the next call, persists in `~/.local/state/rdf/llm_backend.json`, and logs `llm.backend_changed`. Changing `RDF_LLM_BACKEND` itself wins over a saved UI choice.
+- Every call logs `llm.call` {backend, model, step, latency_ms, tokens, cost estimate} and writes it to event_log. The planner evidence, decision trail and report name the backend and model behind each decision.
+- Planner fixture, one real call each: api 9.7 s, claude_code 13.5 s, droid 21.0 s; all three chose `recovery_takeover x 5`.
+
 ## Do these first (in order)
 1. **Read `docs/morning-questions.md`.** The decisions there need you. The big ones:
    - **Jetson SSH** (`JETSON_HOST` / `JETSON_USER` in `.env`).

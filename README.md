@@ -13,6 +13,12 @@ make dev                 # orchestrator :8000, web :3737, mcp :3002 against Main
 make test-loop           # full loop on a throwaway local SpacetimeDB + fake robot, no arm, no maincloud
 ```
 
+Every Claude call (ticket parse, diagnose, planner, reviewer, LLM QA) goes through one switchable transport,
+`rdf_common.llm`. `RDF_LLM_BACKEND=api` (default; the real demo / E2E, and forced in cloud deploys) uses the
+Anthropic API; `droid` uses Factory credits via the local droid CLI; `claude_code` uses your local Claude Code
+(`claude -p`, no tools) for heavy local testing. Pick it per command (`make test-loop DRIVER=orchestrator
+LLM=claude_code`), in `.env`, or live from `/ops/settings` (no restart). Decisions record which backend made them.
+
 Key pages (web on `http://localhost:3737`):
 
 | Page | What |

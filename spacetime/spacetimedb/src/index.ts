@@ -106,3 +106,4 @@ export const revoke_service_identity = spacetimedb.reducer(
   }
 );
 export * from './reducers/tickets'; // TDM-9
+export * from './reducers/training_eval'; // TDM-12

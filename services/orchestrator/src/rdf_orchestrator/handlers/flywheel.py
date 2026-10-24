@@ -15,7 +15,8 @@ Env:
 * ``RDF_ONBOARDING_DROID=1``: the ``onboarding`` stage starts a TDM-32 Onboarding Droid
   (``rdf_factory.droids.onboarding``) instead of the ``step.not_implemented`` stub.
 * ``RDF_MODAL_STUB=1``: queued training runs are marked running with a ``stub-`` call id instead
-  of launching Modal (``register_modal_stub``). Local servers only.
+  of launching Modal (``register_modal_stub``). On maincloud only when set explicitly (logged once
+  as ``modal.stub_on_maincloud``; runs labelled ``[STUB] no GPU``).
 """
 from __future__ import annotations
 
@@ -70,9 +71,11 @@ def register_modal_stub(reg: Registry) -> None:
     """``RDF_MODAL_STUB=1`` stand-in for TDM-21's stub mode: a queued training run is marked
     ``running`` with modal_call_id ``stub-<hex>`` and nothing is launched; the TDM-28 harness's
     StubTrainer then finishes it with a fake:// checkpoint. Steps aside if another handler on
-    training_run entering queued (the real Modal client) is registered. Refuses maincloud."""
-    if "maincloud" in os.environ.get("SPACETIME_HOST", ""):
-        raise RuntimeError("RDF_MODAL_STUB=1 against maincloud: refusing to fake training runs")
+    training_run entering queued (the real Modal client) is registered. Maincloud: logged, not refused."""
+    if "maincloud" in os.environ.get("SPACETIME_HOST", ""):  # explicit stub on maincloud: allowed, logged once
+        from ..modal_client import note_stub_on_shared_db
+
+        note_stub_on_shared_db()
     import json
     import uuid
 
@@ -89,7 +92,7 @@ def register_modal_stub(reg: Registry) -> None:
         call_id = f"stub-{uuid.uuid4().hex[:10]}"
         log.warning("modal_stub.running", extra={"fields": {"training_run_id": cur["id"], "modal_call_id": call_id}})
         await ev.bus.call_reducer("set_training_status", [cur["id"], "running", {"some": call_id}, {"none": []},
-                                                          {"some": json.dumps({"fake": True, "stub": "RDF_MODAL_STUB"})},
+                                                          {"some": json.dumps({"fake": True, "stub": "RDF_MODAL_STUB", "label": "[STUB] no GPU"})},
                                                           {"none": []}])
 
 

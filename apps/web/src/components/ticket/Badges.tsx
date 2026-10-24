@@ -16,6 +16,28 @@ export function FakeBadge({ title }: { title?: string }) {
 }
 
 /** TDM-107: recorded on the MuJoCo sim robot, never a real-arm result. TDM-109: steel stencil tag. */
+/** RDF_SEED_EVALS: the eval's outcomes were drawn from a seed, not run on the robot. */
+export function SeededBadge() {
+  return (
+    <span title="Seeded, not run: outcomes drawn at the sim policy's calibrated rate (demo run-through, RDF_SEED_EVALS). No robot trials, no episodes."
+      className="gx-tag gx-tag-sim" style={{ background: 'var(--slag-soft)', color: 'var(--slag)', boxShadow: 'inset 0 0 0 1px var(--slag)' }}>
+      <i className="gx-rivet" aria-hidden />
+      SEEDED · not run
+    </span>
+  );
+}
+
+/** RDF_MODAL_STUB: training ran no GPU; the checkpoint is a fake stand-in. */
+export function StubBadge() {
+  return (
+    <span title="[STUB] no GPU: RDF_MODAL_STUB training (no Modal credit spent). The checkpoint is fake; the sim policy uses its fine-tuned calibration for it."
+      className="gx-tag gx-tag-sim" style={{ background: 'var(--slag-soft)', color: 'var(--slag)', boxShadow: 'inset 0 0 0 1px var(--slag)' }}>
+      <i className="gx-rivet" aria-hidden />
+      [STUB] no GPU
+    </span>
+  );
+}
+
 export function SimBadge({ title }: { title?: string }) {
   return (
     <span

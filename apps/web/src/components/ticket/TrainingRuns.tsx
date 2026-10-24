@@ -1,8 +1,8 @@
 'use client';
 
 import { fmtCents, fmtTs } from '@/lib/format';
-import { Empty, StatusPill } from './Badges';
-import { byNewest, fmtDuration, parseObj, shortUri, type TrainingRun } from './util';
+import { Empty, StatusPill, StubBadge } from './Badges';
+import { byNewest, fmtDuration, isStubCheckpoint, parseObj, shortUri, type TrainingRun } from './util';
 
 function num(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -93,6 +93,9 @@ export function TrainingRuns({ runs }: { runs: readonly TrainingRun[] }) {
               </div>
             </dl>
             {r.modalCallId && <p className="mt-2 text-xs text-zinc-500">Modal call <code>{r.modalCallId}</code></p>}
+            {(r.modalCallId?.startsWith('stub-') || isStubCheckpoint(r.checkpointUri)) && (
+              <p className="mt-2 flex items-center gap-2 text-xs text-zinc-500"><StubBadge /> no GPU ran and no Modal credit was spent; the checkpoint is fake.</p>
+            )}
             {r.error && <p className="mt-2 rounded bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/30 dark:text-red-300">{r.error}</p>}
           </li>
         );

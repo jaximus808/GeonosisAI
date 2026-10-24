@@ -396,6 +396,7 @@ function EvalNumber({ label, sub, v, after }: { label: string; sub: string; v: E
           <p className="r-note">
             Eval run {v.eval_run_id}
             {v.fake_trials ? `, ${v.fake_trials} fake trial${v.fake_trials === 1 ? '' : 's'}` : ''}
+            {v.seeded_trials ? ` (seeded, not run: ${v.seeded_trials} of ${v.trials} outcomes drawn, no robot trials)` : ''}
           </p>
         </>
       ) : (
@@ -557,6 +558,7 @@ function Iteration({ it }: { it: IterationBlock }) {
             {t.duration_s !== null ? ` in ${t.duration_s}s` : ''}, GPU {usd(t.gpu_cost_cents)}
             {hp ? `; lr ${String(hp.lr)}, ${String(hp.steps)} steps, batch ${String(hp.batch_size)}, LoRA rank ${String(hp.lora_rank)}` : ''}
             {t.fake && <FakeTag />}
+            {t.stub ? <strong> {t.stub}</strong> : null}
           </>
         ) : (
           <span className="r-missing-inline">no training run</span>

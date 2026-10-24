@@ -13,7 +13,8 @@ set stops two pool workers launching the same run, and ``set_training_status`` r
 transitions); tracking is a set keyed by run id.
 
 ``RDF_MODAL_STUB=1``: no Modal calls; queued runs get a ``stub-`` call id for the TDM-28 harness's
-StubTrainer to finish. Refused against maincloud. With this module registered the TDM-22
+StubTrainer to finish. Allowed on maincloud only when set explicitly; logged once
+(``modal.stub_on_maincloud`` in event_log) and every stub run is labelled ``[STUB] no GPU``. With this module registered the TDM-22
 ``tdm22_modal_stub`` stand-in steps aside.
 """
 from __future__ import annotations
@@ -43,8 +44,11 @@ RUNNER = TrainingRunner(writer=lambda: make_stdb())
 
 
 def _check_stub_target() -> None:
+    """Explicit RDF_MODAL_STUB=1 on maincloud is allowed (demo: save Modal credit), logged once."""
     if stub_mode() and "maincloud" in os.environ.get("SPACETIME_HOST", ""):
-        raise RuntimeError("RDF_MODAL_STUB=1 against maincloud: refusing to fake training runs")
+        from ..modal_client import note_stub_on_shared_db
+
+        note_stub_on_shared_db()
 
 
 @on_enter("training_run", where=lambda r: r.status == "queued", name="tdm21_training_launch")

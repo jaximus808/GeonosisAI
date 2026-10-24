@@ -83,6 +83,16 @@ export function isFakeEpisode(e: Episode): boolean {
   return parseObj(e.camerasJson)?.fake === true || /FAKE-/.test(e.storageUri);
 }
 
+/** RDF_SEED_EVALS demo run-through: the outcome was drawn, not run on the robot. */
+export function isSeededTrial(t: EvalTrial): boolean {
+  return (t.failureNote ?? '').startsWith('[SEEDED]');
+}
+
+/** RDF_MODAL_STUB training: no GPU ran and the checkpoint is fake ("[STUB] no GPU"). */
+export function isStubCheckpoint(uri: string | null | undefined): boolean {
+  return !!uri && uri.includes('stub-no-gpu');
+}
+
 export function isFakeTrial(t: EvalTrial): boolean {
   return (t.failureNote ?? '').startsWith('[FAKE]');
 }

@@ -20,6 +20,7 @@ export interface EvalView {
   finalized_event: Ref;
   trial_outcomes: { trial_index: number; success: boolean; episode_id: number; failure_note: string | null }[];
   fake_trials: number;
+  seeded_trials?: number; // RDF_SEED_EVALS: outcomes drawn, not run
   is_deployed_checkpoint?: boolean;
 }
 
@@ -53,6 +54,7 @@ export interface TrainingView {
   duration_s: number | null;
   error: string | null;
   fake: boolean;
+  stub?: string | null; // "[STUB] no GPU" when RDF_MODAL_STUB trained it
 }
 
 export interface IterationBlock {

@@ -122,6 +122,10 @@ def fake_markers(row: dict) -> list[str]:
         if isinstance(v, str):
             if "[FAKE" in v:
                 found.append(f"{k}: [FAKE]")
+            elif "[SEEDED" in v:
+                found.append(f"{k}: [SEEDED] not run")
+            elif "[STUB" in v or "stub-no-gpu" in v:
+                found.append(f"{k}: [STUB] no GPU")
             elif _FAKE_JSON.search(v):
                 found.append(f'{k}: "fake": true')
             elif "fake://" in v or "FAKE-" in v:
@@ -182,6 +186,8 @@ def _eval_view(r: dict | None, trials: list[dict], finalized: dict | None) -> di
                             "episode_id": _i(t.get("episode_id")), "failure_note": t.get("failure_note")}
                            for t in trials],
         "fake_trials": sum(1 for t in trials if fake_markers(t)),
+        # RDF_SEED_EVALS demo run-throughs: outcomes drawn, not run (the web shows "seeded, not run")
+        "seeded_trials": sum(1 for t in trials if str(t.get("failure_note") or "").startswith("[SEEDED")),
     }
     return view
 
@@ -219,7 +225,10 @@ def _training_view(r: dict | None) -> dict | None:
             "duration_s": round((finished - started) / 1e6, 1) if started and finished else None,
             # TDM-42: how gpu_cost_cents was computed (source estimate | modal_billing, formula, GPU part)
             "cost": _json(r.get("metrics_json")).get("cost"),
-            "fake": bool(fake_markers(r))}
+            "fake": bool(fake_markers(r)),
+            # demo stub training (RDF_MODAL_STUB): no GPU ran; the checkpoint is fake
+            "stub": "[STUB] no GPU" if (str(r.get("modal_call_id") or "").startswith("stub-")
+                                        or "stub-no-gpu" in str(r.get("checkpoint_uri") or "")) else None}
 
 
 # --------------------------------------------------------------------------- the assembler

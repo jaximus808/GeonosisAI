@@ -213,7 +213,14 @@ function Line({ stations }: { stations: Station[] }) {
 function TrialChips({ runId, trials }: { runId: bigint; trials: number }) {
   const [rows] = useRows('evalTrial', (r) => r.evalRunId.eq(runId));
   const byIdx = new Map(rows.map((t) => [t.trialIndex, t]));
+  const seeded = rows.some((t) => (t.failureNote ?? '').startsWith('[SEEDED]')); // RDF_SEED_EVALS: drawn, not run
   return (
+    <>
+    {seeded && (
+      <p className={`${F_MONO} mb-1 text-[12px] text-[var(--color-slag)]`} title="RDF_SEED_EVALS demo run-through: outcomes drawn at the sim policy's calibrated rate, no robot trials">
+        SEEDED · not run
+      </p>
+    )}
     <ol className="flex flex-wrap gap-[4px]" aria-label="Trials">
       {Array.from({ length: trials }, (_, i) => {
         const t = byIdx.get(i);
@@ -230,6 +237,7 @@ function TrialChips({ runId, trials }: { runId: bigint; trials: number }) {
         );
       })}
     </ol>
+    </>
   );
 }
 
@@ -409,7 +417,11 @@ function LiveKioskBody({ ticketParam }: { ticketParam: string | null }) {
       plan_data: plan ? `${plan.amount} ${SHORT_BUY[plan.dataType] ?? plan.dataType.replace(/_/g, ' ')}` : '',
       collect: plan ? `${bought.total}/${plan.amount}` : bought.total ? String(bought.total) : '',
       review: bought.reviewed ? `${bought.accepted} accepted` : '',
-      train: latestTrain ? (latestTrain.status === 'succeeded' || latestTrain.status === 'done' ? `${steps ? `${steps.toLocaleString('en-US')} steps` : 'done'}` : latestTrain.status) : '',
+      train: latestTrain
+        ? (latestTrain.modalCallId?.startsWith('stub-') || (latestTrain.checkpointUri ?? '').includes('stub-no-gpu')
+          ? `[STUB] no GPU, ${latestTrain.status}` // RDF_MODAL_STUB: no Modal credit spent, fake checkpoint
+          : latestTrain.status === 'succeeded' || latestTrain.status === 'done' ? `${steps ? `${steps.toLocaleString('en-US')} steps` : 'done'}` : latestTrain.status)
+        : '',
       eval: rateNote(pair.current),
       shipped: target !== null ? `target ${pct(target)}%` : '',
     };

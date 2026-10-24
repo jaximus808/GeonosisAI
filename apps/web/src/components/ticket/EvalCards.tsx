@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRows } from '@/lib/spacetime/hooks';
 import { Readout } from '@/components/brand/Readout';
-import { FakeBadge, SimBadge, StatusPill } from './Badges';
-import { byOldest, ciText, isFakeTrial, pct, shortUri, type EvalRun, type TicketEvent } from './util';
+import { FakeBadge, SeededBadge, SimBadge, StatusPill, StubBadge } from './Badges';
+import { byOldest, ciText, isFakeTrial, isSeededTrial, isStubCheckpoint, pct, shortUri, type EvalRun, type TicketEvent } from './util';
 
 type Settings = { successThreshold: number; requireCiLow: boolean } | undefined;
 
@@ -126,6 +126,8 @@ function EvalRow({ run, label, summary, settings, robotFake, emphasis, sim }: {
 }) {
   const [trialFake, setTrialFake] = useState(false);
   const fake = robotFake || trialFake;
+  const [rowTrials] = useRows('evalTrial', (r) => r.evalRunId.eq(run.id));
+  const seeded = rowTrials.some(isSeededTrial); // RDF_SEED_EVALS: drawn, not run
   const v = verdict(run, settings);
   const text =
     run.status === 'done'
@@ -138,6 +140,8 @@ function EvalRow({ run, label, summary, settings, robotFake, emphasis, sim }: {
           <h3 className="font-display text-lg font-bold">{label}</h3>
           {fake && <FakeBadge />}
           {sim && <SimBadge />}
+          {seeded && <SeededBadge />}
+          {isStubCheckpoint(run.checkpointUri) && <StubBadge />}
           {run.status !== 'done' && <StatusPill status={run.status} />}
         </div>
         <p className="gx-id mt-0.5 truncate" title={run.checkpointUri}>

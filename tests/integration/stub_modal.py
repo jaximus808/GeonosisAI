@@ -23,9 +23,13 @@ FAKE_CKPT_PREFIX = "fake://tdm28/checkpoints/"
 
 
 class StubTrainer:
-    def __init__(self, client, *, mode: str = "queued", train_seconds: float = 1.0, poll: float = 0.3) -> None:
+    def __init__(self, client, *, mode: str = "queued", train_seconds: float = 1.0, poll: float = 0.3,
+                 ckpt_prefix: str = FAKE_CKPT_PREFIX, label: str | None = None) -> None:
+        """``ckpt_prefix`` / ``label``: the demo (scripts/demo/run.py) writes ``fake://stub-no-gpu/...``
+        checkpoints labelled ``[STUB] no GPU`` (metrics_json.label), so a stub is never read as a real run."""
         assert mode in ("queued", "stub-call")
         self.client, self.mode, self.train_seconds, self.poll = client, mode, train_seconds, poll
+        self.ckpt_prefix, self.label = ckpt_prefix, label
         self._stop = threading.Event()
         self._started: dict[int, float] = {}
         self.finished: list[int] = []
@@ -56,9 +60,13 @@ class StubTrainer:
                     elif r["status"] == "running" and str(r.get("modal_call_id") or "").startswith("stub-"):
                         t0 = self._started.setdefault(rid, time.monotonic())
                         if time.monotonic() - t0 >= self.train_seconds:
-                            self._set(rid, "done", ckpt=f"{FAKE_CKPT_PREFIX}run-{rid}",
+                            tid = r.get("ticket_id")
+                            ckpt = (f"{self.ckpt_prefix}tickets/{tid}/run-{rid}" if self.label else
+                                    f"{self.ckpt_prefix}run-{rid}")
+                            self._set(rid, "done", ckpt=ckpt,
                                       metrics={"fake": True, "stub": "tdm28 stub modal", "loss": 0.0,
-                                               "episodes": len(r.get("episode_ids") or [])})
+                                               "episodes": len(r.get("episode_ids") or []),
+                                               **({"label": self.label, "gpu": "none"} if self.label else {})})
                             self.finished.append(rid)
             except Exception as e:  # noqa: BLE001 - keep polling; the test asserts on outcomes
                 self.errors.append(str(e))

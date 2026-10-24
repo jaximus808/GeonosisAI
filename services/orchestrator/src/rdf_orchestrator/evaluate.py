@@ -122,6 +122,11 @@ class EvalConfig:
     rerun_after_estop: bool = False
     max_aborts: int = 3  # aborted evals in a row (per stage) before a re-run waits for a human
     retry_backoff_s: float = 60.0  # after a policy-activate / start failure
+    # RDF_SEED_EVALS=1 (demo run-throughs, SIM robots only): complete an eval at once with SEEDED outcomes
+    # instead of running trials; every row's note starts "[SEEDED]" (see seed_eval).
+    seed_evals: bool = False
+    seed_base_rate: float = 0.65  # the scripted sim policy's calibrated baseline success rate
+    seed_ft_rate: float = 0.95  # ... and with a fine-tuned checkpoint
 
     @classmethod
     def from_env(cls) -> "EvalConfig":
@@ -138,6 +143,9 @@ class EvalConfig:
             sim_auto_reset=os.environ.get("EVAL_SIM_AUTO_RESET", "1") != "0",
             rerun_after_estop=os.environ.get("EVAL_RERUN_AFTER_ESTOP", "") == "1",
             max_aborts=int(_env_float("EVAL_MAX_ABORTS", 3)),
+            seed_evals=os.environ.get("RDF_SEED_EVALS", "") == "1",
+            seed_base_rate=_env_float("RDF_SEED_BASE_RATE", 0.65),
+            seed_ft_rate=_env_float("RDF_SEED_FT_RATE", 0.95),
         )
 
 
@@ -381,8 +389,52 @@ class EvalOrchestrator:
     def eval_timeout_s(self, trials: int) -> float:
         return max(1, trials) * (self.cfg.trial_timeout_s + self.cfg.reset_wait_s)
 
+    def seed_eval(self, ticket: dict, run: dict, robot: dict | None) -> str | None:
+        """RDF_SEED_EVALS=1: record every trial of ``run`` at once with SEEDED outcomes (no robot motion) so a
+        demo run-through is fast. Sim robots only: on any other robot it logs ``eval.seed_ignored`` and returns
+        None (the eval runs for real). Outcomes: Bernoulli at the base rate for the base checkpoint, at the
+        fine-tuned rate otherwise, from a fixed seed per ticket + kind + checkpoint family, so a re-run of
+        the same ticket draws the same outcomes. Every row's note starts "[SEEDED] not run"."""
+        import random
+
+        from .robot_mode import robot_mode
+
+        run_id, ticket_id = _i(run["id"]), _i(ticket["id"])
+        base = {"ticket_id": ticket_id, "eval_run_id": run_id, "robot_id": _i(run.get("robot_id")), "kind": run.get("kind")}
+        if robot_mode(robot) != "sim":
+            self.event("eval.seed_ignored", {**base, "reason": "RDF_SEED_EVALS applies to SIM robots only; running the "
+                                                                 "real trials on this robot"})
+            log.warning("eval.seed_ignored", extra={"fields": base})
+            return None
+        uri = str(run.get("checkpoint_uri") or "")
+        is_base = uri == PI05_BASE_CHECKPOINT or "pi05_base" in uri or uri in ("", "base")
+        rate = self.cfg.seed_base_rate if is_base else self.cfg.seed_ft_rate
+        family = "base" if is_base else "fine-tuned"
+        rng = random.Random(f"rdf-seed-evals:{ticket_id}:{run.get('kind')}:{family}")
+        have = {_i(t.get("trial_index")) for t in self.trials(run_id)}
+        planned = _i(run.get("trials"))
+        outcomes = [rng.random() < rate for _ in range(planned)]  # drawn for every index: stable under re-dispatch
+        wrote = 0
+        for i, ok in enumerate(outcomes):
+            if i in have:
+                continue
+            note = (f"[SEEDED] not run: {'success' if ok else 'failure'} drawn at the {family} rate {rate:.0%} "
+                    f"(fixed seed for ticket {ticket_id}); no robot trial, no episode")
+            self.w.call_reducer("record_eval_trial", run_id, i, bool(ok), 0, 0, note)
+            wrote += 1
+        if wrote == 0:  # already seeded (a re-dispatch while the finalizer catches up)
+            return "seeded"
+        self.event("eval.seeded", {**base, "checkpoint_uri": uri, "family": family, "rate": rate, "trials": planned,
+                                   "successes": sum(outcomes), "written": wrote,
+                                   "note": "[SEEDED] RDF_SEED_EVALS=1: outcomes drawn, not run (demo run-through)"})
+        return "seeded"
+
     def _dispatch(self, ticket: dict, run: dict, tgt: dict, why: str) -> str:
         run_id, robot_id, ticket_id = _i(run["id"]), _i(run.get("robot_id")) or _i(ticket.get("robot_id")), _i(ticket["id"])
+        if self.cfg.seed_evals:
+            seeded = self.seed_eval(ticket, run, self.m.get("robot", robot_id))
+            if seeded:
+                return seeded
         trials = _i(run.get("trials"))
         payload = {"eval_run_id": run_id, "checkpoint_uri": run.get("checkpoint_uri"), "trials": trials,
                    "timeout_s": self.cfg.trial_timeout_s, "kind": run.get("kind"),

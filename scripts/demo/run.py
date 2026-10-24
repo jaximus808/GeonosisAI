@@ -25,7 +25,8 @@ nothing is published, deleted or cleared. The orchestrator runs as the owner (``
 from the env file (``ROBOT_CLIENT_SPACETIME_TOKEN``, ``RDF_WEB_SPACETIME_TOKEN``) when allow-listed, else minted
 and allow-listed ONCE and appended there. The sim robot row is reused by name. It refuses to start while another
 orchestrator is attached (a lockfile + a ps scan of this user's orchestrator processes). Media, stream secret and
-operator key come from .env (no local stand-ins), solo resets are OFF, and on maincloud training is real Modal.
+operator key come from .env (no local stand-ins) and solo resets are OFF. Training is STUB by default (also on
+maincloud: "[STUB] no GPU" checkpoints, no Modal credit); --real-modal spends credits. --seed-evals: SEEDED evals.
 
 Labels: the robot is ``sim-yam-mujoco`` (embodiment ``sim_yam``), every episode is ``fixture: true``,
 eval notes start with ``[SIM]``, the policy describes itself as a scripted sim policy everywhere.
@@ -252,10 +253,9 @@ def up(a: argparse.Namespace) -> int:
                  "run against a shared database (docs/pre-run-checklist.md). Stop them first.")
             return 2
         lock.write_text(json.dumps({"pid": os.getpid(), "host": st.host, "db": st.db, "started": time.time()}))
-        if on_maincloud and not a.real_modal:
-            _log("maincloud: the orchestrator refuses RDF_MODAL_STUB there, so training runs on REAL Modal")
-            a.real_modal = True
     solo = a.solo_resets if a.solo_resets is not None else not attach
+    modal_banner = "Modal: REAL (spends credits)" if a.real_modal else "Modal: STUB (no credits used)"
+    _log(modal_banner)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -333,19 +333,23 @@ def up(a: argparse.Namespace) -> int:
         if media is not None:  # local: the media store stand-in + throwaway stream secret; attach: .env's (real) ones
             orch_env.update(RDF_MEDIA_BACKEND="modal", RDF_MEDIA_STORE_URL=media.url, RDF_MEDIA_SIGNING_KEY=media_key,
                             RDF_STREAM_TOKEN_SECRET=stream_secret)
-        if not a.real_modal:
+        if not a.real_modal:  # stub by default everywhere, maincloud included (logged there as modal.stub_on_maincloud)
             orch_env["RDF_MODAL_STUB"] = "1"
+        if a.seed_evals:  # sim robots only (the orchestrator ignores it, with an event, for a real robot)
+            orch_env["RDF_SEED_EVALS"] = "1"
         if a.policy == "sim":
             orch_env.update(POLICY_SERVER_URL=policy_url, POLICY_SERVER_TOKEN=policy_token)
         st._spawn("orchestrator", ["uv", "run", "--quiet", "--project", str(REPO / "services" / "orchestrator"),
                                    "rdf-orchestrator", "--host", "127.0.0.1", "--port", str(a.orch_port)], env=orch_env)
         wait_for(lambda: _http_json(f"{orch_url}/healthz")["subscription"]["state"] == "live", 150,
                  f"orchestrator live (log {st.logs / 'orchestrator.log'})")
-        _log(f"orchestrator live on {orch_url} (Modal: {'REAL' if a.real_modal else 'stub, RDF_MODAL_STUB=1'})")
+        _log(f"orchestrator live on {orch_url} ({modal_banner})")
         if not a.real_modal:
             from stub_modal import StubTrainer
 
-            trainer = StubTrainer(st.client("orchestrator"), mode="stub-call", train_seconds=a.train_seconds).start()
+            trainer = StubTrainer(st.client("orchestrator"), mode="stub-call", train_seconds=a.train_seconds,
+                                  poll=2.0 if attach else 0.5, ckpt_prefix="fake://stub-no-gpu/",
+                                  label="[STUB] no GPU").start()
 
         # ---- the MuJoCo [SIM] robot
         robot_env = {**local_db, "RDF_STREAM": "none", "RDF_STREAM_PORT": str(a.stream_port),
@@ -397,6 +401,9 @@ def up(a: argparse.Namespace) -> int:
                            ("Robot stream", f"http://127.0.0.1:{a.stream_port}/healthz")):
             print(f"  {label:<22} {url}", flush=True)
         print(f"  {'Operator passcode':<22} {passcode_note}", flush=True)
+        print(f"  {'Training':<22} {modal_banner}" + ("" if a.real_modal else "  [STUB] no GPU checkpoints"), flush=True)
+        print(f"  {'Evals':<22} " + ("SEEDED: outcomes drawn at the sim policy's rates, not run ([SEEDED])"
+                                      if a.seed_evals else "real sim trials on the MuJoCo robot"), flush=True)
         print(f"  {'Spend approval':<22} " + (f"AUTO up to {a.auto_approve_max_cents} cents (flywheel)" if a.auto_approve_max_cents
                                                else "manual: 'Approve plan' on the ticket page (or MCP approve_spend)"), flush=True)
         print(f"  {'Policy':<22} " + ("[SIM] scripted IK pick-and-place (NOT pi0.5); base = baseline noise, "
@@ -479,7 +486,13 @@ def main() -> int:
     u.add_argument("--no-solo-resets", dest="solo_resets", action="store_false")
     u.add_argument("--policy", choices=["sim", "production"], default="sim",
                    help="sim = [SIM] scripted local policy (default); production = the TDM-41 Modal endpoint from .env")
-    u.add_argument("--real-modal", action="store_true", help="real Modal training (default: RDF_MODAL_STUB=1 + stub trainer)")
+    u.add_argument("--real-modal", dest="real_modal", action="store_true", default=False,
+                   help="REAL Modal training (spends credits). Default everywhere, maincloud included: --stub-modal")
+    u.add_argument("--stub-modal", dest="real_modal", action="store_false",
+                   help="(default) RDF_MODAL_STUB=1 + the stub trainer: [STUB] no GPU checkpoints, no credits used")
+    u.add_argument("--seed-evals", action="store_true", default=os.environ.get("RDF_SEED_EVALS") == "1",
+                   help="RDF_SEED_EVALS=1: evals complete at once with SEEDED outcomes (sim robots only; '[SEEDED]' notes). "
+                        "Off by default: real sim trials")
     u.add_argument("--train-seconds", type=float, default=20.0, help="stub trainer: seconds a training run takes")
     u.add_argument("--auto-approve-max-cents", type=int, default=0,
                    help="FLYWHEEL_AUTO_APPROVE_MAX_CENTS (default 0 = off: approve on the ticket page)")

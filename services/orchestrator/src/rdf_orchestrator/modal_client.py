@@ -80,6 +80,47 @@ def stub_mode() -> bool:
     return os.environ.get("RDF_MODAL_STUB") == "1"
 
 
+STUB_LABEL = "[STUB] no GPU"
+_stub_notice_sent = False
+
+
+def note_stub_on_shared_db(writer: Any = None) -> None:
+    """``RDF_MODAL_STUB=1`` against a shared database (maincloud) is allowed when set explicitly (the demo
+    saves Modal credit), but never silently: a warning in the log and ONE ``modal.stub_on_maincloud`` row in
+    event_log per process (background thread, retried). Training rows it finishes are labelled STUB_LABEL."""
+    global _stub_notice_sent
+    if _stub_notice_sent:
+        return
+    _stub_notice_sent = True
+    host = os.environ.get("SPACETIME_HOST", "")
+    log.warning("modal.stub_on_maincloud", extra={"fields": {"host": host, "label": STUB_LABEL}})
+
+    def go() -> None:
+        import json as _json
+        import time as _time
+
+        for attempt in range(6):
+            try:
+                w = writer() if callable(writer) else writer
+                if w is None:
+                    from rdf_common.settings import OrchestratorSettings, load_settings
+                    from rdf_common.spacetime_client import SpacetimeClient
+
+                    w = SpacetimeClient.from_settings(load_settings(OrchestratorSettings, "orchestrator"), timeout=20.0)
+                w.call_reducer("append_event", "orchestrator", "modal.stub_on_maincloud", _json.dumps({
+                    "host": host, "db": os.environ.get("SPACETIME_DB_NAME", ""), "label": STUB_LABEL,
+                    "note": "RDF_MODAL_STUB=1 on a shared database: training runs are STUBS (no GPU, no Modal credit); "
+                            "their checkpoints are fake and labelled so"}))
+                return
+            except Exception as e:  # noqa: BLE001
+                log.warning("modal.stub_notice_retry", extra={"fields": {"attempt": attempt, "error": str(e)[:200]}})
+                _time.sleep(min(30.0, 2.0 * 2 ** attempt))
+
+    import threading as _threading
+
+    _threading.Thread(target=go, name="modal-stub-notice", daemon=True).start()
+
+
 def poll_interval() -> float:
     try:
         return max(0.5, float(os.environ.get("RDF_MODAL_POLL_S", DEFAULT_POLL_S)))
@@ -297,7 +338,7 @@ class TrainingRunner:
         call_id = f"{STUB_PREFIX}{uuid.uuid4().hex[:10]}"
         log.warning("training.stub_running", extra={"fields": {"training_run_id": run["id"], "modal_call_id": call_id}})
         self._set(int(run["id"]), "running", call_id=call_id,
-                  metrics={"fake": True, "stub": "RDF_MODAL_STUB", "phase": "stub"})
+                  metrics={"fake": True, "stub": "RDF_MODAL_STUB", "phase": "stub", "label": STUB_LABEL})
 
     def _launch_real(self, run: dict) -> None:
         rid, tid = int(run["id"]), int(run["ticket_id"])

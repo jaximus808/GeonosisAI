@@ -206,8 +206,9 @@ demo-down:
 # The same demo ATTACHED to maincloud (robo-factory-a706j from spacetime/spacetime.json): nothing is published,
 # deleted or cleared; owner token = SPACETIME_TOKEN from .env; the robot_client / web identities are reused
 # from .env (ROBOT_CLIENT_SPACETIME_TOKEN, RDF_WEB_SPACETIME_TOKEN) or minted + allow-listed once and stored
-# there; refuses to start if another orchestrator is attached; training runs on real Modal (the stub refuses
-# maincloud); solo resets OFF. Any other database: make demo ARGS="--stdb-url <url> --db <name>".
+# there; refuses to start if another orchestrator is attached; solo resets OFF. Training is STUB by default
+# ("[STUB] no GPU", no Modal credit): ARGS="--real-modal" spends credits. ARGS="--seed-evals" = SEEDED evals
+# (sim robots only). Any other database: make demo ARGS="--stdb-url <url> --db <name>".
 .PHONY: demo-maincloud
 demo-maincloud:
 	cd services/orchestrator && uv run --quiet python ../../scripts/demo/run.py up --maincloud $(ARGS)

@@ -273,8 +273,9 @@ def build(volume: VolumeLike, state: State) -> list[dict]:
 
 def for_ticket(records: Iterable[dict], ticket_id: Any) -> list[dict]:
     k = ticket_key(ticket_id)
+    tid = int(k) if k.isdigit() else None
     return [r for r in records if r.get("ticket") == k
-            or (r.get("training_run") or {}).get("ticket_id") == (int(k) if k.isdigit() else None)]
+            or (tid is not None and (r.get("training_run") or {}).get("ticket_id") == tid)]
 
 
 def resolve(records: list[dict], ticket_id: Any, which: str = "latest") -> dict | None:

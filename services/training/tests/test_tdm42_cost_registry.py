@@ -244,3 +244,12 @@ def test_download_paths_skip_train_state():
     paths = registry.download_paths(rec)
     assert not any("train_state" in p for p in paths) and paths[-1].endswith("rdf_run.json")
     assert any(p.endswith("train_state") for p in registry.download_paths(rec, with_train_state=True))
+
+
+def test_for_ticket_does_not_leak_other_volume_tickets():
+    v = FakeVolume()
+    a = v.add_run("tdm40-smoke", "smoke-20261024-075212-6b1cfe", created=T0)
+    v.add_run("tdm40-yam-smoke", "smoke-20261024-081135-ed9bc2", created=T0 + 3600)
+    recs = registry.scan(v)
+    assert {r["uri"] for r in registry.for_ticket(recs, "tdm40-smoke")} == {a}
+    assert registry.resolve(recs, "tdm40-smoke", "latest")["uri"] == a

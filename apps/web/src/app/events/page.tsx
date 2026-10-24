@@ -1,14 +1,19 @@
-import { Section } from '@/components/Section';
-import { EventLogList } from '@/components/EventLogList';
+import { Suspense } from 'react';
+import { EventLogExplorer } from '@/components/eventlog/EventLogExplorer';
+
+export const metadata = { title: 'Event log · Robot Deployment Factory' };
 
 export default function EventsPage() {
   return (
     <>
-      <h1 className="mb-2 text-2xl font-semibold tracking-tight">Event log</h1>
-      <p className="mb-6 text-sm text-zinc-500">Append-only and untouched: every row was written by a reducer call, never edited.</p>
-      <Section title="event_log (live)">
-        <EventLogList />
-      </Section>
+      <h1 className="text-2xl font-semibold tracking-tight">Event log</h1>
+      <p className="mt-1 mb-6 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+        Everything the factory did, in the order the database recorded it. Each row is written once by a reducer
+        call. The seal below is computed in this browser from the live rows.
+      </p>
+      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+        <EventLogExplorer />
+      </Suspense>
     </>
   );
 }

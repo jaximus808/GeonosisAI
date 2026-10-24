@@ -43,6 +43,9 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
             log.info("app.stopped")
 
     app = FastAPI(title="rdf-orchestrator", lifespan=lifespan)
+    from .tickets_api import router as tickets_router  # TDM-19
+
+    app.include_router(tickets_router)
 
     @app.get("/healthz")
     def healthz(request: Request) -> dict:

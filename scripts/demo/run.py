@@ -326,6 +326,10 @@ def up(a: argparse.Namespace) -> int:
                     "INTERVENTION_ROLLOUT_TIMEOUT_S": str(a.trial_timeout_s), "INTERVENTION_CLAIM_TIMEOUT_S": "900",
                     "INTERVENTION_TAKEOVER_MAX_S": "300", "INTERVENTION_VERDICT_WAIT_S": "30",
                     "FLYWHEEL_AUTO_APPROVE_MAX_CENTS": str(a.auto_approve_max_cents)}
+        for k in ("RDF_DROP_SHOW_ACCESS_CODE", "RDF_WEB_PUBLIC_URL"):  # .env settings the orchestrator reads from os.environ
+            v = os.environ.get(k) or _root_env_value(k)
+            if v:
+                orch_env[k] = v
         if media is not None:  # local: the media store stand-in + throwaway stream secret; attach: .env's (real) ones
             orch_env.update(RDF_MEDIA_BACKEND="modal", RDF_MEDIA_STORE_URL=media.url, RDF_MEDIA_SIGNING_KEY=media_key,
                             RDF_STREAM_TOKEN_SECRET=stream_secret)

@@ -286,12 +286,23 @@ export function useTeleopLease(taskIdIn: bigint | number | string, opts: TeleopL
     releasedGen.current = held.current.gen;
     getConnection()?.reducers.releaseTask({ taskId }).catch(() => {});
   };
+  // Unmount releases on the next tick, not synchronously: React StrictMode (next dev) unmounts and
+  // re-mounts every effect once, and a synchronous release there gave the claim back the moment the
+  // teleop page opened. A re-mount within the tick cancels it; a real unmount still releases.
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
+    if (leaveTimer.current !== undefined) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = undefined;
+    }
     const onHide = () => leaveRef.current();
     window.addEventListener('pagehide', onHide);
     return () => {
       window.removeEventListener('pagehide', onHide);
-      leaveRef.current();
+      leaveTimer.current = setTimeout(() => {
+        leaveTimer.current = undefined;
+        leaveRef.current();
+      }, 0);
     };
   }, []);
 

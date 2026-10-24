@@ -30,7 +30,12 @@ Messages (browser -> robot; ``req`` is echoed back so the page can match replies
                                            >= 0.5 s of them before takeover_ts).
   {t:"takeover", req?}                     recovery only: ``on_takeover()`` (pause policy, human gets
                                            control) THEN ``recorder.mark_takeover()``. Refused before
-                                           ``min_pre_takeover_s`` of policy frames.
+                                           ``min_pre_takeover_s`` of policy frames. If the robot already
+                                           sat paused_for_takeover (``paused_at_ns()``, the DAgger path:
+                                           the rollout paused, then someone claimed and connected),
+                                           takeover_ts is the PAUSE time, so the idle wait is in the
+                                           human window (TDM-48 relabels idle ticks there) and the
+                                           frames before takeover_ts are all policy.
   {t:"handback", req?}                     recovery only: ``recorder.mark_handback()`` THEN
                                            ``on_handback()`` (resume_policy). Refused before
                                            ``min_takeover_s`` (the reviewer's minimum human segment).
@@ -111,6 +116,7 @@ class RecordingControl:
                  on_takeover: Callable[[], None] | None = None,
                  on_handback: Callable[[], None] | None = None,
                  on_record_end: Callable[[dict[str, Any]], None] | None = None,
+                 paused_at_ns: Callable[[], int | None] | None = None,
                  min_pre_takeover_s: float = 1.0, min_takeover_s: float = 1.0) -> None:
         if recorder is None:
             raise ValueError("no recorder (the robot client runs without cameras?)")
@@ -119,6 +125,8 @@ class RecordingControl:
         self._target: RecordingTarget | None = target if isinstance(target, RecordingTarget) else None
         self.on_record_start, self.on_takeover, self.on_handback = on_record_start, on_takeover, on_handback
         self.on_record_end = on_record_end
+        # time.monotonic_ns() at which the policy was paused, while the robot is paused_for_takeover (else None)
+        self.paused_at_ns = paused_at_ns
         self.min_pre_takeover_s, self.min_takeover_s = float(min_pre_takeover_s), float(min_takeover_s)
         self._lock = threading.RLock()
         self._mine: str | None = None  # key of the recording this control started
@@ -235,8 +243,8 @@ class RecordingControl:
         note = str(msg.get("note") or f"{tg.kind} via web recording controls (task {tg.task_id})")[:200]
         key = self.recorder.start(tg.ticket_id, tg.kind, tg.task_id, tg.contributor_id, note=note)
         self._mine, self._kind, self._owned = key, tg.kind, True
-        self._start_mono = time.monotonic()
         s = getattr(self.recorder, "_s", None)
+        self._start_mono = s.start_ns / 1e9 if s is not None else time.monotonic()
         self._started_at_us = s.anchor.wall_us_of(s.start_ns) if s is not None else int(time.time() * 1e6)
         self._tk_mono = self._hb_mono = None
         self._tk_ts = self._hb_ts = None
@@ -253,14 +261,21 @@ class RecordingControl:
             raise RecordingError("you already have control")
         if self._hb_mono is not None:
             raise RecordingError("already handed back; finish or discard this episode")
-        ran = time.monotonic() - self._start_mono
+        now_ns = time.monotonic_ns()
+        # Already paused (DAgger: the rollout paused, a contributor claimed and connected): stamp at the
+        # pause, not now. Otherwise the whole wait would be idle frames before takeover_ts and the
+        # reviewer's failure_before_takeover check (>= 90 % policy frames before takeover) fails.
+        paused = self.paused_at_ns() if self.paused_at_ns else None
+        start_ns = int(self._start_mono * 1e9)
+        at_ns = int(paused) if paused and start_ns < int(paused) <= now_ns else None
+        ran = ((at_ns or now_ns) - start_ns) / 1e9
         if ran < self.min_pre_takeover_s:
             raise RecordingError(f"let the policy run {self.min_pre_takeover_s:g} s first "
                                  f"(the reviewer needs the failure before the takeover); {ran:.1f} s so far")
         if self.on_takeover:
             self.on_takeover()  # pause the policy / give the human control first, then stamp
-        self._tk_ts = int(self.recorder.mark_takeover())
-        self._tk_mono = time.monotonic()
+        self._tk_ts = int(self.recorder.mark_takeover(at_ns))
+        self._tk_mono = (at_ns or time.monotonic_ns()) / 1e9
 
     def _op_handback(self, _msg: dict[str, Any]) -> None:
         self._require_takeover_kind()

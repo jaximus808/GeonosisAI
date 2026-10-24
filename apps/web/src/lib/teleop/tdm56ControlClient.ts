@@ -33,7 +33,8 @@ export type Tdm56OutMsg =
   | { t: 'handback' }
   | { t: 'takeover' }
   | { t: 'record_start' }
-  | { t: 'record_stop'; success?: boolean };
+  | { t: 'record_stop'; success?: boolean }
+  | { t: 'record_discard'; reason?: string };
 
 /** What we understood from the robot's {t:"state"} message (raw kept for display/debug). */
 export interface Tdm56RobotState {
@@ -147,6 +148,7 @@ export class Tdm56ControlClient {
   private sentAt = new Map<number, number>();
   private rtts: number[] = [];
   private cmdTimes: number[] = [];
+  private subs = new Set<(m: Record<string, unknown> & { t: string }) => void>();
   private snap: Tdm56LinkSnapshot = {
     state: 'idle',
     cmdHz: 0,
@@ -209,6 +211,20 @@ export class Tdm56ControlClient {
   send(msg: Exclude<Tdm56OutMsg, Tdm56Cmd>): boolean {
     if (msg.t === 'stop') return this.sendStop();
     return this.sendRaw(msg);
+  }
+
+  /** Any JSON message (TDM-58 recording controls add `req` / `note` / `reason`). `{t:"stop"}` goes through sendStop. */
+  sendJson(msg: Record<string, unknown>): boolean {
+    if (msg.t === 'stop') return this.sendStop();
+    return this.sendRaw(msg);
+  }
+
+  /** Every robot -> browser message, parsed (state, ack, record_ack, lease_lost, ...). Returns an unsubscribe. */
+  subscribe(fn: (m: Record<string, unknown> & { t: string }) => void): () => void {
+    this.subs.add(fn);
+    return () => {
+      this.subs.delete(fn);
+    };
   }
 
   private sendRaw(msg: object): boolean {
@@ -297,6 +313,16 @@ export class Tdm56ControlClient {
         this.snap = { ...this.snap, lastAckAt: now };
       } else if (kind === 'error') {
         this.snap = { ...this.snap, detail: String(m.code ?? m.detail ?? 'robot error') };
+      }
+      if (kind && this.subs.size) {
+        const msg = { ...m, t: kind };
+        for (const fn of this.subs) {
+          try {
+            fn(msg);
+          } catch {
+            /* a subscriber's bug must not break the control link */
+          }
+        }
       }
     };
     ws.onclose = (ev) => {

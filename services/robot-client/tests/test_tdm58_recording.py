@@ -172,3 +172,44 @@ def test_adopts_rollout_owned_takeover_recording(setup):
     assert not st["active"] and st["last"]["key"] == key and st["last"]["status"] == "recorded"
     assert ep.meta["takeover_ts"] == st["last"]["takeover_ts"] < st["last"]["handback_ts"]
     assert check_local(ep).passed, check_local(ep).reason()
+
+
+@pytest.mark.parametrize("stamp_at_pause", [True, False])
+def test_adopted_takeover_after_long_pause_stamps_at_pause(setup, stamp_at_pause):
+    """DAgger path with a long pause-to-takeover wait (claim + connect). takeover_ts must be the PAUSE
+    time (``paused_at_ns``), so the idle wait falls in the human window and the reviewer's
+    failure_before_takeover check (>= 90 % policy frames before takeover_ts) passes. Stamped at the
+    human's takeover instead (no ``paused_at_ns``: the old behaviour), the same recording fails it."""
+    rec, holder, _ = setup
+    paused: dict = {}
+    rc = RecordingControl(rec, RecordingTarget(7, 8, 2, "recovery_takeover"),
+                          paused_at_ns=(lambda: paused.get("ns")) if stamp_at_pause else None)
+
+    class Source:  # the executor: policy, then idle (held) while paused, then what the recording says
+        def control_source(self):
+            return "idle" if paused.get("holding") else (rc.control_source() or "policy")
+
+    holder["rc"] = Source()
+    rec.start(7, "recovery_takeover", 8, 2, note="rollout runner")
+    time.sleep(1.5)                       # the policy drives, then fails
+    paused.update(ns=time.monotonic_ns(), holding=True)
+    time.sleep(3.0)                       # nobody has control yet: arm held, idle ticks
+    r = rc.handle({"t": "takeover"})
+    paused["holding"] = False
+    assert r["ok"], r
+    want = rec._s.anchor.wall_us_of(paused["ns"])
+    if stamp_at_pause:
+        assert r["recording"]["takeover_ts"] == want and r["recording"]["takeover_at_ms"] < 2000, r["recording"]
+    else:
+        assert r["recording"]["takeover_ts"] > want + 2_500_000
+    time.sleep(1.5)                       # the human recovers
+    assert rc.handle({"t": "handback"})["ok"]
+    time.sleep(1.0)                       # the policy finishes the trial
+    ep = rec.stop(success=True)
+    rep = check_local(ep)
+    fbt = rep.get("failure_before_takeover")
+    if stamp_at_pause:
+        assert rep.passed, rep.reason()
+        assert fbt.detail["pre_policy_fraction"] >= 0.9 and fbt.detail["takeover_human_fraction"] >= 0.9, fbt.detail
+    else:
+        assert not fbt.passed and "policy-driven" in fbt.reason, fbt

@@ -8,6 +8,8 @@
   eval_trial inserted                                        -> request_reset (paid reset task)
   robot enters status paused (no takeover task on it)       -> request_reset
   reset task enters completed                               -> reserve_task_payment + resume_policy
+  clean_teleop task claimed / no longer claimed             -> start_teleop / stop_teleop on its robot
+  clean_teleop episode accepted, task still claimed         -> complete_task (frees the robot's lease)
 
 Every path is idempotent: the dispatcher decides from rows, so a resync replaying an event is a no-op.
 """
@@ -47,6 +49,7 @@ def dispatch_on_review(ev: Event) -> None:
     task = ev.bus.get("task", int(ev.row["task_id"]))
     if task is not None and int(task.get("data_plan_id") or 0):
         _d(ev).dispatch_plan(int(task["data_plan_id"]))
+    _d(ev).complete_on_accept(ev.row)  # accepted clean demo: complete the still-claimed task
 
 
 def dispatch_on_ticket_changed(ev: Event) -> None:
@@ -71,6 +74,12 @@ def resume_after_reset(ev: Event) -> None:
         log.info("dispatch.resume", extra={"fields": {"task_id": ev.row.get("id"), "outcome": out}})
 
 
+def dispatch_teleop_on_task(ev: Event) -> None:
+    out = _d(ev).on_teleop_task(ev.row, ev.old)
+    if out:
+        log.info("dispatch.teleop", extra={"fields": {"task_id": ev.row.get("id"), "outcome": out}})
+
+
 def register(reg: Registry) -> Registry:
     """Put the dispatcher handlers on ``reg`` (the default registry at import; tests use their own)."""
     for t in dsp.TABLES:
@@ -83,6 +92,7 @@ def register(reg: Registry) -> Registry:
     reg.on_insert("eval_trial", include_existing=True, name="reset_after_eval_trial")(reset_after_eval_trial)
     reg.on_enter("robot", where=lambda r: r.status == "paused", include_existing=False, name="reset_on_robot_paused")(reset_on_robot_paused)
     reg.on_enter("task", where=lambda r: r.type == "reset" and r.status == "completed", name="resume_after_reset")(resume_after_reset)
+    reg.on_update("task", where=lambda r: r.type == "clean_teleop", name="dispatch_teleop_on_task")(dispatch_teleop_on_task)
     return reg
 
 

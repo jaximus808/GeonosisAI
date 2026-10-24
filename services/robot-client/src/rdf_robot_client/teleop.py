@@ -422,6 +422,7 @@ class TeleopHub:
         self._handback = threading.Event()
         self._driver: threading.Thread | None = None
         self._auto_takeover = False
+        self._takeover_task_id = 0            # the claimant's task during a DAgger takeover
         self._rec_owned: str | None = None    # episode key started via record_start (we may stop it)
         self.episodes: list[dict[str, Any]] = []
         self._last_handback: dict[str, Any] = {}
@@ -558,9 +559,12 @@ class TeleopHub:
                 return None
             http = getattr(self.client, "http", None)
             sql = http.sql if http is not None else self.client.sql
+            sm = self.client.sm
             sess.rc = RecordingControl(rec, lambda: lookup_task(sql, sess.claims.task_id),
                                        on_record_start=self._rc_record_start, on_takeover=lambda: self._rc_takeover(sess),
-                                       on_handback=self._rc_handback)
+                                       on_handback=self._rc_handback,
+                                       # DAgger: takeover_ts = when the policy was paused (same as _op_takeover's own mark)
+                                       paused_at_ns=lambda: self._paused_at_ns(sm) if sm.state is S.PAUSED_FOR_TAKEOVER else None)
         return sess.rc
 
     @staticmethod
@@ -609,6 +613,7 @@ class TeleopHub:
             sm.transition(S.TELEOP, f"takeover via /control ({sess.claims.sub})", command_id=job.command.id,
                           allowed_from=[S.PAUSED_FOR_TAKEOVER])
             self.mode, self._ctx = "takeover", job
+            self._takeover_task_id = sess.claims.task_id
             self._handback.clear()
             self.counters["takeovers"] += 1
         ts = None
@@ -748,6 +753,10 @@ class TeleopHub:
             self._last_handback = {"handback_ts": ts, "resumed_policy": resumed, "ended": ended}
             self.client.event("robot.handback", command_id=job.command.id, ticket_id=job.command.ticket_id,
                               handback_ts=ts, resumed_policy=resumed, ended=ended)
+            if resumed and self._takeover_task_id:  # TDM-69 contract: the orchestrator logs the handback from this
+                self.client.event("intervention.handed_back", task_id=self._takeover_task_id,
+                                  command_id=job.command.id, ticket_id=job.command.ticket_id, handback_ts=ts,
+                                  via="/control")
             with self._lock:
                 self.mode, self._ctx = None, None
 
@@ -859,7 +868,7 @@ class TeleopHub:
             source = None
         rec = self.client.services.get("recorder")
         recording: dict[str, Any] = {"active": False}
-        rc = sess.rc if sess is not None and sess.rc else None
+        rc = self._rc_for(sess) if sess is not None and sess.claims.task_id > 0 else None
         if rc is not None:
             recording = rc.state()
             source = rc.control_source() or source

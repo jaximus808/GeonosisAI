@@ -13,7 +13,9 @@
 // Slots for parallel tickets:
 //   canDrive / canDriveReason  TDM-57 exclusive control (lease heartbeat, lost control)
 //   controlSlot                TDM-57 lease / claim status, rendered in the top bar
-//   recordingSlot              TDM-58 record start/stop, takeover/handback; use useTdm56Teleop().send(...)
+//   recordingSlot              TDM-58 record start/stop, takeover/handback; use useTdm56Teleop().controlSocket
+//   stamp                      TDM-57 command gate (useTeleopLease().stamp): every outgoing cmd and recording op
+//                              goes through it; null = not allowed now, nothing is sent
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CameraFeed, TaskCameraFeed, type FeedHealth } from '@/components/teleop/CameraFeed';
@@ -21,6 +23,7 @@ import { Tdm56Joystick, type Tdm56StickValue } from '@/components/teleop/Tdm56Jo
 import { useContributor } from '@/lib/contributor/hooks';
 import { staticStreamGrant, taskStreamGrant } from '@/lib/teleop/tdm55StreamGrant';
 import type { StreamGrant } from '@/lib/teleop/tdm55CameraClient';
+import type { ControlChannel, RobotControlMessage } from '@/lib/teleop/tdm58Recording';
 import {
   Tdm56ControlClient,
   type Tdm56LinkSnapshot,
@@ -56,6 +59,8 @@ export interface Tdm56TeleopApi {
   robot: Tdm56RobotState | null;
   /** True while motion commands are going out. */
   driving: boolean;
+  /** TDM-58 `<RecordingControls controlSocket/>`: the same /control socket, stable across reconnects. Sends are stamped. */
+  controlSocket: ControlChannel;
 }
 
 const Tdm56Ctx = createContext<Tdm56TeleopApi | null>(null);
@@ -76,6 +81,9 @@ export interface Tdm56TeleopConsoleProps {
   canDriveReason?: string;
   controlSlot?: ReactNode;
   recordingSlot?: ReactNode;
+  /** TDM-57 lease gate (useTeleopLease().stamp). Adds {task_id, claimed_at_us} to every cmd / op, or returns null
+   *  when control is not allowed at this instant (then nothing is sent). STOP is never gated. */
+  stamp?: <T extends object>(msg: T) => (T & { task_id: number; claimed_at_us: number }) | null;
   /** Force the clutch off when the worst camera latency exceeds this. Default 400 ms. */
   maxLatencyMs?: number;
   /** Dev / mock robot: a fixed stream URL + token instead of the claimant grant. Shown as such in the UI. */
@@ -120,8 +128,15 @@ function ConsoleInner({
   recordingSlot,
   maxLatencyMs = 400,
   dev,
+  stamp,
   getGrant,
 }: Tdm56TeleopConsoleProps & { getGrant: () => Promise<StreamGrant> }) {
+  const stampRef = useRef(stamp);
+  stampRef.current = stamp;
+  /** Lease-stamp a message; unstamped when no gate is mounted (dev page). */
+  const gate = useCallback(<T extends object>(m: T): T | null => (stampRef.current ? stampRef.current(m) : m), []);
+  // robot -> browser messages for slot components (TDM-58), re-attached to every new control client
+  const subs = useRef(new Set<(m: RobotControlMessage) => void>());
   // ---- link
   const [link, setLink] = useState<Tdm56LinkSnapshot>({
     state: 'idle',
@@ -141,8 +156,12 @@ function ConsoleInner({
   useEffect(() => {
     const c = new Tdm56ControlClient(() => grantRef.current(), setLink, { urlOverride: dev?.controlUrl });
     clientRef.current = c;
+    const unsub = c.subscribe((m) => {
+      for (const fn of subs.current) fn(m as RobotControlMessage);
+    });
     c.start();
     return () => {
+      unsub();
       c.stop();
       clientRef.current = null;
     };
@@ -190,8 +209,14 @@ function ConsoleInner({
   localStopRef.current = localStop;
 
   const [showSticks, setShowSticks] = useState(false);
+  // two sticks + the clutch column must fit a 390 px phone (same sizes as TDM-59's practice console)
+  const [stickSize, setStickSize] = useState(124);
   useEffect(() => {
     setShowSticks(window.matchMedia?.('(pointer: coarse)').matches ?? false);
+    const fit = () => setStickSize(window.innerWidth < 420 ? 108 : 124);
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
   }, []);
 
   const pressStop = useCallback(() => {
@@ -235,15 +260,17 @@ function ConsoleInner({
     if (!engaged.current) return;
     engaged.current = false;
     // One final clutch:false so the robot holds at once instead of waiting for its 200 ms watchdog.
-    clientRef.current?.sendCmd({
+    // Stamped when the lease allows it; otherwise sent bare (it can only make the arm hold).
+    const rel = {
       seq: ++seq.current,
       clutch: false,
       d_pos: integ.current.dPos.map((v) => round(v)) as V3,
       d_rot: integ.current.dRot.map((v) => round(v)) as V3,
       gripper: round(gripperRef.current, 3),
       speed_scale: round(effSpeedRef.current, 3),
-    });
-  }, []);
+    };
+    clientRef.current?.sendCmd(gate(rel) ?? rel);
+  }, [gate]);
 
   // ---- the 30 Hz loop
   useEffect(() => {
@@ -306,7 +333,7 @@ function ConsoleInner({
         engaged.current = true;
       }
       integ.current.step(twist ?? ZERO_TWIST, dt, effSpeedRef.current);
-      clientRef.current?.sendCmd({
+      const cmd = gate({
         seq: ++seq.current,
         clutch: true,
         d_pos: integ.current.dPos.map((v) => round(v)) as V3,
@@ -314,12 +341,19 @@ function ConsoleInner({
         gripper: round(gripperRef.current, 3),
         speed_scale: round(effSpeedRef.current, 3),
       });
+      if (!cmd) {
+        // the lease gate said no at this instant (lease running low, tab hidden): let go, press again later
+        release();
+        needsRelease.current = true;
+        return;
+      }
+      clientRef.current?.sendCmd(cmd);
     }, TICK_MS);
     return () => {
       window.clearInterval(id);
       release();
     };
-  }, [blockReason, release, pressStop]);
+  }, [blockReason, release, pressStop, gate]);
 
   // ---- keyboard
   useEffect(() => {
@@ -400,14 +434,35 @@ function ConsoleInner({
     return () => window.clearInterval(id);
   }, []);
 
+  const controlSocket = useMemo<ControlChannel>(
+    () => ({
+      send: (m) => {
+        if (m.t === 'stop') {
+          pressStop();
+          return clientRef.current?.isOpen ?? false;
+        }
+        const out = gate(m);
+        return out ? (clientRef.current?.sendJson(out) ?? false) : false;
+      },
+      subscribe: (fn) => {
+        subs.current.add(fn);
+        return () => {
+          subs.current.delete(fn);
+        };
+      },
+    }),
+    [pressStop, gate],
+  );
+
   const api = useMemo<Tdm56TeleopApi>(
     () => ({
-      send: (m) => (m.t === 'stop' ? (pressStop(), clientRef.current?.isOpen ?? false) : (clientRef.current?.send(m) ?? false)),
+      send: (m) => controlSocket.send(m as Record<string, unknown>),
       link,
       robot: link.robot,
       driving: ui.engaged,
+      controlSocket,
     }),
-    [link, ui.engaged, pressStop],
+    [link, ui.engaged, controlSocket],
   );
 
   const robot = link.robot;
@@ -530,7 +585,7 @@ function ConsoleInner({
               <div className="h-52 sm:hidden" aria-hidden />
               <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-zinc-50/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 sm:static sm:mt-2 sm:rounded-xl sm:border sm:px-4">
                 <div className="mx-auto flex max-w-md items-end justify-between gap-2">
-                  <Tdm56Joystick size={116} label="Move" hint="forward, back, left, right" onChange={(v) => (stickL.current = v)} />
+                  <Tdm56Joystick size={stickSize} label="Move" hint="forward, back, left, right" onChange={(v) => (stickL.current = v)} />
                   <div className="flex flex-col items-center gap-2">
                     <button
                       type="button"
@@ -559,7 +614,7 @@ function ConsoleInner({
                     </button>
                     <GripperSlider value={gripper} onChange={setGripper} compact />
                   </div>
-                  <Tdm56Joystick size={116} label="Lift and turn" hint="up, down, turn" onChange={(v) => (stickR.current = v)} />
+                  <Tdm56Joystick size={stickSize} label="Lift and turn" hint="up, down, turn" onChange={(v) => (stickR.current = v)} />
                 </div>
               </div>
               </>

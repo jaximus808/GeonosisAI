@@ -624,6 +624,75 @@ class Dispatcher:
             return "issued"
 
 
+    def complete_on_accept(self, episode: dict) -> str | None:
+        """The clean_teleop task's episode was accepted while the claimant still holds it: complete the
+        task for them (one paid episode per task). That clears the arm-control lease, so the robot's
+        next arm-control task can be claimed, and ends the teleop session (``on_teleop_task``)."""
+        if episode.get("review_status") != "accepted":
+            return None
+        task = self.m.get("task", _i(episode.get("task_id")))
+        if not task or task.get("type") != "clean_teleop" or task.get("status") != "claimed":
+            return None
+        try:
+            self.w.call_reducer("complete_task", _i(task["id"]), json.dumps(
+                {"by": ACTOR, "reason": "episode_accepted", "episode_id": _i(episode["id"])}))
+        except Exception as e:  # noqa: BLE001 - e.g. the claimant completed it a moment earlier
+            log.info("dispatch.complete_skipped", extra={"fields": {"task_id": task["id"], "error": str(e)[:300]}})
+            return "skipped"
+        self.event("dispatch.task_completed_on_accept", {"ticket_id": _i(task.get("ticket_id")), "task_id": _i(task["id"]),
+                                                         "episode_id": _i(episode["id"])})
+        return "completed"
+
+    # ---- clean teleop sessions (TDM-52 executor)
+    def on_teleop_task(self, task: dict, old: dict | None = None) -> str | None:
+        """A clean_teleop task was claimed: start the robot's teleop session (``start_teleop`` {task_id},
+        the TDM-52 job that drives from /ws/control); it left ``claimed``: ``stop_teleop``. Without this
+        the claimant's commands reach the robot but nothing drives (the hub only drives inside a
+        start_teleop job or a paused-rollout takeover). Recovery takeovers never get one (TDM-69: the
+        rollout holds the job lock)."""
+        if task.get("type") != "clean_teleop":
+            return None
+        task_id, rid, tid = _i(task["id"]), _i(task.get("robot_id")), _i(task.get("ticket_id"))
+        st, was = task.get("status"), (old or {}).get("status")
+        if not rid or st == was:
+            return None
+        with self.lock(tid):
+            cmds = self.m.rows("robot_command")
+            mine = [c for c in cmds if _i(c.get("robot_id")) == rid and c.get("type") == "start_teleop"
+                    and c.get("status") in OPEN_JOB and _i(_json(c.get("payload_json")).get("task_id")) == task_id]
+            base = {"ticket_id": tid, "task_id": task_id, "robot_id": rid}
+            if st == "claimed":
+                if mine:
+                    return "already_started"
+                busy = self._robot_jobs_open(rid)
+                if busy:
+                    self.event("dispatch.teleop_blocked", {**base, "open_jobs": [_i(c["id"]) for c in busy],
+                                                           "note": "robot is running another job; no teleop session"})
+                    return "robot_busy"
+                try:
+                    self.w.call_reducer("issue_robot_command", rid, "start_teleop", json.dumps(
+                        {"task_id": task_id, "kind": "clean_teleop", "contributor_id": _i(task.get("assignee_id")),
+                         "ref": f"teleop:{task_id}", "by": ACTOR}), tid)
+                except Exception as e:  # noqa: BLE001
+                    self.event("dispatch.error", {**base, "op": "issue_robot_command(start_teleop)", "error": str(e)[:500]})
+                    return "error"
+                self.event("dispatch.teleop_started", base)
+                return "issued"
+            if not mine:
+                return None
+            if any(c.get("type") == "stop_teleop" and c.get("status") in OPEN_JOB and _i(c.get("robot_id")) == rid
+                   and _i(_json(c.get("payload_json")).get("task_id")) == task_id for c in cmds):
+                return "already_stopping"
+            try:
+                self.w.call_reducer("issue_robot_command", rid, "stop_teleop",
+                                    json.dumps({"task_id": task_id, "reason": f"task {st}", "by": ACTOR}), tid)
+            except Exception as e:  # noqa: BLE001
+                self.event("dispatch.error", {**base, "op": "issue_robot_command(stop_teleop)", "error": str(e)[:500]})
+                return "error"
+            self.event("dispatch.teleop_stopped", {**base, "task_status": st})
+            return "stopped"
+
+
 # --------------------------------------------------------------------------- per-bus singleton
 
 def _default_writer() -> Writer:

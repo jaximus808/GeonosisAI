@@ -361,3 +361,51 @@ def test_bus_end_to_end_plan_approved_to_tasks(n):
     finally:
         dsp.make_writer = old
     assert len(created) == n and len(open_tasks) == n and dt < 1.0
+
+
+def test_claimed_clean_teleop_starts_and_stops_the_robot_teleop_session():
+    """Teleop integration: claiming a clean_teleop task issues start_teleop {task_id} (the TDM-52 job
+    the robot drives from /ws/control); leaving claimed issues stop_teleop. Idempotent; never while
+    another job holds the robot; never for recovery takeovers (the paused rollout holds the job lock)."""
+    db, d = setup(amount=1)
+    d.dispatch_plan(3)
+    (task,) = db.tasks(data_plan_id=3)
+    open_ = dict(task)
+    task.update(status="claimed", assignee_id=5)
+    assert d.on_teleop_task(task, open_) == "issued"
+    (cmd,) = [c for c in db.rows("robot_command") if c["type"] == "start_teleop"]
+    p = json.loads(cmd["payload_json"])
+    assert p["task_id"] == task["id"] and p["kind"] == "clean_teleop" and p["contributor_id"] == 5
+    assert d.on_teleop_task(task, open_) == "already_started"
+    assert d.on_teleop_task(task, dict(task)) is None  # no status change
+    claimed = dict(task)
+    task.update(status="completed")
+    assert d.on_teleop_task(task, claimed) == "stopped"
+    (stop,) = [c for c in db.rows("robot_command") if c["type"] == "stop_teleop"]
+    assert json.loads(stop["payload_json"])["task_id"] == task["id"]
+    assert d.on_teleop_task(task, claimed) == "already_stopping"
+    # robot busy with another job: no session, logged
+    db.put("robot_command", robot_id=1, ticket_id=7, type="run_baseline", payload_json="{}", status="acked")
+    cmd["status"] = "done"
+    t2 = db.put("task", ticket_id=7, robot_id=1, data_plan_id=0, type="clean_teleop", status="claimed",
+                instructions="", price_cents=1000, assignee_id=5, completed_at=None)
+    assert d.on_teleop_task(t2, {**t2, "status": "open"}) == "robot_busy"
+    assert db.ev("dispatch.teleop_blocked")
+    t3 = db.put("task", ticket_id=7, robot_id=1, data_plan_id=0, type="recovery_takeover", status="claimed",
+                instructions="", price_cents=500, assignee_id=5, completed_at=None)
+    assert d.on_teleop_task(t3, {**t3, "status": "open"}) is None
+
+
+def test_accepted_clean_demo_completes_the_still_claimed_task():
+    db, d = setup(amount=1)
+    d.dispatch_plan(3)
+    (task,) = db.tasks(data_plan_id=3)
+    task.update(status="claimed", assignee_id=5)
+    ep = db.put("episode", ticket_id=7, task_id=task["id"], kind="clean_teleop", review_status="pending")
+    assert d.complete_on_accept(ep) is None
+    ep["review_status"] = "accepted"
+    assert d.complete_on_accept(ep) == "completed"
+    (call,) = [c for c in db.calls if c[0] == "complete_task"]
+    assert call[1] == task["id"] and json.loads(call[2])["reason"] == "episode_accepted"
+    task["status"] = "completed"
+    assert d.complete_on_accept(ep) is None

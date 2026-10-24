@@ -1,0 +1,48 @@
+# TDM-47 camera rig for the Jetson (read by rdf_robot_client.cameras; override with $RDF_CAMERAS_CONFIG).
+# Laptop: `python -m rdf_robot_client.cameras check --synthetic` swaps every camera for a fake one
+# with the same size/fps/orientation; `--webcam 0` uses the laptop webcam as the reference camera.
+# Jetson setup steps: services/robot-client/docs/cameras-jetson-checklist.md
+
+reference: top            # its frames define the synced timeline; others pair to the nearest frame
+pair_tolerance_ms: 20     # a pair is in_sync when every camera is within this of the reference frame
+buffer_seconds: 1.0       # ring buffer per camera (full-res frames, ~0.9 MB each at 640x480)
+policy_size: 224          # S-05a: pi0.5 images, letterboxed (resize_with_pad)
+stream: {width: 424, jpeg_quality: 70, fps: 15}   # MJPEG feed for the browser (TDM-55)
+
+cameras:
+  top:                    # exo / scene camera -> observation.images.top -> policy observation/image
+    source: v4l2
+    # Prefer a by-id path (follows the camera) or by-path (follows the USB port). Globs are allowed.
+    # TODO on the Jetson: replace with the real path from `python -m rdf_robot_client.cameras list`.
+    device: /dev/video0
+    width: 640
+    height: 480
+    fps: 30
+    fourcc: MJPG          # needed: two YUYV 640x480@30 streams do not fit on one USB 2 bus
+    rotate: 0             # 0/90/180/270 clockwise; set so the table is at the bottom of the image
+    flip: none            # none / horizontal / vertical
+    timestamps: auto      # driver (V4L2 buffer stamp, CLOCK_MONOTONIC) if plausible, else host
+    v4l2_controls:        # applied with v4l2-ctl after open; old/new kernel names both work
+      exposure_dynamic_framerate: 0   # do NOT let auto-exposure drop to 15 fps in dim light
+      power_line_frequency: 2         # 60 Hz mains (US): avoids flicker banding
+  wrist:                  # wrist camera -> observation.images.wrist -> policy observation/wrist_image
+    source: v4l2
+    device: /dev/video2   # UVC cameras take two nodes each (video0+1, video2+3)
+    width: 640
+    height: 480
+    fps: 30
+    fourcc: MJPG
+    rotate: 0             # set so the gripper fingers are at the bottom of the image
+    flip: none
+    timestamps: auto
+    v4l2_controls:
+      exposure_dynamic_framerate: 0
+      power_line_frequency: 2
+
+# GStreamer alternative (needs the JetPack system OpenCV built with GStreamer; the pip wheel has none):
+#   top:
+#     source: gstreamer
+#     pipeline: >-
+#       v4l2src device=/dev/video0 io-mode=2 ! image/jpeg,width=640,height=480,framerate=30/1 !
+#       nvv4l2decoder mjpeg=1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert !
+#       video/x-raw,format=BGR ! appsink drop=1 max-buffers=2 sync=false

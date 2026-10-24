@@ -3,7 +3,7 @@ name = "rdf-robot-client"
 version = "0.0.0"
 description = "Robot PC bridge: YAM arm control, cameras, recording, takeover/teleop, rollouts and eval trials"
 requires-python = ">=3.11,<3.12"
-dependencies = ["rdf-common"]
+dependencies = ["rdf-common", "numpy>=1.26", "pyyaml>=6", "opencv-python-headless>=4.10,<5"]  # TDM-47 cameras: numpy/pyyaml/opencv
 
 [project.scripts]
 rdf-robot-client = "rdf_robot_client.__main__:main"

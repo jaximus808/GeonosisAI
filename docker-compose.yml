@@ -109,9 +109,9 @@ services:
       <<: *spacetime-env
       HOST: 0.0.0.0
       PORT: "3002"
+      ORCHESTRATOR_URL: http://orchestrator:8000 # in-network name; .env's localhost URL is for host runs
     ports: ["${MCP_PORT:-3002}:3002"]
-    # No healthcheck yet: the placeholder doesn't listen. Add `healthcheck: *http-up`
-    # once apps/mcp serves on $PORT.
+    healthcheck: *http-up # TDM-80: GET / and /healthz answer 200 without auth
     volumes: *node-volumes
 
   # ---------- optional: local SpacetimeDB (profile local-spacetime) ----------

@@ -56,3 +56,13 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - **Publishing to maincloud is serialized.** Take the lock with `mkdir spacetime/.publish-lock` (retry every 10 s if it exists). Then run `npx tsc --noEmit` for the whole module; if another ticket's half-written file breaks the build, wait and retry rather than editing it. Publish with `--delete-data=never --yes=remote,migrate`, then `rmdir spacetime/.publish-lock`. Never leave the lock behind.
 - Every state-changing reducer appends an `event_log` row (actor, type, payload_json). Important reducers check `ctx.sender` with the auth helpers.
 - The **one-time event_log wipe is held** until right before the Saturday-night real run (TDM-72). Until then, test rows on maincloud are fine. Tag them `test.*`.
+
+## Orchestrator runtime (TDM-18)
+- `services/orchestrator/src/rdf_orchestrator/bus.py` registers handlers per table. Examples: `@on_enter('training_run', where=lambda r: r.status=='queued')`, and `on_insert`/`on_update`/`on_delete`. Rows allow attribute access.
+- The bus resyncs after a reconnect, so handlers must be idempotent.
+- Call reducers with `stdb.call_reducer(...)`, not ad-hoc HTTP. Log through `log.py`, which tags `ticket_id` automatically.
+- Put new handlers in `handlers/<area>.py`, register them where `handlers/event_log_tap.py` is registered, and add tests under `tests/`.
+- Run: `cd services/orchestrator && uv run rdf-orchestrator --port 8000`. Health: `/healthz`.
+
+## Temp files
+- Keep scratch files in `spikes/<ticket>/tmp/` (gitignored by `tmp/`) or in a ticket-named dir under `$TMPDIR`. Never use a shared scratchpad, and never use generic names like `probe.py`.

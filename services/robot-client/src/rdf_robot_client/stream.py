@@ -21,6 +21,7 @@ Transport ``jpeg-ws/1`` (decision + revert plan: ``docs/decisions.md``, "TDM-55"
 Endpoints (one port, default 8091):
 
   ``GET /ws/cameras``                 WebSocket, protocol below
+  ``GET /ws/control`` (+ ``/control``)  WebSocket, TDM-52 teleop control (``teleop.py``), when registered
   ``GET /snapshot/<cam>.jpg?token=``  one JPEG (the browser's fallback when WebSockets fail)
   ``GET /healthz``                    JSON: cameras, viewers, public URL (no frames, no auth)
 
@@ -235,6 +236,12 @@ class CameraStreamServer:
         self._started = threading.Event()
         self._thread: threading.Thread | None = None
         self.port = cfg.port
+        # TDM-52: extra WebSocket paths on the same port/tunnel/token, e.g. "/control" -> coroutine(server, ws)
+        self.ws_routes: dict[str, Callable[["CameraStreamServer", ServerConnection], Any]] = {}
+
+    def add_ws_route(self, path: str, handler: Callable[["CameraStreamServer", ServerConnection], Any]) -> None:
+        """Serve another WebSocket path (TDM-52 ``/control``) on this server; ``handler(server, ws)`` does its own auth."""
+        self.ws_routes[path] = handler
 
     # -- auth
     def check_token(self, token: str) -> StreamClaims:
@@ -249,7 +256,7 @@ class CameraStreamServer:
     # -- HTTP side (healthz / snapshot)
     def _http(self, conn: ServerConnection, req: Request) -> Response | None:
         u = urlsplit(req.path)
-        if u.path == WS_PATH:
+        if u.path == WS_PATH or u.path in self.ws_routes:
             return None
         hdr = Headers({"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
         if u.path == "/healthz":
@@ -287,6 +294,10 @@ class CameraStreamServer:
 
     # -- WebSocket side
     async def _handler(self, ws: ServerConnection) -> None:
+        route = self.ws_routes.get(urlsplit(ws.request.path).path) if ws.request else None
+        if route is not None:
+            await route(self, ws)
+            return
         try:
             first = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
             msg = json.loads(first) if isinstance(first, str) else {}
@@ -565,9 +576,13 @@ class StreamHandle:
         """``{"stream": {...}}`` to merge into ``robot.camera_config_json`` (the orchestrator reads it)."""
         http = self.http_url
         ws = None if http is None else re.sub(r"^http", "ws", http) + WS_PATH
-        return {"stream": {"transport": TRANSPORT, "url": ws, "http": http, "cams": self.server.rig.names,
-                           "width": self.server.width, "fps": self.server.cfg.fps,
-                           "tunnel": "cloudflared" if self.tunnel else "none", "updated_at": int(time.time())}}
+        info = {"transport": TRANSPORT, "url": ws, "http": http, "cams": self.server.rig.names,
+                "width": self.server.width, "fps": self.server.cfg.fps,
+                "tunnel": "cloudflared" if self.tunnel else "none", "updated_at": int(time.time())}
+        ctl = next((p for p in ("/ws/control", "/control") if p in self.server.ws_routes), None)
+        if ctl:  # TDM-52 teleop control socket (same token)
+            info["control_url"] = None if http is None else re.sub(r"^http", "ws", http) + ctl
+        return {"stream": info}
 
     def stop(self) -> None:
         if self.tunnel:

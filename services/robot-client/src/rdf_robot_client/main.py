@@ -128,6 +128,43 @@ def run(argv: list[str] | None = None) -> None:
     )
     if hasattr(arm, "set_event_sink"):  # TDM-45: rate-limited robot.limit_hit event_log rows
         arm.set_event_sink(client.event)
+    # TDM-52: TDM-55 video stream + teleop /ws/control (same server, tunnel and token). stream.info() is merged
+    # into the registered camera_config (robot.camera_config_json["stream"], incl. control_url) and re-published
+    # when the tunnel URL changes. Env: RDF_STREAM=cloudflared|none|off (default cloudflared; none = LAN, the
+    # default with --sim), RDF_STREAM_PORT (8091), RDF_TELEOP_ALLOW_OPS=1 (ops tokens may drive: HIL tests only).
+    import atexit
+
+    from . import teleop as _teleop
+
+    client.handlers["start_teleop"] = _teleop.start_teleop
+    stream_mode = os.environ.get("RDF_STREAM") or ("none" if sim else "cloudflared")
+    if services.get("cameras") is not None and stream_mode != "off":
+        try:
+            from .stream import start_stream
+
+            stream = start_stream(services["cameras"], robot_name=name, tunnel=stream_mode,
+                                  port=int(os.environ.get("RDF_STREAM_PORT") or 8091))
+        except (Exception, SystemExit) as e:  # e.g. RDF_STREAM_TOKEN_SECRET missing: run without video/teleop
+            _log("stream + teleop NOT started (no video, no /ws/control)", error=repr(e)[:300])
+        else:
+            _teleop.install_control(stream, _teleop.hub_for(client, config=_teleop.TeleopConfig(
+                allow_ops_tokens=os.environ.get("RDF_TELEOP_ALLOW_OPS") == "1")))
+            client.camera_config.update(stream.info())
+
+            def _republish(info: dict[str, Any]) -> None:
+                client.camera_config.update(info)
+                if client.robot_id is None:
+                    return  # not registered yet: _register() sends the merged config
+                try:
+                    client.http.call_reducer("register_robot", name, arm.embodiment, arm.adapter_version,
+                                             json.dumps({**client.camera_config, "arm": arm.describe()}, default=str))
+                except Exception as e:  # noqa: BLE001
+                    _log("stream url re-publish failed", error=str(e)[:200])
+
+            stream.on_url(_republish)
+            services["stream"] = stream
+            atexit.register(stream.stop)
+            _log("stream + teleop up", **stream.info()["stream"])
     done = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: done.set())

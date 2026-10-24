@@ -66,10 +66,11 @@ export function jointTransform(body: YamBody, value: number): Mat4 {
   return mat4FromPosQuat([j.axis[0] * value, j.axis[1] * value, j.axis[2] * value], [1, 0, 0, 0]);
 }
 
-/** Gripper 0 closed .. 1 open (RobotLiveState.gripper) -> finger slide (m): 0 = open. */
+/** Gripper 0 closed .. 1 open (RobotLiveState.gripper) -> finger slide (m): 0 = closed, travel = open
+ * (the MJCF's joint7/joint8; the MuJoCo sim drives ctrl = travel * gripper). */
 export function gripperToSlide(g: number, travel: number): number {
   const c = Math.min(1, Math.max(0, Number.isFinite(g) ? g : 1));
-  return (1 - c) * travel;
+  return c * travel;
 }
 
 export function createYamKinematics(model: YamModelLike) {

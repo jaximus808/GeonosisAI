@@ -38,9 +38,9 @@ describe('YAM twin FK vs yam_kinematics + MuJoCo', () => {
     assert.ok(dist(p, [0.255, 0, 0.173]) < 1e-3, String(p));
   });
 
-  it('gripper 1 = open (slide 0), 0 = closed (full travel)', () => {
-    assert.equal(fk.slide(1), 0);
-    assert.equal(fk.slide(0), 0.0475);
-    assert.equal(fk.slide(Number.NaN), 0);
+  it('gripper 1 = open (full travel), 0 = closed (slide 0), as the MuJoCo sim drives it', () => {
+    assert.equal(fk.slide(1), 0.0475);
+    assert.equal(fk.slide(0), 0);
+    assert.equal(fk.slide(Number.NaN), 0.0475);
   });
 });

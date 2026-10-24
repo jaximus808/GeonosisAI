@@ -500,6 +500,39 @@ def _unwrap(arm: Any) -> list[Any]:
     return out
 
 
+def _vec(v: Any, n: int) -> list[float] | None:
+    try:
+        out = [round(float(x), 5) for x in v]
+    except (TypeError, ValueError):
+        return None
+    return out if len(out) == n else None
+
+
+def scene_for_contract(raw: Any) -> dict[str, Any] | None:
+    """An adapter's ``scene_state()`` -> the contract's ``{cube?: {pos, quat}, plate?: {pos}}``.
+
+    Accepts ``pos`` or the MuJoCo sim adapter's ``cube.xyz`` / ``plate.xy`` + ``plate.top_z``;
+    everything else (task status, joints, ...) is dropped.
+    """
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    cube = raw.get("cube") if isinstance(raw.get("cube"), dict) else None
+    if cube:
+        pos = _vec(cube.get("pos", cube.get("xyz")), 3)
+        quat = _vec(cube.get("quat", (1.0, 0.0, 0.0, 0.0)), 4)
+        if pos and quat:
+            out["cube"] = {"pos": pos, "quat": quat}
+    plate = raw.get("plate") if isinstance(raw.get("plate"), dict) else None
+    if plate:
+        pos = _vec(plate.get("pos"), 3)
+        if pos is None and (xy := _vec(plate.get("xy"), 2)) is not None:
+            pos = [*xy, round(float(plate.get("top_z") or 0.0), 5)]
+        if pos:
+            out["plate"] = {"pos": pos}
+    return out or None
+
+
 class LiveStateSampler:
     """Builds one ``RobotLiveState`` dict from a running robot client (``RobotClient`` or ``StandaloneRobot``).
 
@@ -572,9 +605,9 @@ class LiveStateSampler:
             msg["checkpoint_uri"] = str(ckpt)
         if self.workspace:
             msg["workspace"] = self.workspace
-        if self._scene is not None:
+        if self._scene is not None and self.sim:  # scene poses are sim-only: live never carries them
             try:
-                scene = self._scene()
+                scene = scene_for_contract(self._scene())
                 if scene:
                     msg["scene"] = scene
             except Exception:  # noqa: BLE001 - scene is decoration; never drop the state for it

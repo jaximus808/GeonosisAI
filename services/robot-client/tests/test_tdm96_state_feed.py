@@ -21,7 +21,7 @@ from rdf_robot_client.rollout import StandaloneRobot
 from rdf_robot_client.safety import SafetyLayer
 from rdf_robot_client.state import RobotState as S
 from rdf_robot_client.stream import (CLAMP_KEYS, CameraStreamServer, LiveStateSampler, StreamConfig, StreamHandle,
-                                     install_state_feed)
+                                     install_state_feed, scene_for_contract)
 from rdf_robot_client.tdm57_lease import ControlLeaseGuard
 from rdf_robot_client.teleop import CLOSE_FORBIDDEN, hub_for, install_control
 
@@ -262,6 +262,18 @@ def test_scene_hook_and_stream_info(bench, rig):
         assert m["scene"]["cube"]["pos"] == [0.3, 0.0, 0.02]
     finally:
         arm.disconnect()
+    try:  # live never carries scene poses, even if an adapter offers them
+        arm2 = SceneArm(SimArm())
+        arm2.connect()
+        assert "scene" not in LiveStateSampler(StandaloneRobot(arm2), sim=False).sample()
+    finally:
+        arm2.disconnect()
+    # the MuJoCo sim adapter's shape (cube.xyz, plate.xy + top_z) is mapped to the contract
+    raw = {"sim": True, "cube": {"xyz": [0.4, 0.1, 0.03], "quat": [1, 0, 0, 0], "half": 0.02},
+           "plate": {"xy": [0.35, -0.1], "radius": 0.08, "top_z": 0.012}, "joints": [0] * 6, "task": {}}
+    assert scene_for_contract(raw) == {"cube": {"pos": [0.4, 0.1, 0.03], "quat": [1.0, 0.0, 0.0, 0.0]},
+                                       "plate": {"pos": [0.35, -0.1, 0.012]}}
+    assert scene_for_contract({"cube": {"xyz": [1, 2]}}) is None
     info = StreamHandle(bench.server, None, "10.0.0.5").info()["stream"]
     assert info["state_url"] == f"ws://10.0.0.5:{bench.server.port}/ws/state"
     assert bench.server.health()["state"]["hz"] == 30

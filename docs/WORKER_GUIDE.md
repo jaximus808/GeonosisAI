@@ -81,3 +81,9 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 
 ## Committing in the shared checkout (IMPORTANT)
 - **Always commit with an explicit pathspec: `git commit -m "..." -- <your paths>`.** A plain `git commit` takes whatever *anyone* has staged, and that has already put one ticket's files under another ticket's message. Don't leave files staged between steps.
+
+## Training recipe (TDM-36 decision; full details in the "S-05a decision" note on the Architecture tab)
+- π0.5 LoRA (`gemma_2b_lora` + `gemma_300m_lora`) on 1× H100, using openpi `215abfb`. Batch 32, action horizon 50, 224 px images. Joint actions are trained as deltas; the gripper stays absolute.
+- **Our datasets must be LeRobot format v2.1** (openpi pins that LeRobot version).
+- 2,000 steps takes ~49 min end to end and costs ~$3–4, whether we have 5 or 10 episodes. Fixed overhead is ~4.5 min per run. Checkpoints are 9.5 GB.
+- The working spike is `spikes/tdm-36-finetune/` (Volume `rdf-s05a-checkpoints`). Production code goes in `services/training/`.

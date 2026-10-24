@@ -200,6 +200,7 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
   - Control is accepted only while the token's task is still claimed (re-check the lease every ≤5 s). If the feed goes stale, the browser must release the clutch.
 - **Exclusive control:** the TDM-10 `claim_task` lease, kept alive with `useTdm61ClaimHeartbeat(task)` from `apps/web/src/lib/marketplace/tdm61.ts`.
 - **Recording:** the TDM-48 `recorder_for(ctx)` provides `start` / `mark_takeover` / `mark_handback` / `stop(success)`.
+- **Recording controls (TDM-58):** the executor forwards `t` in `RECORDING_MESSAGES` (`record_start`, `record_stop` {success}, `record_discard`, `takeover`, `handback`) to `rdf_robot_client.tdm58_recording.RecordingControl.handle_async(msg)` (it calls the recorder; your `on_takeover` / `on_handback` hooks do the pause / resume_policy), sends back its `{t:"record_ack"}`, and puts `rc.state()` in `{t:"state"}` as `recording` (use `rc.control_source()` for the ticks). Browser: `<RecordingControls taskId kind controlSocket onPhase/>` (`components/teleop/RecordingControls.tsx`); `controlSocket` = `{send(json), subscribe(fn)}`. Proof: `spikes/tdm-58-recording/e2e_stack.py`.
 
 ## DAgger interventions (TDM-69): `rdf_orchestrator/interventions.py`, robot side `rdf_robot_client/interventions.py`
 - **When:** on for collection rollouts (ticket `dispatch` + recovery_takeover plan + robot with `camera_config_json.capabilities: ["interventions"]`), off for evals. Override: `run_settings.hyperparams_json.interventions_enabled` true/false.

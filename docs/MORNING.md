@@ -40,5 +40,11 @@ The build ran overnight from the Tandem board (`HL4RZKEQ`, http://127.0.0.1:7891
 `SPACETIME_*`, `MCP_TOKEN`, `RDF_STREAM_TOKEN_SECRET`, `RDF_MEDIA_SIGNING_KEY`, `POLICY_SERVER_TOKEN`, `RDF_OPERATOR_KEY`, `RDF_OPERATOR_PASSCODE` (read it from `.env` to log in at `/ops/login`), the VAPID push keys (don't regenerate them), and `MCP_OAUTH_SECRET` if set.
 
 ## Board loose ends
-- **TDM-41 (policy server)** is still `executing` with a stale claim. Its worker went quiet after committing the code (e9082b9, 15 unit tests; TDM-40 verified loading its checkpoints through this server path). It's unproven on a deployed endpoint until the Modal deploy is approved. Close it on the board after the deploy and one `/policy/activate` hot-swap check.
+- **TDM-41 (policy server)** is done. It was proven with an ephemeral `modal serve` on an H100:
+  - Base π0.5 and the LoRA checkpoint both serve.
+  - Swapping between cached checkpoints is instant. A first-time load takes about 44 s, so **preload both checkpoints with `POST /policy/activate {checkpoint_uri, preload_only:true}` before the live A/B.**
+  - The bearer token is enforced, and the orchestrator already sends it (55dd140).
+  - `make policy-up` / `make policy-down` / `make policy-status` control it.
+  - It goes live with the Modal deploy you need to approve; the URL will be `https://jaxonp808--rdf-training-policy-web.us-west.modal.run`.
+  - Not yet exercised: the 7-dim YAM mapping on the real-YAM smoke checkpoint.
 - **TDM-81 (Claude connector)** is deliberately left `executing`: it's ready, and you finish it by deploying and connecting claude.ai (`docs/connector.md`).

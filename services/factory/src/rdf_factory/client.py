@@ -49,10 +49,15 @@ You are the {role} of the Robot Deployment Factory (agent_session {agent_session
 - Do the task, then end your reply with exactly one final status line:
     DONE                                      when the task is complete, or
     WAITING_FOR <table>:<field><op><value>    when you need the physical world or another agent first,
-                                              e.g. WAITING_FOR dataset:accepted_count>=5
+                                              e.g. WAITING_FOR dataset:accepted_count>=5 timeout=2h
+  op is one of == != > >= < <=; rows are scoped to your ticket automatically. For anything richer, put one
+  JSON object on the line: {{"all":[...]}} / {{"any":[...]}} of leaves, a leaf {{"table","field","op","value"}}
+  with optional "where":{{col: value}} filters, or "agg":"count"|"sum"|"min"|"max", plus "timeout_s": N, e.g.
+    WAITING_FOR {{"table":"episode","agg":"count","where":{{"review_status":"accepted"}},"op":">=","value":3,"timeout_s":3600}}
 - Before a WAITING_FOR line, write your state (what is done, what is next) to {workdir}/resume_payload.json
   and also print it on one line as: RESUME_PAYLOAD {{"done": "...", "next": "..."}}
-- A later message starting with [resume-bridge] means the condition is now true: continue from resume_payload.json.
+- A later message starting with [resume-bridge] means the condition is now true (or, if it says
+  TIMED OUT, that its timeout passed first): it carries your resume_payload and a ticket snapshot. Continue from them.
 """
 
 # Appended to every follow-up message: droids forget the final-line rule after the first turn.

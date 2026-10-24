@@ -35,6 +35,15 @@ Predicate semantics (``parse_predicate`` / ``evaluate``):
   * ``{"all": [...]}`` / ``{"any": [...]}`` nest (TDM-13 validates depth <= 4).
   * A predicate naming an unknown table, or a ``ticket_id`` that has no ticket row, is logged as an
     error (and ``agent.wait_error`` once per wait). The session keeps waiting; nothing crashes.
+  * TDM-31 deadline: a top-level ``"timeout_s": N`` (seconds from the moment the session started
+    waiting) or ``"deadline_us": T`` (absolute). Without either, ``RESUME_BRIDGE_DEFAULT_TIMEOUT_S``
+    applies (default 6 h; ``0`` and ``"timeout_s": 0`` mean never). Once it passes while the predicate
+    is still false (or could not be parsed), the bridge claims the wake-up the same way and sends a
+    "timed out" message with the current values, so a droid is never parked forever. Checked on every
+    event and on the safety poll, so it fires within ``RESUME_BRIDGE_POLL_S`` of the deadline.
+
+Every resume message (TDM-31) ends with the saved ``resume_payload`` and a snapshot of the ticket
+(status, iteration, dataset counts, latest data plan / training run / eval run) from the bus mirror.
 
 Restart and race safety: nothing here is trusted across a restart. On boot, the bus snapshot fires
 the session handler for every waiting row and the predicate is evaluated against the fresh mirror.
@@ -81,11 +90,14 @@ BUS_TABLES = (
 
 # "raw" is the droid's original WAITING_FOR line (TDM-30 keeps it for display); "predicate" is
 # TDM-30's free-text fallback, which cannot be evaluated.
-LEAF_RESERVED = {"table", "field", "op", "value", "agg", "where", "raw", "predicate"}
+LEAF_RESERVED = {"table", "field", "op", "value", "agg", "where", "raw", "predicate",
+                 "timeout_s", "deadline_us"}  # TDM-31: wait metadata, never a row filter
 OPS: dict[str, Callable[[Any, Any], bool]] = {
     "==": operator.eq, "!=": operator.ne, ">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le,
 }
 AGGS = ("count", "sum", "min", "max")
+EV_TIMED_OUT = "agent.wait_timed_out"  # TDM-31
+DEFAULT_TIMEOUT_S = 6 * 3600.0
 
 
 def _env_f(name: str, default: float) -> float:
@@ -525,6 +537,8 @@ class Change:
     server_ts_us: int | None = None
 
     def describe(self, fields: set[str]) -> str:
+        if self.kind == "timeout":
+            return "the wait timed out (deadline passed, condition still false)"
         if self.kind in ("poll", "wait", "snapshot", "boot"):
             return {"poll": "found true on the safety poll", "wait": "already true when the wait started",
                     "snapshot": f"found true when the {self.table} snapshot loaded",
@@ -548,13 +562,17 @@ class Waiting:
     tables: set[str]
     error: str | None = None
     reported: set[str] = field(default_factory=set)  # error/warning keys already logged this wait
+    deadline_us: int | None = None  # TDM-31: wake with "timed out" after this (None = never)
+
+    def timeout_s(self) -> float | None:
+        return round((self.deadline_us - self.gen) / 1e6, 1) if self.deadline_us and self.gen else None
 
 
 class ResumeBridge:
     def __init__(self, bus: Any, *, writer_factory: Callable[[], Writer] | None = None,
                  resumer_factory: Callable[[], Resumer | None] | None = None, poll_s: float | None = None,
                  orphan_s: float | None = None, retry_delays: tuple[float, ...] = (1.0, 3.0, 9.0),
-                 bridge_id: str | None = None) -> None:
+                 bridge_id: str | None = None, default_timeout_s: float | None = None) -> None:
         self.bus = bus
         self._writer_factory = writer_factory or (lambda: make_writer())
         self._resumer_factory = resumer_factory or (lambda: make_resumer())
@@ -563,6 +581,8 @@ class ResumeBridge:
         self._resumer_loaded = False
         self.poll_s = poll_s if poll_s is not None else _env_f("RESUME_BRIDGE_POLL_S", 30.0)
         self.orphan_s = orphan_s if orphan_s is not None else _env_f("RESUME_BRIDGE_ORPHAN_S", 180.0)
+        self.default_timeout_s = (default_timeout_s if default_timeout_s is not None
+                                  else _env_f("RESUME_BRIDGE_DEFAULT_TIMEOUT_S", DEFAULT_TIMEOUT_S))
         self.retry_delays = retry_delays
         self.bridge_id = bridge_id or f"{socket.gethostname()}:{os.getpid()}"
         self.side = SideTables(self)
@@ -577,7 +597,8 @@ class ResumeBridge:
         self._stop = threading.Event()
         self._poller: threading.Thread | None = None
         self._no_resumer_logged = False
-        self.stats = {"evaluations": 0, "claims": 0, "lost": 0, "delivered": 0, "failed": 0, "recovered": 0}
+        self.stats = {"evaluations": 0, "claims": 0, "lost": 0, "delivered": 0, "failed": 0, "recovered": 0,
+                      "timed_out": 0}
 
     # ------------------------------------------------------------------ plumbing
     @property
@@ -650,7 +671,7 @@ class ResumeBridge:
                 w, fresh = self._track(sid, gen, row), True
         if fresh and (change is None or change.kind not in ("boot", "poll")):
             change = Change("agent_session", "wait", row, None, None)  # it may be true already
-        if w.pred is not None:
+        if w.pred is not None or w.deadline_us:  # TDM-31: a bad predicate can still time out
             self.check(sid, change or Change("agent_session", "wait", row, None, None))
 
     def session_deleted(self, row: dict) -> None:
@@ -674,7 +695,7 @@ class ResumeBridge:
             tables, err = tables_of(pred), None
         except PredicateError as e:
             pred, tables, err = None, set(), str(e)
-        w = Waiting(sid, gen, row, raw, pred, tables, err)
+        w = Waiting(sid, gen, row, raw, pred, tables, err, deadline_us=self._deadline(raw, gen))
         self.waiting[sid] = w
         if err:
             self._report_once(w, "parse", "error", "resume_bridge.bad_predicate", {"error": err}, True)
@@ -694,6 +715,18 @@ class ResumeBridge:
             "tables": sorted(tables), "side_tables": sorted(side)}})
         return w
 
+    def _deadline(self, raw: Any, gen: int) -> int | None:
+        """TDM-31: absolute deadline (us) from deadline_us / timeout_s / the default; None = never."""
+        meta = raw if isinstance(raw, dict) else {}
+        if meta.get("deadline_us"):
+            return _i(meta["deadline_us"]) or None
+        t = meta.get("timeout_s", self.default_timeout_s)
+        try:
+            t = float(t or 0)
+        except (TypeError, ValueError):
+            t = self.default_timeout_s
+        return gen + int(t * 1e6) if t > 0 and gen else None
+
     # ------------------------------------------------------------------ evaluation
     def table_changed(self, table: str, change: Change) -> None:
         with self._lock:
@@ -705,16 +738,24 @@ class ResumeBridge:
         """Evaluate one waiting session; on true, submit the claim. Returns what happened."""
         with self._lock:
             w = self.waiting.get(sid)
-            if w is None or w.pred is None:
+            if w is None or (w.pred is None and w.deadline_us is None):
                 return "not_waiting"
             key = (sid, w.gen)
             if key in self.outcomes or key in self.inflight:
                 return "handled"
-        self.stats["evaluations"] += 1
-        res = evaluate(w.pred, self.rows_for)
-        self._diagnose(w, res)
-        if not res.ok:
+        timed_out = bool(w.deadline_us) and _now_us() >= w.deadline_us  # type: ignore[operator]
+        if w.pred is None:  # unparseable predicate: only its deadline can wake it
+            if not timed_out:
+                return "not_waiting"
+            res = Evaluation(False)
+        else:
+            self.stats["evaluations"] += 1
+            res = evaluate(w.pred, self.rows_for)
+            self._diagnose(w, res)
+        if not res.ok and not timed_out:
             return "false"
+        if not res.ok:
+            change = Change("agent_session", "timeout", w.row, None, None)
         if self.resumer() is None:
             if not self._no_resumer_logged:
                 self._no_resumer_logged = True
@@ -744,9 +785,12 @@ class ResumeBridge:
         key = (w.session_id, w.gen)
         sid = w.session_id
         elapsed_s = round(max(0, _now_us() - w.gen) / 1e6, 3) if w.gen else None
-        desc = w.pred.describe() if w.pred else "?"
+        desc = w.pred.describe() if w.pred else (w.error or "?")
+        timed_out = change.kind == "timeout"
         changed = change.describe({l.field for l in leaves_of(w.pred) if l.field} if w.pred else set())
-        reason = f"predicate true: {desc}; {changed}; waited {elapsed_s}s (bridge {self.bridge_id})"[:900]
+        reason = (f"timed out after {elapsed_s}s (timeout {w.timeout_s()}s), still false: {desc} (bridge {self.bridge_id})"
+                  if timed_out else
+                  f"predicate true: {desc}; {changed}; waited {elapsed_s}s (bridge {self.bridge_id})")[:900]
         t0 = time.time()
         try:
             self.writer.call_reducer("agent_resume", sid, "", reason)
@@ -777,10 +821,17 @@ class ResumeBridge:
         log.info("resume_bridge.claimed", extra={"fields": {
             "session_id": sid, "predicate": desc, "changed": changed, "elapsed_s": elapsed_s,
             "claim_ms": round((t_claim - t0) * 1000, 1), "detect_ms": detect_ms}})
-        text = self.message(w, res, changed, elapsed_s)
+        if timed_out:
+            self.stats["timed_out"] += 1
+            self.event(EV_TIMED_OUT, {"session_id": sid, "ticket_id": _i(w.row.get("ticket_id")), "predicate": w.raw,
+                                      "predicate_text": desc, "elapsed_s": elapsed_s, "timeout_s": w.timeout_s(),
+                                      "bridge": self.bridge_id})
+            text = self.timeout_message(w, elapsed_s)
+        else:
+            text = self.message(w, res, changed, elapsed_s)
         self.deliver(w.row, text, reason=reason, predicate=w.raw, predicate_text=desc, changed=changed, elapsed_s=elapsed_s,
                      detect_ms=detect_ms, true_to_claim_ms=round((t_claim - t_true) * 1000, 1),
-                     matched=self._matched(res))
+                     matched=self._matched(res), timed_out=timed_out)
 
     def deliver(self, row: dict, text: str, **info: Any) -> bool:
         """Hand the wake-up to the Factory client (after a won claim, or an orphan recovery).
@@ -862,10 +913,66 @@ class ResumeBridge:
             rows = "; ".join(", ".join(f"{k}={_short(v, 60)}" for k, v in sorted(r.items())) for r in m["rows"])
             lines.append(f"Now true: {m['leaf']} -> {m['count']} row(s): {rows}")
         lines.append(f"agent_session {w.session_id} (ticket {_i(w.row.get('ticket_id'))}), waited {elapsed_s}s.")
+        return "\n".join(lines + self._tail(w))
+
+    def timeout_message(self, w: Waiting, elapsed_s: float | None) -> str:
+        """TDM-31: the wake-up when the deadline passed with the condition still false."""
+        lines = [
+            f"TIMED OUT: you waited {elapsed_s}s (timeout {w.timeout_s()}s) and the condition is still false.",
+            f"Waited for: {w.pred.describe() if w.pred else w.raw}",
+        ]
+        if w.pred is None:
+            lines.append(f"Your predicate could not be evaluated: {w.error}. Use WAITING_FOR <table>:<field><op><value> "
+                         "or a JSON predicate.")
+        else:
+            for leaf in leaves_of(w.pred):
+                rows = self.rows_for(leaf.table)
+                sel = filter_rows(leaf, rows) if rows is not None else []
+                now = (f"{len(sel)} row(s)" if leaf.agg == "count" or leaf.field is None else
+                       ", ".join(f"{leaf.field}={_short(r.get(leaf.field), 40)}" for r in sel[:5]) or "no matching row")
+                lines.append(f"Now: {leaf.describe()} -> {now}")
+        lines.append("Decide: wait again (end with a new WAITING_FOR line, optionally with a longer timeout), "
+                     "or report what is blocked and end with DONE.")
+        lines.append(f"agent_session {w.session_id} (ticket {_i(w.row.get('ticket_id'))}).")
+        return "\n".join(lines + self._tail(w))
+
+    def _tail(self, w: Waiting) -> list[str]:
+        out = []
         payload = w.row.get("resume_payload_json")
         if payload:
-            lines.append(f"Your saved resume_payload: {payload[:2000]}")
-        return "\n".join(lines)
+            out.append(f"Your saved resume_payload: {payload[:2000]}")
+        snap = self.ticket_snapshot(_i(w.row.get("ticket_id")))
+        if snap:
+            out.append(f"Current SpacetimeDB snapshot for ticket {_i(w.row.get('ticket_id'))}: {snap}")
+        return out
+
+    SNAPSHOT_FIELDS = {
+        "ticket": ("status", "iteration", "target_success", "budget_cents", "spent_cents", "deployed_checkpoint_uri"),
+        "dataset": ("accepted_count", "total_count", "lerobot_uri"),
+        "data_plan": ("id", "iteration", "data_type", "amount", "status"),
+        "training_run": ("id", "iteration", "status", "checkpoint_uri", "error"),
+        "eval_run": ("id", "kind", "status", "completed", "trials", "successes"),
+    }
+
+    def ticket_snapshot(self, ticket_id: int) -> str:
+        """One compact JSON object: the ticket row plus its dataset and newest plan / run / eval (bus mirror)."""
+        if not ticket_id:
+            return ""
+        snap: dict[str, Any] = {}
+        for table, fields in self.SNAPSHOT_FIELDS.items():
+            if not self.on_bus(table):
+                continue
+            try:
+                rows = self._bus_rows(table)
+            except Exception:  # noqa: BLE001 - a snapshot is a courtesy, never a failure
+                continue
+            key = "id" if table == "ticket" else "ticket_id"
+            mine = [r for r in rows if _i(r.get(key)) == ticket_id]
+            if not mine:
+                continue
+            r = max(mine, key=lambda x: _i(x.get("id")))
+            snap[table] = {f: r.get(f) for f in fields if f in r and r.get(f) not in (None, "")}
+        return json.dumps(snap, default=str, separators=(",", ":"))[:1500] if snap else ""
 
     # ------------------------------------------------------------------ poll + recovery
     def resync(self, why: str = "poll") -> None:
@@ -953,6 +1060,7 @@ class ResumeBridge:
         with self._lock:
             return {"bridge": self.bridge_id, "waiting": {s: w.pred.describe() if w.pred else w.error
                                                           for s, w in self.waiting.items()},
+                    "deadlines_us": {s: w.deadline_us for s, w in self.waiting.items() if w.deadline_us},
                     "side_tables": sorted(self.side.tables), "stats": dict(self.stats)}
 
 

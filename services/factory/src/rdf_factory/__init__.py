@@ -5,7 +5,8 @@ stream_events), ``FactoryConfig``, ``TurnResult``, ``ResumeConflict``. See servi
 """
 from .client import FactoryClient, TurnResult
 from .config import FactoryConfig
-from .events import DroidEvent, parse_waiting_for
+from .events import DroidEvent, parse_waiting_for, waiting_for_line
 from .mirror import ResumeConflict
 
-__all__ = ["FactoryClient", "FactoryConfig", "TurnResult", "ResumeConflict", "DroidEvent", "parse_waiting_for"]
+__all__ = ["FactoryClient", "FactoryConfig", "TurnResult", "ResumeConflict", "DroidEvent", "parse_waiting_for",
+           "waiting_for_line"]

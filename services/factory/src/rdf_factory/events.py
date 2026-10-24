@@ -165,16 +165,63 @@ DONE_RE = re.compile(r"(?:^|(?<=[.!?;:`]))\s*DONE\s*\.?\s*$", re.MULTILINE)
 # dataset:accepted_count>=5   episode:accepted_count >= 5   dataset.accepted_count==3
 _PRED_RE = re.compile(r"^(?P<table>[a-z_][a-z0-9_]*)[:.](?P<field>[a-z_][a-z0-9_]*)\s*"
                       r"(?P<op>==|!=|>=|<=|>|<|=)\s*(?P<value>\S+)")
+# TDM-31: optional wait deadline after the predicate: "... timeout=30m" / "timeout 2h" / "timeout=90"
+_TIMEOUT_RE = re.compile(r"\s+timeout\s*[=: ]\s*(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>[smhd]?)\b", re.IGNORECASE)
+_UNIT_S = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+# TDM-31: how a leaf is scoped to the droid's ticket. Most tables have a ticket_id column; the ticket
+# table is keyed by id; these have no ticket column at all, so adding ticket_id would make the leaf
+# never true (the bridge's equality filter needs the column). Keep in sync with spacetime/schema.md.
+TICKET_KEY_COLUMN = {"ticket": "id"}
+NO_TICKET_COLUMN = frozenset({"robot", "contributor", "contributor_presence", "qa_result", "eval_trial",
+                              "event_log", "service_identity"})
+# Keys that describe the wait, not a row filter (the bridge also ignores them inside a leaf).
+WAIT_META_KEYS = ("timeout_s", "deadline_us")
+
+
+def scope_to_ticket(pred: dict[str, Any], ticket_id: int) -> dict[str, Any]:
+    """Add the droid's ticket as a filter on every leaf that has none (recursing into all/any).
+
+    ``ticket`` leaves get ``id``; tables with no ticket column are left alone. A leaf that already
+    names ``ticket_id`` (or ``id`` for ``ticket``), at top level or in ``where``, is not touched.
+    """
+    if not ticket_id or not isinstance(pred, dict):
+        return pred
+    for kind in ("all", "any"):
+        if isinstance(pred.get(kind), list):
+            pred[kind] = [scope_to_ticket(c, ticket_id) for c in pred[kind]]
+            return pred
+    table = pred.get("table")
+    if not isinstance(table, str) or table in NO_TICKET_COLUMN:
+        return pred
+    col = TICKET_KEY_COLUMN.get(table, "ticket_id")
+    where = pred.get("where") if isinstance(pred.get("where"), dict) else {}
+    if col not in pred and col not in where:
+        pred[col] = ticket_id
+    return pred
+
+
+def parse_timeout(raw: str) -> tuple[str, float | None]:
+    """('dataset:accepted_count>=5', 1800.0) from 'dataset:accepted_count>=5 timeout=30m'."""
+    m = _TIMEOUT_RE.search(raw)
+    if not m:
+        return raw, None
+    secs = float(m["n"]) * _UNIT_S[m["unit"].lower()]
+    return (raw[: m.start()] + raw[m.end():]).strip(), secs
 
 
 def parse_waiting_for(text: str, *, ticket_id: int = 0) -> dict[str, Any] | None:
     """The LAST ``WAITING_FOR ...`` line of a turn as an agent_wait_for predicate, else None.
 
-    Accepted forms (the droid contract asks for the first):
+    Accepted forms (the droid contract asks for the first two):
       ``WAITING_FOR dataset:accepted_count>=5``      -> {table, field, op, value[, ticket_id]}
-      ``WAITING_FOR {"table": "dataset", ...}``       -> used verbatim (needs "table" or all/any)
+      ``WAITING_FOR {"table": "dataset", ...}``       -> used verbatim (needs "table" or all/any);
+                                                         agg / where / all / any as in TDM-27's bridge
       ``WAITING_FOR episodes>=5`` / free text          -> {table: <first word>, predicate: <raw>}
-    ``raw`` always holds the original line so the bridge (TDM-27) can show it.
+    Either form may carry a deadline (TDM-31): ``... timeout=30m`` after the text form, or
+    ``"timeout_s": 1800`` in the JSON; it is stored as ``timeout_s`` and the bridge wakes the droid
+    with a "timed out" message when it passes. With ``ticket_id``, every leaf without a ticket filter
+    is scoped to that ticket (``scope_to_ticket``). ``raw`` always holds the original line.
     """
     matches = WAITING_RE.findall(text or "")
     if not matches:
@@ -185,12 +232,11 @@ def parse_waiting_for(text: str, *, ticket_id: int = 0) -> dict[str, Any] | None
             p = json.loads(raw)
             if isinstance(p, dict) and ("table" in p or "all" in p or "any" in p):
                 p.setdefault("raw", raw)
-                if ticket_id and "table" in p:
-                    p.setdefault("ticket_id", ticket_id)
-                return p
+                return scope_to_ticket(p, ticket_id)
         except json.JSONDecodeError:
             pass
-    m = _PRED_RE.match(raw)
+    body, timeout_s = parse_timeout(raw)
+    m = _PRED_RE.match(body)
     if m:
         value: Any = m["value"].rstrip(".,;")
         try:
@@ -200,11 +246,33 @@ def parse_waiting_for(text: str, *, ticket_id: int = 0) -> dict[str, Any] | None
         p = {"table": m["table"], "field": m["field"], "op": "==" if m["op"] == "=" else m["op"],
              "value": value, "raw": raw}
     else:
-        word = re.match(r"[A-Za-z_][A-Za-z0-9_]*", raw)
-        p = {"table": (word.group(0).lower() if word else "unknown"), "predicate": raw, "raw": raw}
-    if ticket_id:
-        p["ticket_id"] = ticket_id
-    return p
+        word = re.match(r"[A-Za-z_][A-Za-z0-9_]*", body)
+        p = {"table": (word.group(0).lower() if word else "unknown"), "predicate": body, "raw": raw}
+    if timeout_s is not None:
+        p["timeout_s"] = timeout_s
+    return scope_to_ticket(p, ticket_id)
+
+
+def waiting_for_line(predicate: dict[str, Any] | str, *, timeout_s: float | None = None) -> str:
+    """The final line a droid (or a droid tool) prints to park: the inverse of ``parse_waiting_for``.
+
+    A simple leaf {table, field, op, value} becomes the text form; anything else (all/any, agg,
+    where, extra filters) is compact JSON. ``timeout_s`` adds the deadline.
+    """
+    if isinstance(predicate, str):
+        line = predicate.removeprefix("WAITING_FOR ").strip()
+        return f"WAITING_FOR {line}" + (f" timeout={int(timeout_s)}s" if timeout_s else "")
+    p = {k: v for k, v in predicate.items() if k != "raw"}
+    if timeout_s is not None:
+        p["timeout_s"] = timeout_s
+    simple = (set(p) <= {"table", "field", "op", "value", "timeout_s"} and {"table", "field", "value"} <= set(p)
+              and isinstance(p["value"], (str, int, float, bool)) and not re.search(r"\s", str(p["value"])))
+    if simple:
+        value = p["value"] if isinstance(p["value"], str) else json.dumps(p["value"])
+        t = p.get("timeout_s")
+        return (f"WAITING_FOR {p['table']}:{p['field']}{p.get('op', '==')}{value}"
+                + (f" timeout={int(t)}s" if t else ""))
+    return "WAITING_FOR " + json.dumps(p, separators=(",", ":"), default=str)
 
 
 def says_done(text: str) -> bool:

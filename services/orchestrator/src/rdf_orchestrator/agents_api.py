@@ -134,3 +134,9 @@ def get_agents_replay_source() -> dict:
     sessions, events = agents_feed.load_recorded_events(paths)
     return {"v": agents_feed.FEED_VERSION, "replay": True, "sessions": sessions, "events": events,
             "replay_source": [p.name for p in paths]}
+
+
+# TDM-31: POST /agents/{session_id}/wait lives in agents_wait_api; mounted here so app.py needs no change.
+from .agents_wait_api import agents_wait_router  # noqa: E402
+
+agents_router.include_router(agents_wait_router)

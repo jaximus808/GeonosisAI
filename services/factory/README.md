@@ -58,6 +58,28 @@ Before a `WAITING_FOR` line, the droid writes `resume_payload.json` in its workd
 
 A turn with neither line leaves the session `paused` (idle, can be messaged). Every follow-up message (`send`, `resume`) repeats a one-line reminder of the rule.
 
+## Wait-for protocol (TDM-31)
+
+The whole path is: droid final line -> `parse_waiting_for` -> `agent_wait_for` (TDM-30 client) -> TDM-27 bridge evaluates on every row change -> `agent_resume` claim -> `FactoryClient.resume` with the bridge's message. The contract text above (`client.CONTRACT`) is the one snippet every droid gets, so droid briefs should not restate it; they only say *which* line to end with. Droid tools that build the line use `rdf_factory.waiting_for_line(predicate, timeout_s=None)`.
+
+**Predicate forms** (all evaluated by `rdf_orchestrator.resume_bridge.parse_predicate` / `evaluate`):
+
+| Droid writes | Stored predicate |
+|---|---|
+| `WAITING_FOR dataset:accepted_count>=5` | `{"table":"dataset","field":"accepted_count","op":">=","value":5,"ticket_id":T}` |
+| `WAITING_FOR dataset:accepted_count>=5 timeout=2h` | same plus `"timeout_s":7200` (`s`/`m`/`h`/`d`, bare number = seconds) |
+| `WAITING_FOR ticket:status==train` | `{..., "id":T}`: the ticket table is keyed by `id` |
+| `WAITING_FOR {"all":[leaf, ...]}` / `{"any":[...]}` | verbatim, nested up to 4 deep |
+| `WAITING_FOR {"table":"episode","agg":"count","where":{"review_status":"accepted"},"op":">=","value":3}` | `agg` = count / sum / min / max over the filtered rows; `where` and any extra key are equality filters |
+| JSON with `"timeout_s": N` (or `"deadline_us": T`) at the top level | wait metadata, never a row filter |
+
+- **Ticket scoping:** with a ticket, every leaf that has no ticket filter gets one (`ticket_id`, or `id` for `ticket`). `robot`, `contributor`, `qa_result`, `eval_trial`, `event_log` have no ticket column and are left unscoped. Before TDM-31 a `ticket:` or `qa_result:` wait got a `ticket_id` filter on a table without that column and could never be true.
+- **Timeout:** the bridge wakes the droid with `[resume-bridge] TIMED OUT: ...` (current values, payload, snapshot, "wait again or report and end DONE") once the deadline passes with the predicate still false, and logs `agent.wait_timed_out`. A predicate the bridge cannot parse can only be woken by its deadline. No timeout given = `RESUME_BRIDGE_DEFAULT_TIMEOUT_S` (default 21600 = 6 h); `timeout_s: 0` = never. Checked on every event and on the 30 s safety poll.
+- **Resume message:** predicate, what changed, the matched rows, the saved `resume_payload`, and `Current SpacetimeDB snapshot for ticket T: {"ticket":{status, iteration, ...},"dataset":{accepted_count, total_count, lerobot_uri},"data_plan":..,"training_run":..,"eval_run":..}` (newest row of each).
+- **HTTP:** `POST /agents/{session_id}/wait {"predicate": "<text>" | {...}, "resume_payload": {...}, "timeout_s": N}` on the orchestrator (`agents_wait_api.py`) parses and scopes the same way, validates with the bridge's parser (422 if it could never be evaluated, 404 unknown, 409 done/failed) and calls `agent_wait_for`. It is for orchestrator code, scripts, the MCP connector or an operator parking a droid whose turn ended `paused`. A droid itself parks with the final line; calling the route mid-turn would be undone when its turn ends `paused`.
+- **Tests:** `services/orchestrator/tests/test_tdm31_wait_protocol.py` (parse -> agent_wait_for -> bridge -> resume for text, all, any, agg+where, ticket table, both timeout cases, the HTTP route) and `services/factory/tests/test_tdm31_wait_protocol.py`.
+- **Proof (2026-10-24, real local droid, throwaway SpacetimeDB 127.0.0.1:3131):** `cd services/orchestrator && uv run python scripts/tdm31_wait_proof.py`. A trivial data_droid parked with `WAITING_FOR dataset:accepted_count>=1 timeout=1h` (stored ticket-scoped with `timeout_s` 3600). A manual `submit_review(accepted)` woke it through the bridge in 597 ms, and turn 2 replied `PAYLOAD_NEXT=assemble-dataset-31 ACCEPTED=1`, both values taken from the bridge message, then `DONE`. Native resume on the same Factory session, one `agent.resumed`, 8/8 checks, 2 turns, 5,168 credits.
+
 ## What lands in SpacetimeDB
 
 | When | Reducer |

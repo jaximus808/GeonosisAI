@@ -13,8 +13,8 @@ The orchestrator's bus (``bus.py``) only talks to the small surface below:
     await client.call_reducer("append_event", [...])
     client.stop()
 
-The wire protocol lives in the TDM-7 spike client (``spikes/tdm-7-spacetime/stdb_ws.py``) until
-TDM-16 promotes it to a shared package. Swapping is the single import line marked SWAP below.
+The wire protocol lives in the TDM-16 shared package (``rdf_common.stdb_ws``, the promoted TDM-7
+spike client).
 
 Rows are normalised using the published schema so both wire shapes (JSON objects in the initial
 subscription, positional arrays in transaction updates) look the same to handlers:
@@ -27,18 +27,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import urllib.request
-from pathlib import Path
 from typing import Any, Callable
 
-# services/orchestrator/src/rdf_orchestrator/stdb.py -> repo root is parents[4]
-_SPIKE_DIR = Path(__file__).resolve().parents[4] / "spikes" / "tdm-7-spacetime"
-if str(_SPIKE_DIR) not in sys.path:
-    sys.path.insert(0, str(_SPIKE_DIR))
-
-# SWAP: when TDM-16 lands, import these from the shared package instead (same names).
-from stdb_ws import StdbSubscriber, call_reducer_http, sql, ts_micros  # noqa: E402
+# TDM-16 shared package (drop-in for the TDM-7 spike client, same names and raw-row semantics).
+from rdf_common.stdb_ws import StdbSubscriber, call_reducer_http, sql, ts_micros
 
 __all__ = ["Row", "SpacetimeClient", "call_reducer_http", "sql", "ts_micros", "load_schema"]
 

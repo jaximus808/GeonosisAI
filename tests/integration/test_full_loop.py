@@ -58,7 +58,8 @@ def test_ticket_reaches_shipped(stack, robot_id, event_watch):
                          '{"eval_trials": 10, "target_episodes": 3, "max_iterations": 3}')
         if driver == "orchestrator":
             contributor = FakeContributor(st.host, st.db, ticket_id=tid).start()  # does the dispatcher's tasks
-            st.spawn_orchestrator(extra_env={"RDF_MODAL_STUB": "1"})
+            # TDM-22: nobody clicks "approve spend" in a test, so the flywheel auto-approves within budget.
+            st.spawn_orchestrator(extra_env={"RDF_MODAL_STUB": "1", "FLYWHEEL_AUTO_APPROVE_MAX_CENTS": "5000"})
             wait_for(lambda: st.sql(f"SELECT * FROM ticket WHERE id = {tid}")[0]["status"] in ("shipped", "failed"),
                      LOOP_TIMEOUT_S, f"ticket {tid} shipped (orchestrator log: {st.logs / 'orchestrator.log'})", every=1)
         else:

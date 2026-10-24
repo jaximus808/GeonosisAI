@@ -59,6 +59,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
 
     from .media_api import media_router  # TDM-4: /uploads/sign, /media/sign, /media/list, /media/healthz
     app.include_router(media_router)
+    from .flywheel_api import router as flywheel_router  # TDM-22: /tickets/{id}/advance, /flywheel/*
+    app.include_router(flywheel_router)
 
     return app
 

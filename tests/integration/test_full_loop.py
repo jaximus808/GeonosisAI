@@ -7,8 +7,8 @@ Driver selection (env ``RDF_LOOP_DRIVER``, or ``make test-loop DRIVER=...``):
   * ``orchestrator``  the real orchestrator process (rdf-orchestrator against the local DB) drives
                       the flywheel; the test only creates the ticket and watches. Skipped until the
                       TDM-22 flywheel is registered (``rdf_orchestrator.handlers.flywheel``).
-                      TODO(TDM-26/TDM-28 follow-up): the dispatcher's paid tasks need a fake
-                      contributor that claims them and drives start_teleop on the fake robot.
+                      The dispatcher's paid tasks are claimed and done by
+                      ``tdm26_fake_contributor.FakeContributor`` ([FAKE], local only).
 Both modes assert the same end state: shipped within 3 minutes with a data_plan, at least one
 training_run done, at least two finalized eval_runs, every eval_trial tagged [FAKE], and an
 unbroken append-only event_log.
@@ -24,6 +24,7 @@ from conftest import assert_event_log_unbroken, new_ticket
 from harness import wait_for
 from scripted_flywheel import ScriptedFlywheel
 from stub_modal import FAKE_CKPT_PREFIX, StubTrainer
+from tdm26_fake_contributor import FakeContributor
 
 LOOP_TIMEOUT_S = 180
 
@@ -51,10 +52,12 @@ def test_ticket_reaches_shipped(stack, robot_id, event_watch):
     trainer = StubTrainer(st.client(), mode="stub-call" if driver == "orchestrator" and has_training_handler
                           else "queued").start()
     t0 = time.monotonic()
+    contributor = None
     try:
         tid = new_ticket(st, robot_id, "put the cup in the bin (full loop)",
                          '{"eval_trials": 10, "target_episodes": 3, "max_iterations": 3}')
         if driver == "orchestrator":
+            contributor = FakeContributor(st.host, st.db, ticket_id=tid).start()  # does the dispatcher's tasks
             st.spawn_orchestrator(extra_env={"RDF_MODAL_STUB": "1"})
             wait_for(lambda: st.sql(f"SELECT * FROM ticket WHERE id = {tid}")[0]["status"] in ("shipped", "failed"),
                      LOOP_TIMEOUT_S, f"ticket {tid} shipped (orchestrator log: {st.logs / 'orchestrator.log'})", every=1)
@@ -62,6 +65,8 @@ def test_ticket_reaches_shipped(stack, robot_id, event_watch):
             ScriptedFlywheel(st, robot_id).run(tid)
     finally:
         trainer.stop()
+        if contributor is not None:
+            contributor.stop()
     elapsed = time.monotonic() - t0
     print(f"\n[tdm28] driver={driver} ticket {tid} finished in {elapsed:.1f}s")
 

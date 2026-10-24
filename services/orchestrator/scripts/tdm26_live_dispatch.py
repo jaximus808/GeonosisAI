@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tests" / "integration"))
 
 from harness import LocalStack, wait_for
+from tdm26_fake_contributor import FakeContributor
 from rdf_common.spacetime_client import SpacetimeClient, create_identity
 
 from rdf_orchestrator import dispatcher as dsp
@@ -200,6 +201,26 @@ def main() -> None:
         cmd = wait_for(lambda: st.newest("robot_command", f"robot_id = {robot_id} AND type = 'reset_request'"), 5, "cmd")
         wait_for(lambda: st.newest("robot_command", f"id = {int(cmd['id'])}")["status"] == "done", 20, "fake reset done")
         check("D: fake robot completed the reset_request", True, f"command {cmd['id']}")
+
+        # ---------------------------------------------------------------- E
+        fc = FakeContributor(st.host, st.db, ticket_id=ta).start()
+        try:
+            wait_for(lambda: len(fc.done) >= 4 or fc.errors, 60, "fake contributor did 3 demos + 1 reset")
+        finally:
+            fc.stop()
+        check("E: fake contributor ran without errors", not fc.errors, fc.errors)
+        demos = [x for x in fc.done if x["type"] == "clean_teleop"]
+        check("E: 3 demo tasks claimed, teleop'd on the fake robot, completed", len(demos) == 3
+              and all(x["episode_id"] for x in demos), [(x["task_id"], x["episode_id"]) for x in demos])
+        eps = st.sql(f"SELECT * FROM episode WHERE ticket_id = {ta} AND kind = 'clean_teleop'")
+        check("E: 3 pending clean_teleop episodes linked to the tasks",
+              sorted(int(e["task_id"]) for e in eps) == sorted(x["task_id"] for x in demos)
+              and all(e["review_status"] == "pending" for e in eps))
+        wait_for(lambda: [c for c in st.sql(f"SELECT * FROM robot_command WHERE robot_id = {robot_id}")
+                          if c["type"] == "resume_policy" and json.loads(c["payload_json"]).get("task_id") == res.task_id],
+                 5, "resume after the fake contributor's reset")
+        check("E: fake contributor's reset -> resume_policy", True, f"task {res.task_id}")
+        bt.settle()
         st_a = d.plan_status(pa)
         check("TDM-22 interface: plan_status", st_a.state == "collecting" and st_a.in_flight == 3 and not st_a.done,
               st_a.to_dict())

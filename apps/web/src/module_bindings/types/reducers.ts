@@ -6,6 +6,7 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AbortEvalRunReducer from "../abort_eval_run_reducer";
 import AcceptDatasetOfferReducer from "../accept_dataset_offer_reducer";
 import AckRobotCommandReducer from "../ack_robot_command_reducer";
 import AgentResumeReducer from "../agent_resume_reducer";
@@ -32,6 +33,7 @@ import FinalizeOfferReducer from "../finalize_offer_reducer";
 import HeartbeatClaimReducer from "../heartbeat_claim_reducer";
 import IngestPurchasedEpisodeReducer from "../ingest_purchased_episode_reducer";
 import IssueRobotCommandReducer from "../issue_robot_command_reducer";
+import MarkCheckpointDeployedReducer from "../mark_checkpoint_deployed_reducer";
 import MarkPaymentAwaitingOnboardingReducer from "../mark_payment_awaiting_onboarding_reducer";
 import MarkPaymentFailedReducer from "../mark_payment_failed_reducer";
 import MarkPaymentPaidReducer from "../mark_payment_paid_reducer";
@@ -51,6 +53,8 @@ import ReserveTaskPaymentReducer from "../reserve_task_payment_reducer";
 import RevokeServiceIdentityReducer from "../revoke_service_identity_reducer";
 import RobotHeartbeatReducer from "../robot_heartbeat_reducer";
 import SetContributorPayoutAccountReducer from "../set_contributor_payout_account_reducer";
+import SetDatasetLerobotUriReducer from "../set_dataset_lerobot_uri_reducer";
+import SetTicketRobotReducer from "../set_ticket_robot_reducer";
 import SetTicketStatusReducer from "../set_ticket_status_reducer";
 import SetTrainingStatusReducer from "../set_training_status_reducer";
 import StartEvalRunReducer from "../start_eval_run_reducer";
@@ -58,6 +62,7 @@ import SubmitReviewReducer from "../submit_review_reducer";
 import UpdateRunSettingsReducer from "../update_run_settings_reducer";
 import UpsertAgentSessionReducer from "../upsert_agent_session_reducer";
 
+export type AbortEvalRunParams = __Infer<typeof AbortEvalRunReducer>;
 export type AcceptDatasetOfferParams = __Infer<typeof AcceptDatasetOfferReducer>;
 export type AckRobotCommandParams = __Infer<typeof AckRobotCommandReducer>;
 export type AgentResumeParams = __Infer<typeof AgentResumeReducer>;
@@ -84,6 +89,7 @@ export type FinalizeOfferParams = __Infer<typeof FinalizeOfferReducer>;
 export type HeartbeatClaimParams = __Infer<typeof HeartbeatClaimReducer>;
 export type IngestPurchasedEpisodeParams = __Infer<typeof IngestPurchasedEpisodeReducer>;
 export type IssueRobotCommandParams = __Infer<typeof IssueRobotCommandReducer>;
+export type MarkCheckpointDeployedParams = __Infer<typeof MarkCheckpointDeployedReducer>;
 export type MarkPaymentAwaitingOnboardingParams = __Infer<typeof MarkPaymentAwaitingOnboardingReducer>;
 export type MarkPaymentFailedParams = __Infer<typeof MarkPaymentFailedReducer>;
 export type MarkPaymentPaidParams = __Infer<typeof MarkPaymentPaidReducer>;
@@ -103,6 +109,8 @@ export type ReserveTaskPaymentParams = __Infer<typeof ReserveTaskPaymentReducer>
 export type RevokeServiceIdentityParams = __Infer<typeof RevokeServiceIdentityReducer>;
 export type RobotHeartbeatParams = __Infer<typeof RobotHeartbeatReducer>;
 export type SetContributorPayoutAccountParams = __Infer<typeof SetContributorPayoutAccountReducer>;
+export type SetDatasetLerobotUriParams = __Infer<typeof SetDatasetLerobotUriReducer>;
+export type SetTicketRobotParams = __Infer<typeof SetTicketRobotReducer>;
 export type SetTicketStatusParams = __Infer<typeof SetTicketStatusReducer>;
 export type SetTrainingStatusParams = __Infer<typeof SetTrainingStatusReducer>;
 export type StartEvalRunParams = __Infer<typeof StartEvalRunReducer>;

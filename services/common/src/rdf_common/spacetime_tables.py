@@ -62,6 +62,38 @@ class Contributor(_RowMixin):
 
 
 @dataclass(slots=True)
+class ContributorContact(_RowMixin):
+    """Row of `contributor_contact` (private; primary key: contributor_id)."""
+
+    TABLE = "contributor_contact"
+    PRIMARY_KEY = ('contributor_id',)
+    contributor_id: int
+    email: str
+    updated_at: Micros
+
+
+@dataclass(slots=True)
+class ContributorPresence(_RowMixin):
+    """Row of `contributor_presence` (public; primary key: contributor_id)."""
+
+    TABLE = "contributor_presence"
+    PRIMARY_KEY = ('contributor_id',)
+    contributor_id: int
+    last_seen: Micros
+    page: str
+
+
+@dataclass(slots=True)
+class ContributorPresenceSweep(_RowMixin):
+    """Row of `contributor_presence_sweep` (private; primary key: scheduled_id)."""
+
+    TABLE = "contributor_presence_sweep"
+    PRIMARY_KEY = ('scheduled_id',)
+    scheduled_id: int
+    scheduled_at: Any
+
+
+@dataclass(slots=True)
 class DataPlan(_RowMixin):
     """Row of `data_plan` (public; primary key: id)."""
 
@@ -312,6 +344,7 @@ class RunSettings(_RowMixin):
     max_iterations: int
     hyperparams_json: str
     updated_at: Micros
+    data_type_override: str
 
 
 @dataclass(slots=True)
@@ -395,6 +428,9 @@ class TrainingRun(_RowMixin):
 ROW_TYPES: dict[str, type] = {
     "agent_session": AgentSession,
     "contributor": Contributor,
+    "contributor_contact": ContributorContact,
+    "contributor_presence": ContributorPresence,
+    "contributor_presence_sweep": ContributorPresenceSweep,
     "data_plan": DataPlan,
     "dataset": Dataset,
     "dataset_offer": DatasetOffer,
@@ -429,6 +465,9 @@ class Reducers:
     def __init__(self, client: _Caller):
         self._c = client
 
+    def abort_eval_run(self, *, eval_run_id: int, status: str, reason: str) -> Any:
+        return self._c.call_reducer("abort_eval_run", eval_run_id, status, reason)
+
     def accept_dataset_offer(self, *, offer_id: int) -> Any:
         return self._c.call_reducer("accept_dataset_offer", offer_id)
 
@@ -446,6 +485,9 @@ class Reducers:
 
     def append_event(self, *, actor: str, type: str, payload_json: str) -> Any:
         return self._c.call_reducer("append_event", actor, type, payload_json)
+
+    def approve_spend(self, *, ticket_id: int, data_plan_id: int, approved_cents: int, approved_by: str) -> Any:
+        return self._c.call_reducer("approve_spend", ticket_id, data_plan_id, approved_cents, approved_by)
 
     def bootstrap_owner(self) -> Any:
         return self._c.call_reducer("bootstrap_owner")
@@ -465,8 +507,17 @@ class Reducers:
     def complete_task(self, *, task_id: int, result_json: str) -> Any:
         return self._c.call_reducer("complete_task", task_id, result_json)
 
+    def contributor_heartbeat(self, *, page: str) -> Any:
+        return self._c.call_reducer("contributor_heartbeat", page)
+
+    def contributor_offline(self) -> Any:
+        return self._c.call_reducer("contributor_offline")
+
     def create_dataset_offer(self, *, ticket_id: int, seller_id: int, price_per_episode_cents: int, source_uri: str | None) -> Any:
         return self._c.call_reducer("create_dataset_offer", ticket_id, seller_id, price_per_episode_cents, source_uri)
+
+    def create_episode(self, *, ticket_id: int, task_id: int, contributor_id: int, kind: str, storage_uri: str, actions_uri: str, cameras_json: str, frame_count: int, duration_ms: int, takeover_ts: Micros | None, handback_ts: Micros | None, success: bool | None, checkpoint_uri: str | None) -> Any:
+        return self._c.call_reducer("create_episode", ticket_id, task_id, contributor_id, kind, storage_uri, actions_uri, cameras_json, frame_count, duration_ms, takeover_ts, handback_ts, success, checkpoint_uri)
 
     def create_task(self, *, ticket_id: int, type: str, price_cents: int, payload_json: str) -> Any:
         return self._c.call_reducer("create_task", ticket_id, type, price_cents, payload_json)
@@ -495,6 +546,21 @@ class Reducers:
     def issue_robot_command(self, *, robot_id: int, type: str, payload_json: str, ticket_id: int) -> Any:
         return self._c.call_reducer("issue_robot_command", robot_id, type, payload_json, ticket_id)
 
+    def mark_checkpoint_deployed(self, *, ticket_id: int, training_run_id: int, eval_run_id: int, note: str) -> Any:
+        return self._c.call_reducer("mark_checkpoint_deployed", ticket_id, training_run_id, eval_run_id, note)
+
+    def mark_payment_awaiting_onboarding(self, *, payment_id: int, note: str) -> Any:
+        return self._c.call_reducer("mark_payment_awaiting_onboarding", payment_id, note)
+
+    def mark_payment_failed(self, *, payment_id: int, error: str) -> Any:
+        return self._c.call_reducer("mark_payment_failed", payment_id, error)
+
+    def mark_payment_paid(self, *, payment_id: int, provider: str, provider_ref: str) -> Any:
+        return self._c.call_reducer("mark_payment_paid", payment_id, provider, provider_ref)
+
+    def mark_payment_reversed(self, *, payment_id: int, reason: str) -> Any:
+        return self._c.call_reducer("mark_payment_reversed", payment_id, reason)
+
     def queue_training_run(self, *, ticket_id: int, episode_ids_json: str, hyperparams_json: str) -> Any:
         return self._c.call_reducer("queue_training_run", ticket_id, episode_ids_json, hyperparams_json)
 
@@ -510,6 +576,9 @@ class Reducers:
     def record_qa_result(self, *, episode_id: int, check_name: str, passed: bool, detail_json: str) -> Any:
         return self._c.call_reducer("record_qa_result", episode_id, check_name, passed, detail_json)
 
+    def register_contributor(self, *, name: str, email: str, devices: list[str], kind: str, source_ticket_id: int) -> Any:
+        return self._c.call_reducer("register_contributor", name, email, devices, kind, source_ticket_id)
+
     def register_robot(self, *, name: str, embodiment: str, adapter_version: str, camera_config_json: str) -> Any:
         return self._c.call_reducer("register_robot", name, embodiment, adapter_version, camera_config_json)
 
@@ -519,11 +588,29 @@ class Reducers:
     def release_task(self, *, task_id: int) -> Any:
         return self._c.call_reducer("release_task", task_id)
 
+    def reserve_dataset_payment(self, *, dataset_offer_id: int, batch_ref: str) -> Any:
+        return self._c.call_reducer("reserve_dataset_payment", dataset_offer_id, batch_ref)
+
+    def reserve_payment(self, *, episode_id: int) -> Any:
+        return self._c.call_reducer("reserve_payment", episode_id)
+
+    def reserve_task_payment(self, *, task_id: int) -> Any:
+        return self._c.call_reducer("reserve_task_payment", task_id)
+
     def revoke_service_identity(self, *, identity: str) -> Any:
         return self._c.call_reducer("revoke_service_identity", identity)
 
     def robot_heartbeat(self, *, robot_id: int, status: str) -> Any:
         return self._c.call_reducer("robot_heartbeat", robot_id, status)
+
+    def set_contributor_payout_account(self, *, contributor_id: int, stripe_account_id: str, payouts_enabled: bool) -> Any:
+        return self._c.call_reducer("set_contributor_payout_account", contributor_id, stripe_account_id, payouts_enabled)
+
+    def set_dataset_lerobot_uri(self, *, ticket_id: int, lerobot_uri: str, episode_ids_json: str, summary_json: str) -> Any:
+        return self._c.call_reducer("set_dataset_lerobot_uri", ticket_id, lerobot_uri, episode_ids_json, summary_json)
+
+    def set_ticket_robot(self, *, ticket_id: int, robot_id: int, by: str, reason: str) -> Any:
+        return self._c.call_reducer("set_ticket_robot", ticket_id, robot_id, by, reason)
 
     def set_ticket_status(self, *, ticket_id: int, status: str, note: str) -> Any:
         return self._c.call_reducer("set_ticket_status", ticket_id, status, note)
@@ -534,6 +621,12 @@ class Reducers:
     def start_eval_run(self, *, ticket_id: int, checkpoint_uri: str, trials: int) -> Any:
         return self._c.call_reducer("start_eval_run", ticket_id, checkpoint_uri, trials)
 
+    def submit_review(self, *, episode_id: int, accepted: bool, reason: str, metrics_json: str) -> Any:
+        return self._c.call_reducer("submit_review", episode_id, accepted, reason, metrics_json)
+
+    def sweep_contributor_presence(self, *, timer: dict[str, Any]) -> Any:
+        return self._c.call_reducer("sweep_contributor_presence", timer)
+
     def update_run_settings(self, *, ticket_id: int, patch_json: str) -> Any:
         return self._c.call_reducer("update_run_settings", ticket_id, patch_json)
 
@@ -541,6 +634,6 @@ class Reducers:
         return self._c.call_reducer("upsert_agent_session", id, role, factory_session_id, status, current_step, name, ticket_id)
 
 
-TABLES = ('agent_session', 'contributor', 'data_plan', 'dataset', 'dataset_offer', 'episode', 'eval_run', 'eval_trial', 'event_log', 'failure_cluster', 'payment', 'qa_result', 'review', 'robot', 'robot_command', 'run_settings', 'service_identity', 'task', 'ticket', 'training_run')
-PUBLIC_TABLES = ('agent_session', 'contributor', 'data_plan', 'dataset', 'dataset_offer', 'episode', 'eval_run', 'eval_trial', 'event_log', 'failure_cluster', 'payment', 'qa_result', 'review', 'robot', 'robot_command', 'run_settings', 'task', 'ticket', 'training_run')
-REDUCERS = ('accept_dataset_offer', 'ack_robot_command', 'agent_resume', 'agent_step', 'agent_wait_for', 'append_event', 'bootstrap_owner', 'cancel_dataset_offer', 'cancel_task', 'claim_task', 'complete_robot_command', 'complete_task', 'create_dataset_offer', 'create_task', 'create_ticket', 'expire_task_leases', 'fail_robot_command', 'finalize_eval_run', 'finalize_offer', 'heartbeat_claim', 'ingest_purchased_episode', 'init', 'issue_robot_command', 'queue_training_run', 'record_data_plan', 'record_eval_trial', 'record_failure_cluster', 'record_qa_result', 'register_robot', 'register_service_identity', 'release_task', 'revoke_service_identity', 'robot_heartbeat', 'set_ticket_status', 'set_training_status', 'start_eval_run', 'update_run_settings', 'upsert_agent_session')
+TABLES = ('agent_session', 'contributor', 'contributor_contact', 'contributor_presence', 'contributor_presence_sweep', 'data_plan', 'dataset', 'dataset_offer', 'episode', 'eval_run', 'eval_trial', 'event_log', 'failure_cluster', 'payment', 'qa_result', 'review', 'robot', 'robot_command', 'run_settings', 'service_identity', 'task', 'ticket', 'training_run')
+PUBLIC_TABLES = ('agent_session', 'contributor', 'contributor_presence', 'data_plan', 'dataset', 'dataset_offer', 'episode', 'eval_run', 'eval_trial', 'event_log', 'failure_cluster', 'payment', 'qa_result', 'review', 'robot', 'robot_command', 'run_settings', 'task', 'ticket', 'training_run')
+REDUCERS = ('abort_eval_run', 'accept_dataset_offer', 'ack_robot_command', 'agent_resume', 'agent_step', 'agent_wait_for', 'append_event', 'approve_spend', 'bootstrap_owner', 'cancel_dataset_offer', 'cancel_task', 'claim_task', 'complete_robot_command', 'complete_task', 'contributor_heartbeat', 'contributor_offline', 'create_dataset_offer', 'create_episode', 'create_task', 'create_ticket', 'expire_task_leases', 'fail_robot_command', 'finalize_eval_run', 'finalize_offer', 'heartbeat_claim', 'ingest_purchased_episode', 'init', 'issue_robot_command', 'mark_checkpoint_deployed', 'mark_payment_awaiting_onboarding', 'mark_payment_failed', 'mark_payment_paid', 'mark_payment_reversed', 'queue_training_run', 'record_data_plan', 'record_eval_trial', 'record_failure_cluster', 'record_qa_result', 'register_contributor', 'register_robot', 'register_service_identity', 'release_task', 'reserve_dataset_payment', 'reserve_payment', 'reserve_task_payment', 'revoke_service_identity', 'robot_heartbeat', 'set_contributor_payout_account', 'set_dataset_lerobot_uri', 'set_ticket_robot', 'set_ticket_status', 'set_training_status', 'start_eval_run', 'submit_review', 'sweep_contributor_presence', 'update_run_settings', 'upsert_agent_session')

@@ -34,6 +34,7 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AbortEvalRunReducer from "./abort_eval_run_reducer";
 import AcceptDatasetOfferReducer from "./accept_dataset_offer_reducer";
 import AckRobotCommandReducer from "./ack_robot_command_reducer";
 import AgentResumeReducer from "./agent_resume_reducer";
@@ -60,6 +61,7 @@ import FinalizeOfferReducer from "./finalize_offer_reducer";
 import HeartbeatClaimReducer from "./heartbeat_claim_reducer";
 import IngestPurchasedEpisodeReducer from "./ingest_purchased_episode_reducer";
 import IssueRobotCommandReducer from "./issue_robot_command_reducer";
+import MarkCheckpointDeployedReducer from "./mark_checkpoint_deployed_reducer";
 import MarkPaymentAwaitingOnboardingReducer from "./mark_payment_awaiting_onboarding_reducer";
 import MarkPaymentFailedReducer from "./mark_payment_failed_reducer";
 import MarkPaymentPaidReducer from "./mark_payment_paid_reducer";
@@ -79,6 +81,8 @@ import ReserveTaskPaymentReducer from "./reserve_task_payment_reducer";
 import RevokeServiceIdentityReducer from "./revoke_service_identity_reducer";
 import RobotHeartbeatReducer from "./robot_heartbeat_reducer";
 import SetContributorPayoutAccountReducer from "./set_contributor_payout_account_reducer";
+import SetDatasetLerobotUriReducer from "./set_dataset_lerobot_uri_reducer";
+import SetTicketRobotReducer from "./set_ticket_robot_reducer";
 import SetTicketStatusReducer from "./set_ticket_status_reducer";
 import SetTrainingStatusReducer from "./set_training_status_reducer";
 import StartEvalRunReducer from "./start_eval_run_reducer";
@@ -447,6 +451,7 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("abort_eval_run", AbortEvalRunReducer),
   __reducerSchema("accept_dataset_offer", AcceptDatasetOfferReducer),
   __reducerSchema("ack_robot_command", AckRobotCommandReducer),
   __reducerSchema("agent_resume", AgentResumeReducer),
@@ -473,6 +478,7 @@ const reducersSchema = __reducers(
   __reducerSchema("heartbeat_claim", HeartbeatClaimReducer),
   __reducerSchema("ingest_purchased_episode", IngestPurchasedEpisodeReducer),
   __reducerSchema("issue_robot_command", IssueRobotCommandReducer),
+  __reducerSchema("mark_checkpoint_deployed", MarkCheckpointDeployedReducer),
   __reducerSchema("mark_payment_awaiting_onboarding", MarkPaymentAwaitingOnboardingReducer),
   __reducerSchema("mark_payment_failed", MarkPaymentFailedReducer),
   __reducerSchema("mark_payment_paid", MarkPaymentPaidReducer),
@@ -492,6 +498,8 @@ const reducersSchema = __reducers(
   __reducerSchema("revoke_service_identity", RevokeServiceIdentityReducer),
   __reducerSchema("robot_heartbeat", RobotHeartbeatReducer),
   __reducerSchema("set_contributor_payout_account", SetContributorPayoutAccountReducer),
+  __reducerSchema("set_dataset_lerobot_uri", SetDatasetLerobotUriReducer),
+  __reducerSchema("set_ticket_robot", SetTicketRobotReducer),
   __reducerSchema("set_ticket_status", SetTicketStatusReducer),
   __reducerSchema("set_training_status", SetTrainingStatusReducer),
   __reducerSchema("start_eval_run", StartEvalRunReducer),

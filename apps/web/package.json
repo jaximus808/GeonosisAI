@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start --port 3737",
     "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.ts",
     "gen:bindings": "node scripts/gen-bindings.mjs"
   },
   "dependencies": {

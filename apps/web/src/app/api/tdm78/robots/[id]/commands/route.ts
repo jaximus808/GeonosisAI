@@ -3,10 +3,11 @@
 // orchestrator's identity. The operator key (RDF_OPERATOR_KEY) is added on the server; the
 // browser never sees it. soft_estop has its own, more direct route (../estop).
 //
-// Auth gap (see docs/decisions.md, TDM-78): the web app has no operator login, so anyone who can
-// load this site can press these buttons. The key only stops callers that skip this server.
+// Operator login required (lib/operator/session.ts): 401 without a valid rdf_op session cookie.
+// The soft e-stop route (../estop) is never guarded.
 
 import type { NextRequest } from 'next/server';
+import { requireOperator } from '@/lib/operator/session';
 import { TDM78_ROBOT_ID, tdm78ViaOrchestrator } from '@/lib/tdm78/server';
 
 const TDM78_TYPES = new Set(['home', 'stop', 'run_baseline', 'load_checkpoint', 'start_teleop', 'stop_teleop']);
@@ -14,6 +15,8 @@ const TDM78_TYPES = new Set(['home', 'stop', 'run_baseline', 'load_checkpoint', 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const { id } = await ctx.params;
   if (!TDM78_ROBOT_ID.test(id)) return Response.json({ ok: false, detail: 'bad robot id' }, { status: 400 });
   const b = (await req.json().catch(() => null)) as { type?: unknown; payload?: unknown; ticket_id?: unknown } | null;

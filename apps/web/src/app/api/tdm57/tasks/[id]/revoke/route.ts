@@ -2,10 +2,10 @@
 // release_task (default) or cancel_task (cancel: true) as the orchestrator. The operator key
 // (RDF_OPERATOR_KEY) is added here on the server; the browser never sees it.
 //
-// Same auth gap as TDM-78 (docs/decisions.md): the dashboard has no operator login, so anyone who can
-// load the site can press it. The key only stops callers that skip this server.
+// Operator login required (lib/operator/session.ts): 401 without a valid rdf_op session cookie.
 
 import type { NextRequest } from 'next/server';
+import { requireOperator } from '@/lib/operator/session';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -34,6 +34,8 @@ function tdm57Env(...names: string[]): string | undefined {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const { id } = await ctx.params;
   if (!/^\d{1,15}$/.test(id)) return Response.json({ detail: 'bad task id' }, { status: 400 });
   const b = (await req.json().catch(() => ({}))) as { reason?: unknown; cancel?: unknown };

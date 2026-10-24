@@ -8,12 +8,16 @@
 //   POST /api/tdm74/tickets/parse  -> POST /tickets/parse  (Claude reads the prompt; creates nothing)
 //   POST /api/tdm74/tickets        -> POST /tickets        (send `parsed` back to skip a second parse)
 //
+// Both need an operator login (lib/operator/session.ts): creating a ticket commits spend, and the
+// parse is a paid Claude call.
+//
 // No token is involved: the orchestrator holds its own SpacetimeDB identity. Never put the owner
 // token in the browser.
 //
 // Orchestrator base URL: RDF_ORCHESTRATOR_URL, else NEXT_PUBLIC_ORCHESTRATOR_URL, else http://localhost:8000.
 
 import type { NextRequest } from 'next/server';
+import { requireOperator } from '@/lib/operator/session';
 
 const TDM74_ORCH = (
   process.env.RDF_ORCHESTRATOR_URL ||
@@ -44,6 +48,8 @@ function tdm74Invalid(loc: string[], msg: string, type = 'invalid_body') {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const parts = (await ctx.params).path;
   const target =
     parts.length === 1 && parts[0] === 'tickets'

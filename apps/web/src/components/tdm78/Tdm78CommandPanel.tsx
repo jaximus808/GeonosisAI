@@ -3,9 +3,12 @@
 // TDM-78: operator commands. Anything that moves the arm asks for a second press to confirm.
 // Sent through /api/tdm78/robots/{id}/commands (Next server -> orchestrator, operator key added
 // server side). The SpacetimeDB reducer is the real gate (busy / estop latch); the disabled states
-// here only mirror it.
+// here only mirror it. The commands route needs an operator login (/ops/login); without one every
+// button here is disabled. The soft e-stop (Tdm78SoftEstop) never needs it.
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { operatorLoginHref, useOperator } from '@/lib/operator/useOperator';
 import type { CommandRow } from '@/lib/tdm78/useRobotConsole';
 
 type CmdType = 'home' | 'stop' | 'run_baseline' | 'load_checkpoint' | 'start_teleop' | 'stop_teleop';
@@ -33,6 +36,8 @@ export function Tdm78CommandPanel({
   const [ticketId, setTicketId] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [ckpt, setCkpt] = useState('');
+  const op = useOperator();
+  const notOperator = op.operator !== true;
 
   useEffect(() => {
     if (!armed) return;
@@ -60,6 +65,7 @@ export function Tdm78CommandPanel({
       });
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; seq?: number | null; detail?: string };
       const ms = Math.round(performance.now() - t0);
+      if (res.status === 401) op.recheck(); // session expired or logged out elsewhere
       setOutcome(
         res.ok && b.ok
           ? { ok: true, text: `${LABEL[type]} sent${b.seq ? ` as #${b.seq}` : ''} in ${ms} ms.` }
@@ -77,7 +83,8 @@ export function Tdm78CommandPanel({
     else setArmed(type);
   }
 
-  const jobDisabled = blocked || offline || Boolean(openJob) || pending != null;
+  const jobDisabled = notOperator || blocked || offline || Boolean(openJob) || pending != null;
+  const stopDisabled = notOperator || blocked || offline || pending != null;
   const why = locked
     ? 'Locked by the soft e-stop.'
     : openEstop
@@ -90,6 +97,21 @@ export function Tdm78CommandPanel({
 
   return (
     <div className="space-y-4">
+      {notOperator && (
+        <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          {op.operator === null ? (
+            'Checking operator login…'
+          ) : (
+            <>
+              Commands need an operator.{' '}
+              <Link href={operatorLoginHref(`/robots/${robotId}`)} className="font-medium text-sky-700 underline dark:text-sky-400">
+                Log in as operator
+              </Link>
+              . The soft e-stop works without it.
+            </>
+          )}
+        </p>
+      )}
       {why && <p className="text-sm text-zinc-600 dark:text-zinc-400">{why}</p>}
 
       <div className="grid grid-cols-2 gap-2">
@@ -104,7 +126,7 @@ export function Tdm78CommandPanel({
         <Tdm78Btn
           label="Stop job"
           hint="Ends the current job and holds the arm (no lock)"
-          disabled={blocked || offline || pending != null}
+          disabled={stopDisabled}
           busy={pending === 'stop'}
           onClick={() => void send('stop')}
         />
@@ -119,7 +141,7 @@ export function Tdm78CommandPanel({
         <Tdm78Btn
           label="Stop teleop"
           hint="Ends teleop and holds the arm"
-          disabled={blocked || offline || pending != null}
+          disabled={stopDisabled}
           busy={pending === 'stop_teleop'}
           onClick={() => void send('stop_teleop')}
         />

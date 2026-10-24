@@ -9,10 +9,12 @@
 //   POST  /api/tdm64/payments/contributors/{id}/refresh     -> POST  same
 //   PATCH /api/tdm64/tickets/{id}/settings                  -> PATCH same, body {budget_cents} only,
 //                                                              X-Human-Id passed through (logged as human:<id>)
+//                                                              operator login required (spend change)
 //
 // Orchestrator base URL: RDF_ORCHESTRATOR_URL, else NEXT_PUBLIC_ORCHESTRATOR_URL, else http://localhost:8000.
 
 import type { NextRequest } from 'next/server';
+import { requireOperator } from '@/lib/operator/session';
 
 const ORCH = (
   process.env.RDF_ORCHESTRATOR_URL ||
@@ -74,6 +76,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const parts = (await ctx.params).path;
   const ok = parts.length === 3 && parts[0] === 'tickets' && /^\d{1,19}$/.test(parts[1]) && parts[2] === 'settings';
   if (!ok) return json(404, { detail: 'not proxied' });

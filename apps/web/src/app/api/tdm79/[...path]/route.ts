@@ -11,12 +11,15 @@
 //   GET   /api/tdm79/tickets/{id}/report.md    -> GET   same, as a download (Content-Disposition)
 //   POST  /api/tdm79/tickets/{id}/report/save  -> POST  same (stores .md + .json, logs report.saved)
 //
+// PATCH and POST need an operator login (lib/operator/session.ts); the GETs stay public.
+//
 // No token is involved: the orchestrator holds its own SpacetimeDB identity. Never put the owner
 // token in the browser.
 //
 // Orchestrator base URL: RDF_ORCHESTRATOR_URL, else NEXT_PUBLIC_ORCHESTRATOR_URL, else http://localhost:8000.
 
 import type { NextRequest } from 'next/server';
+import { requireOperator } from '@/lib/operator/session';
 
 const TDM79_ORCH = (
   process.env.RDF_ORCHESTRATOR_URL ||
@@ -89,6 +92,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const parts = (await ctx.params).path;
   if (!ticketPath(parts) || parts.length !== 3 || parts[2] !== 'settings') return tdm79NotProxied();
   const body = (await req.json().catch(() => null)) as unknown;
@@ -106,7 +111,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   return tdm79Forward('PATCH', parts.join('/'), { body: JSON.stringify(body), headers });
 }
 
-export async function POST(_req: NextRequest, ctx: Ctx) {
+export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = requireOperator(req);
+  if (denied) return denied;
   const parts = (await ctx.params).path;
   const ok = ticketPath(parts) && parts.length === 4 && parts[2] === 'report' && parts[3] === 'save';
   if (!ok) return tdm79NotProxied();

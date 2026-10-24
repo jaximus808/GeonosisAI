@@ -195,7 +195,18 @@ class TicketView:
     # ---- robot
     @property
     def onboarded(self) -> bool:
-        return bool(self.robot and (self.robot.get("adapter_version") or "").strip())
+        if not (self.robot and (self.robot.get("adapter_version") or "").strip()):
+            return False
+        if os.environ.get("RDF_ONBOARDING_DROID") != "1":
+            return True
+        # With the Onboarding Droid on, a self-registered adapter_version is not enough: the
+        # droid must have published a passing onboarding block (TDM-32).
+        try:
+            cfg = json.loads(self.robot.get("camera_config_json") or "{}")
+        except (TypeError, ValueError):
+            return False
+        status = (cfg.get("onboarding") or {}).get("status") if isinstance(cfg, dict) else None
+        return status in ("passed_sim", "passed_hil")
 
     # ---- evals
     def evals(self, *, kind: str | None = None, status: str | None = None, training_run_id: int | None = None) -> list:

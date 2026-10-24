@@ -1,0 +1,63 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+.modal.toml
+.spacetime/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Node / web
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Rust (SpacetimeDB module, if Rust)
+target/
+
+# Robot data and training artifacts (these go to object storage / Modal volumes, not git)
+data/
+episodes/
+datasets/
+checkpoints/
+recordings/
+wandb/
+*.mp4
+*.mkv
+*.h5
+*.hdf5
+*.safetensors
+*.ckpt
+*.pt
+*.parquet
+
+# Local infra state
+minio-data/
+.docker-data/
+logs/
+*.log

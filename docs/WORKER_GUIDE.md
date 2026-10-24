@@ -107,3 +107,9 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - Everything runs on a throwaway local SpacetimeDB at 127.0.0.1:3028 (db `tdm28loop`), with data under `$TMPDIR/tdm-28/`. It's wiped on every boot and never touches maincloud.
 - The fake robot is `rdf-robot-client --fake`. Every fake output is tagged `[FAKE]` / `fake: true`, and its payload keys are documented in the `fake.py` docstring.
 - The orchestrator driver makes **real** Anthropic calls on fake data (diagnose and planner). That's fine for tests, but run it on purpose, not in a loop.
+
+## Policy inference (TDM-37 decision; details in the "S-05b decision" note)
+- **Remote action chunks, run asynchronously.** The arm runs at 30 Hz, and each call returns a 50-step chunk (1.67 s). Re-query every 10 steps (~3 Hz) over a websocket while the current chunk keeps executing. On arrival, skip the first round(latency/33 ms) actions (~5–6) and blend over 3 steps. If no new chunk has arrived by step 40, hold the pose. The simple fallback: run 25 steps, then make a blocking query.
+- **Latency on H100:** p50 157 ms, p95 183 ms (websocket), of which 41 ms is GPU. Cold start is ~33 s.
+- **Spike endpoint:** `POLICY_ENDPOINT_URL` (Modal app `rdf-s05b-policy`, us-west, H100→A100→L40S). It scales to zero; warm it with `spikes/tdm-37-latency/warm.py up` and stop it with `down`. **It has no auth yet.**
+- The base π0.5 actions don't mean anything for the YAM until the fine-tuned config defines the YAM state/action mapping.

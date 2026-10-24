@@ -264,7 +264,7 @@ function ConsoleInner({
     <Tdm56Ctx.Provider value={api}>
       <div
         className="tdm56"
-        style={{ ['--tdm56-drive' as string]: '#f0b400', ['--tdm56-stop' as string]: '#d4221a', ['--tdm56-ok' as string]: '#1f9d6b' }}
+        style={{ ['--tdm56-drive' as string]: 'var(--melt)', ['--tdm56-stop' as string]: '#d4221a', ['--tdm56-ok' as string]: '#1f9d6b' }}
       >
         {/* ---------------- top bar: always visible */}
         <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50/95 px-4 py-2 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">

@@ -13,8 +13,6 @@ import { Tdm56Joystick } from '@/components/teleop/Tdm56Joystick';
 import { TDM106_PRECISE, TDM106_SPEED_PRESETS } from '@/lib/teleop/tdm106Drive';
 import type { Tdm106Drive } from '@/lib/teleop/useTdm106Drive';
 
-const AMBER = '#f0b400';
-
 function Cap({ code, cap, label, held, hint, wide, tone, disabled }: {
   code: string;
   cap: ReactNode;
@@ -28,23 +26,23 @@ function Cap({ code, cap, label, held, hint, wide, tone, disabled }: {
   const base =
     tone === 'stop'
       ? held
-        ? 'translate-y-0.5 border-red-900 bg-red-700 text-white'
-        : 'border-red-900/60 bg-[#d4221a] text-white'
+        ? 'translate-y-0.5 border-slag bg-slag text-ink brightness-90'
+        : 'border-slag bg-slag text-ink'
       : held
-        ? 'translate-y-0.5 border-[#a67c00] bg-[#f0b400] text-black'
+        ? 'translate-y-0.5 border-melt bg-melt text-on-melt'
         : disabled
-          ? 'border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-600'
-          : 'border-zinc-300 bg-white text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100';
+          ? 'border-line bg-surface text-ink-muted opacity-50'
+          : 'border-line-strong bg-surface-sunken text-ink';
   return (
     <div className={`flex flex-col items-center gap-1 ${wide ? 'col-span-2' : ''}`} data-testid={`tdm106-key-${code}`} data-held={held} data-hint={hint}>
       <kbd
         className={`relative inline-flex h-11 items-center justify-center rounded-lg border-b-4 font-sans text-base font-bold transition-[transform,background-color] duration-75 sm:h-12 ${wide ? 'w-full' : 'w-11 sm:w-12'} ${base} ${
-          hint && !held ? 'ring-4 ring-sky-400/70 motion-safe:animate-pulse' : ''
+          hint && !held ? 'ring-4 ring-arc motion-safe:animate-pulse' : ''
         }`}
       >
         {cap}
       </kbd>
-      <span className={`text-[11px] leading-none ${held ? 'font-semibold text-zinc-900 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'}`}>{label}</span>
+      <span className={`text-[11px] leading-none ${held ? 'font-semibold text-ink' : 'text-ink-muted'}`}>{label}</span>
     </div>
   );
 }
@@ -57,13 +55,13 @@ export function Tdm106KeyLegend({ drive, hint = [], className = '', testPrefix =
   const shift = held.has('ShiftLeft') || held.has('ShiftRight');
   return (
     <section
-      className={`rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
+      className={`gx-plate ${className}`}
       aria-label="Keyboard controls"
       data-testid="tdm106-legend"
     >
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="text-sm font-semibold">Keyboard</h2>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        <h2 className="gx-label uppercase">Keyboard</h2>
+        <p className="text-xs text-ink-muted">
           {settings.directKeys ? 'Hold a key to move. Let go and the arm holds still.' : 'Hold Space, then press a key to move.'}
         </p>
       </div>
@@ -94,7 +92,7 @@ export function Tdm106KeyLegend({ drive, hint = [], className = '', testPrefix =
         )}
         {!settings.directKeys && <Cap code="Space" cap="Space" label="hold to drive" held={h('Space')} hint={false} wide />}
       </div>
-      <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400" data-testid={`${testPrefix}-gamepad`}>
+      <p className="mt-2 text-[11px] text-ink-muted" data-testid={`${testPrefix}-gamepad`}>
         {ui.pad
           ? `Gamepad: hold RT to drive, left stick moves, right stick up/down${rot ? ' and turn' : ''}, A grip, B stop.`
           : 'Gamepad works too: press any button on one to connect it.'}
@@ -108,7 +106,7 @@ export function Tdm106OnScreenControls({ drive, stickSize = 112, testPrefix = 't
   const { ui, gripper, toggleGripper, clutch, sticks, settings } = drive;
   const open = gripper > 0.5;
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900" aria-label="On-screen controls" data-testid={`${testPrefix}-onscreen`}>
+    <section className="gx-plate" aria-label="On-screen controls" data-testid={`${testPrefix}-onscreen`}>
       <div className="mx-auto flex max-w-md items-end justify-between gap-2">
         <Tdm56Joystick size={stickSize} label="Move" hint="drag: forward, back, left, right" onChange={sticks.left} />
         <div className="flex flex-col items-center gap-2">
@@ -116,8 +114,8 @@ export function Tdm106OnScreenControls({ drive, stickSize = 112, testPrefix = 't
             type="button"
             className={`h-14 w-24 touch-none select-none rounded-2xl border-b-4 text-sm font-bold transition-colors ${
               open
-                ? 'border-zinc-300 bg-white text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100'
-                : 'border-[#a67c00] bg-[#f0b400] text-black'
+                ? 'border-line-strong bg-surface-sunken text-ink'
+                : 'border-melt bg-melt text-on-melt'
             }`}
             onClick={toggleGripper}
             aria-pressed={!open}
@@ -129,9 +127,8 @@ export function Tdm106OnScreenControls({ drive, stickSize = 112, testPrefix = 't
           <button
             type="button"
             className={`h-16 w-16 touch-none select-none rounded-full border-4 text-[11px] font-bold leading-tight transition-colors ${
-              ui.engaged ? 'border-black/20 text-black' : 'border-zinc-300 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
+              ui.engaged ? 'border-melt bg-melt text-on-melt' : 'border-line-strong bg-surface-sunken text-ink'
             }`}
-            style={ui.engaged ? { background: AMBER } : undefined}
             onPointerDown={(e) => {
               try {
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -153,7 +150,7 @@ export function Tdm106OnScreenControls({ drive, stickSize = 112, testPrefix = 't
         </div>
         <Tdm56Joystick size={stickSize} label={settings.rotation ? 'Up/down + turn' : 'Up / down'} hint={settings.rotation ? 'drag up, down; sideways turns' : 'drag up or down'} onChange={sticks.right} />
       </div>
-      <label className="mt-2 flex items-center justify-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+      <label className="mt-2 flex items-center justify-center gap-2 text-xs text-ink-muted">
         <input type="checkbox" checked={settings.stickEngages} onChange={(e) => drive.set({ stickEngages: e.target.checked })} />
         Dragging a stick drives (no need to hold the button)
       </label>
@@ -168,7 +165,7 @@ export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix
       <div>
         <div className="mb-1.5 flex items-baseline justify-between">
           <span className="font-medium">Speed</span>
-          <span className="tabular-nums text-zinc-500" data-testid={`${testPrefix}-speed`}>
+          <span className="gx-data text-ink-muted" data-testid={`${testPrefix}-speed`}>
             {Math.round(settings.speed * 100)}%
           </span>
         </div>
@@ -181,8 +178,8 @@ export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix
               aria-pressed={Math.abs(settings.speed - p.speed) < 0.01}
               className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ring-1 ${
                 Math.abs(settings.speed - p.speed) < 0.01
-                  ? 'bg-zinc-900 text-white ring-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
-                  : 'ring-zinc-300 hover:bg-zinc-100 dark:ring-zinc-700 dark:hover:bg-zinc-800'
+                  ? 'bg-ink text-ground ring-ink'
+                  : 'ring-line-strong hover:bg-surface-sunken'
               }`}
               data-testid={`tdm106-speed-${p.id}`}
             >
@@ -197,10 +194,10 @@ export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix
           step={0.05}
           value={settings.speed}
           onChange={(e) => set({ speed: Number(e.target.value) })}
-          className="mt-2 w-full accent-zinc-700 dark:accent-zinc-300"
+          className="mt-2 w-full accent-[var(--ink)]"
           aria-label="Speed scale"
         />
-        <p className="text-xs text-zinc-500">Moves ease in, so taps are small. Hold Shift for fine moves. The robot keeps its own limits.</p>
+        <p className="text-xs text-ink-muted">Moves ease in, so taps are small. Hold Shift for fine moves. The robot keeps its own limits.</p>
       </div>
       <Toggle checked={settings.rotation} onChange={(v) => set({ rotation: v })} label="Turn the hand" note="Off: the hand only slides, it never twists. Arrow keys turn and tilt it when on." testId="tdm106-rotation" />
       <Toggle checked={settings.directKeys} onChange={(v) => set({ directKeys: v })} label="Keys drive directly" note="Off: hold Space (the clutch) while pressing keys, the classic way." testId="tdm106-direct" />
@@ -229,7 +226,7 @@ function Toggle({ checked, onChange, label, note, disabled, testId }: { checked:
       <input type="checkbox" className="mt-0.5" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} data-testid={testId} />
       <span>
         <span className="font-medium">{label}</span>
-        <span className="block text-xs text-zinc-500">{note}</span>
+        <span className="block text-xs text-ink-muted">{note}</span>
       </span>
     </label>
   );

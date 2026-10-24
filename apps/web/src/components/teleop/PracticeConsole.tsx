@@ -1,65 +1,75 @@
 'use client';
 
-// TDM-59: practice mode. The TDM-56 controls (same keys, gamepad mapping, on-screen sticks, clutch,
-// speed / slow mode, gripper, STOP) drive a simulated arm in the browser instead of the robot.
-// No robot link, no claim or lease, no recording: nothing leaves this page except the small
-// network test request to /api/tdm59/ping.
+// TDM-59 practice mode, reworked by TDM-106 after a first-time practice run "was hard".
 //
-// Passing every lesson plus the network test is the readiness check that unlocks claiming
-// arm-control tasks (lib/teleop/tdm59Readiness.ts, <Tdm59ClaimGate>).
+// What it drives: a client-side kinematic copy of the sim robot and the ticket's scene
+// (lib/teleop/tdm106SceneSim.ts), rendered with the same 3D twin as the robot view (TDM-97). It
+// takes exactly the TDM-56 contract commands, from the same input loop as the teleop console
+// (lib/teleop/useTdm106Drive.ts). No robot link, no claim or lease, no recording: nothing leaves
+// this page except the small network test request to /api/tdm59/ping.
+//
+// PRACTICE_ON_SIM_ROBOT (seam): the orchestrator's [SIM] practice sessions
+// (practice_api.py, /api/practice/robots/<id>/start|token|stop|reset_scene) drive the MuJoCo sim
+// robot itself over /ws/control with no lease or recording. This page uses the client-side copy
+// instead, so practice works while the sim robot is busy with trials or someone else's teleop. To
+// drive the sim robot here, swap `send` below for a Tdm56ControlClient on the practice token and
+// feed the twin from useRobotLive(robotId); the controls and coach stay as they are.
+//
+// First-time flow: the controls are on screen from the start (keycap legend that lights up, sticks,
+// gripper button), a coach line always names the next key, four short basics (move, up/down,
+// gripper, STOP), then the task with step-by-step hints. "Skip to the task" appears once the basics
+// pass. Passing the basics + the task + the network test unlocks claiming arm-control tasks
+// (lib/teleop/tdm59Readiness.ts, <Tdm59ClaimGate>).
 
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { SimTag } from '@/components/brand';
 import { InstructionsOverlay } from '@/components/teleop/InstructionsOverlay';
 import { LatencyBadge } from '@/components/teleop/LatencyBadge';
-import { Tdm56Joystick, type Tdm56StickValue } from '@/components/teleop/Tdm56Joystick';
-import { SIM_VIEW_ASPECT, Tdm59SimView } from '@/components/teleop/Tdm59SimView';
-import {
-  Tdm56ClutchIntegrator,
-  TDM56_KEYS,
-  ZERO_TWIST,
-  addTwist,
-  deadzone,
-  firstPad,
-  keyboardTwist,
-  readPad,
-  round,
-  type Tdm56Twist,
-  type V3,
-} from '@/lib/teleop/tdm56Input';
+import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
+import { YAM_READY, createYamKinematics } from '@/components/robotview/yamFk';
+import { YAM_BODIES, YAM_MODEL } from '@/components/robotview/yamModel';
+import type { SceneSpecV1 } from '@/lib/robotview/scene';
+import type { RobotLiveState } from '@/lib/robotview/types';
+import type { V3 } from '@/lib/teleop/tdm56Input';
+import { tdm106Guide, type Tdm106Guide } from '@/lib/teleop/tdm106Guide';
+import { createTdm106Ik } from '@/lib/teleop/tdm106Ik';
+import { tdm106PracticeScene, type Tdm106SceneFetch } from '@/lib/teleop/tdm106PracticeScene';
+import { Tdm106SceneSim, type Tdm106SimCmd } from '@/lib/teleop/tdm106SceneSim';
+import { useTdm106Drive, type Tdm106Block, type Tdm106DriveCmd } from '@/lib/teleop/useTdm106Drive';
 import { introSeen, markIntroSeen, saveReadiness, useTdm59Readiness } from '@/lib/teleop/tdm59Readiness';
 import { GRADE_STYLE, runNetworkTest, type NetworkTest } from '@/lib/teleop/tdm59Quality';
-import { Tdm59SimArm, type SimCmd } from '@/lib/teleop/tdm59Sim';
 
-const TICK_MS = 33;
-const SLOW_CAP = 0.25;
-const GRIP_RATE = 0.9;
+const RobotTwin3D = dynamic(() => import('@/components/robotview/RobotTwin3D').then((m) => m.RobotTwin3D), {
+  ssr: false,
+  loading: () => <div className="flex h-full w-full items-center justify-center text-xs text-ink-muted">Loading 3D view…</div>,
+});
+
 const PAUSE_AT_MS = 400; // same as the TDM-56 console's default maxLatencyMs
+const IK = createTdm106Ik(createYamKinematics(YAM_MODEL), YAM_BODIES);
 
-type LessonId = 'clutch' | 'release' | 'lift' | 'turn' | 'grip' | 'place' | 'stop';
-const LESSON_IDS: LessonId[] = ['clutch', 'release', 'lift', 'turn', 'grip', 'place', 'stop'];
+/** The main practice view: high above and behind the base, looking down the table, so W is "up the
+ *  screen", A is left and D is right, and the arm's own links hide as little of the table as possible. */
+const DRIVER_CAM = { id: 'tdm106-driver', pos: [0.04, 0, 1.0] as V3, target: [0.34, 0, 0.0] as V3, fovy: 44 };
 
+type LessonId = 'move' | 'updown' | 'grip' | 'stop' | 'turn';
 interface Lesson {
   id: LessonId;
   title: string;
-  key: string; // keyboard hint
-  touch: string; // phone hint
+  key: string;
+  touch: string;
+  keys: string[];
 }
-
 const LESSONS: Lesson[] = [
-  { id: 'clutch', title: 'Drive with the clutch', key: 'Hold Space and press W to move the hand forward.', touch: 'Put your thumb on the Move stick and push it. Touching a stick holds the clutch.' },
-  { id: 'release', title: 'Let go to hold still', key: 'Let go of Space. The arm stays where it is.', touch: 'Lift your thumb off. The arm stays where it is.' },
-  { id: 'lift', title: 'Lift and lower', key: 'Hold Space and press Q to go up or E to go down.', touch: 'Push the Lift and turn stick up or down.' },
-  { id: 'turn', title: 'Turn the hand', key: 'Hold Space and press ← or →.', touch: 'Push the Lift and turn stick left or right.' },
-  {
-    id: 'grip',
-    title: 'Pick up the blue block',
-    key: 'Line the fingers up with the block, lower around it (E), then hold Space and F to close.',
-    touch: 'Line the fingers up with the block, lower around it, then slide the gripper to Closed while holding the clutch.',
-  },
-  { id: 'place', title: 'Drop it in the bin', key: 'Carry it over the bin, then hold Space and R to open.', touch: 'Carry it over the bin, then slide the gripper to Open while holding the clutch.' },
-  { id: 'stop', title: 'Press STOP, then resume', key: 'Press STOP or Esc, then Resume.', touch: 'Tap STOP, then Resume.' },
+  { id: 'move', title: 'Move the hand', key: 'Hold W, A, S or D. Let go to stop.', touch: 'Drag the Move stick.', keys: ['KeyW', 'KeyA', 'KeyS', 'KeyD'] },
+  { id: 'updown', title: 'Go up and down', key: 'Hold Q to go up, E to go down.', touch: 'Drag the Up / down stick.', keys: ['KeyQ', 'KeyE'] },
+  { id: 'grip', title: 'Use the gripper', key: 'Tap G to close it, tap G again to open it.', touch: 'Tap Close grip, then Open grip.', keys: ['KeyG'] },
+  { id: 'stop', title: 'Press STOP', key: 'Press Esc (or the red STOP button), then Resume.', touch: 'Tap STOP, then Resume.', keys: ['Escape'] },
 ];
+const BASICS = LESSONS.map((l) => l.id);
+/** Once these pass, "Skip to the task" appears (the gripper is learnt in the task anyway; STOP comes after it). */
+const SKIP_AFTER: LessonId[] = ['move', 'updown'];
 
 const LAGS = [
   { ms: 0, label: 'None' },
@@ -68,70 +78,66 @@ const LAGS = [
   { ms: 500, label: '500 ms' },
 ];
 
-type Block = { code: string; text: string } | null;
+function titleCase(s: string) {
+  return s.replace(/_/g, ' ');
+}
 
-export function PracticeConsole({ next, taskText }: { next?: string; taskText?: string | null }) {
-  const sim = useRef(new Tdm59SimArm());
-  const integ = useRef(new Tdm56ClutchIntegrator());
+export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: string; taskText?: string | null; scene?: Tdm106SceneFetch | null }) {
+  const source = useMemo(() => tdm106PracticeScene(sceneFetch ?? null), [sceneFetch]);
+  const spec: SceneSpecV1 = useMemo(() => ({ ...source.spec, cameras: [...(source.spec.cameras ?? []), DRIVER_CAM] }), [source.spec]);
+  const simRef = useRef<Tdm106SceneSim | null>(null);
+  if (!simRef.current || simRef.current.spec !== spec) simRef.current = new Tdm106SceneSim({ spec, ik: IK, home: YAM_READY });
+  const sim = simRef.current;
+  const objName = titleCase(sim.task?.obj ?? 'object');
+  const goalName = titleCase(sim.task?.goal ?? 'goal');
 
-  // ---- inputs (same sources as the TDM-56 console)
-  const keys = useRef(new Set<string>());
-  const shift = useRef(false);
-  const spaceHeld = useRef(false);
-  const clutchBtn = useRef(false);
-  const stickL = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
-  const stickR = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
-  const [stickEngages, setStickEngages] = useState(true);
-  const stickEngagesRef = useRef(true);
-  stickEngagesRef.current = stickEngages;
-  const [showSticks, setShowSticks] = useState(false);
   const [touch, setTouch] = useState(false);
-  const [stickSize, setStickSize] = useState(124);
+  const [stickSize, setStickSize] = useState(112);
+  const [wide, setWide] = useState(true); // lg: the legend sits at the top of the side column
   useEffect(() => {
-    const c = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-    setShowSticks(c);
-    setTouch(c);
-    const fit = () => setStickSize(window.innerWidth < 420 ? 108 : 124);
+    setTouch(window.matchMedia?.('(pointer: coarse)').matches ?? false);
+    const fit = () => {
+      setStickSize(window.innerWidth < 420 ? 100 : 112);
+      setWide(window.innerWidth >= 1024);
+    };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
   }, []);
 
-  const [gripper, setGripperState] = useState(1);
-  const gripperRef = useRef(1);
-  const setGripper = (g: number) => {
-    gripperRef.current = Math.max(0, Math.min(1, g));
-    setGripperState(gripperRef.current);
-  };
-  const [speed, setSpeed] = useState(0.5);
-  const [slow, setSlow] = useState(true);
-  const effSpeed = slow ? Math.min(speed, SLOW_CAP) : speed;
-  const effSpeedRef = useRef(effSpeed);
-  effSpeedRef.current = effSpeed;
-
+  // ---- simulated network delay
   const [lag, setLag] = useState(0);
   const lagRef = useRef(0);
   lagRef.current = lag;
-  const queue = useRef<{ at: number; cmd: SimCmd }[]>([]);
+  const queue = useRef<{ at: number; cmd: Tdm106SimCmd }[]>([]);
 
+  // ---- STOP
   const [stopped, setStopped] = useState(false);
   const stoppedRef = useRef(false);
   stoppedRef.current = stopped;
+  const pressStop = useCallback(() => {
+    stoppedRef.current = true;
+    setStopped(true);
+    queue.current = [];
+    simRef.current?.stop();
+  }, []);
+  const resume = useCallback(() => {
+    stoppedRef.current = false;
+    setStopped(false);
+    simRef.current?.resume();
+  }, []);
 
-  // ---- walkthrough (first visit), which also pauses input
+  // ---- "How to drive" walkthrough: on demand only (the on-screen hints teach as you go)
   const [intro, setIntro] = useState(false);
   const introRef = useRef(false);
   introRef.current = intro;
-  useEffect(() => {
-    if (!introSeen('practice')) setIntro(true);
-  }, []);
   const closeIntro = useCallback(() => {
     markIntroSeen('practice');
     setIntro(false);
   }, []);
 
-  // ---- lessons
-  const [done, setDone] = useState<Record<LessonId, boolean>>(() => Object.fromEntries(LESSON_IDS.map((l) => [l, false])) as Record<LessonId, boolean>);
+  // ---- lessons + task
+  const [done, setDone] = useState<Record<LessonId, boolean>>({ move: false, updown: false, grip: false, stop: false, turn: false });
   const doneRef = useRef(done);
   doneRef.current = done;
   const tick = useCallback((id: LessonId) => {
@@ -139,8 +145,17 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
     doneRef.current = { ...doneRef.current, [id]: true };
     setDone(doneRef.current);
   }, []);
-  const startedAt = useRef<number | null>(null);
+  const [skipped, setSkipped] = useState(false);
+  const [taskDone, setTaskDone] = useState(false);
+  const taskStart = useRef<number | null>(null);
+  const [taskMs, setTaskMs] = useState<number | null>(null);
+  const [bestMs, setBestMs] = useState<number | null>(null);
+  const practiceStart = useRef<number | null>(null);
   const stopSeen = useRef(false);
+  const gripSeen = useRef({ closed: false });
+  // how far the hand has travelled (all strokes), for the move / up-down lessons
+  const travel = useRef({ xy: 0, z: 0, last: null as V3 | null });
+
   const [toast, setToast] = useState<{ text: string; tone: 'good' | 'warn'; at: number } | null>(null);
   const say = (text: string, tone: 'good' | 'warn') => setToast({ text, tone, at: Date.now() });
   useEffect(() => {
@@ -149,31 +164,7 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  const pressStop = useCallback(() => {
-    stoppedRef.current = true;
-    setStopped(true);
-    queue.current = [];
-    sim.current.stop();
-  }, []);
-  const resume = useCallback(() => {
-    stoppedRef.current = false;
-    setStopped(false);
-    sim.current.resume();
-  }, []);
-
-  // ---- loop state
-  const engaged = useRef(false);
-  const needsRelease = useRef(false);
-  const seq = useRef(0);
-  const lastTick = useRef(0);
-  const padPrev = useRef({ a: false, b: false });
-  const lastBlock = useRef<Block>(null);
-  const lastWant = useRef(false);
-  const lastSource = useRef<string | null>(null);
-  const lastPad = useRef<string | null>(null);
-  const sentTimes = useRef<number[]>([]);
-
-  const blockReason = useCallback((): Block => {
+  const blockReason = useCallback((): Tdm106Block => {
     if (stoppedRef.current) return { code: 'stop', text: 'Stopped. Press Resume when you are ready.' };
     if (introRef.current) return { code: 'intro', text: 'Close the walkthrough to start driving.' };
     if (lagRef.current > PAUSE_AT_MS) return { code: 'latency', text: `Video delay is ${lagRef.current} ms (limit ${PAUSE_AT_MS} ms). Driving is paused, just like on the real robot.` };
@@ -181,187 +172,105 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
     return null;
   }, []);
 
-  const send = useCallback((cmd: SimCmd) => {
-    const now = performance.now();
-    queue.current.push({ at: now + lagRef.current, cmd });
-    if (cmd.clutch) sentTimes.current.push(now);
-  }, []);
+  const send = useCallback((cmd: Tdm106DriveCmd) => {
+    queue.current.push({ at: performance.now() + lagRef.current, cmd });
+    if (cmd.clutch) {
+      practiceStart.current ??= Date.now();
+      if (Math.abs(cmd.d_rot[2]) >= (20 * Math.PI) / 180) tick('turn');
+      if (taskStart.current == null && !simRef.current?.succeeded) taskStart.current = Date.now();
+    }
+    return true;
+  }, [tick]);
 
-  const release = useCallback(() => {
-    if (!engaged.current) return;
-    engaged.current = false;
-    send({
-      seq: ++seq.current,
-      clutch: false,
-      d_pos: integ.current.dPos.map((v) => round(v)) as V3,
-      d_rot: integ.current.dRot.map((v) => round(v)) as V3,
-      gripper: round(gripperRef.current, 3),
-      speed_scale: round(effSpeedRef.current, 3),
-    });
-    if (doneRef.current.clutch) tick('release');
-  }, [send, tick]);
-
-  useEffect(() => {
-    lastTick.current = performance.now();
-    const id = window.setInterval(() => {
-      const now = performance.now();
-      const dt = Math.min(0.1, (now - lastTick.current) / 1000);
-      lastTick.current = now;
-
-      const p = firstPad();
-      const pad = p ? readPad(p) : null;
-      lastPad.current = pad?.id ?? null;
-      if (pad) {
-        if (pad.pressedB && !padPrev.current.b) pressStop();
-        if (pad.pressedA && !padPrev.current.a) setGripper(gripperRef.current > 0.5 ? 0 : 1);
-        padPrev.current = { a: pad.pressedA, b: pad.pressedB };
-      }
-      let gRate = pad?.gripperRate ?? 0;
-      if (keys.current.has('KeyR')) gRate += 1;
-      if (keys.current.has('KeyF')) gRate -= 1;
-      if (gRate) setGripper(gripperRef.current + Math.sign(gRate) * GRIP_RATE * dt);
-
-      let twist: Tdm56Twist = keyboardTwist(keys.current, shift.current);
-      if (pad) twist = addTwist(twist, pad.twist);
-      const L = stickL.current;
-      const R = stickR.current;
-      if (L.active || R.active) twist = addTwist(twist, { lin: [deadzone(L.y), -deadzone(L.x), deadzone(R.y)], ang: [0, 0, -deadzone(R.x)] });
-
-      const sources: string[] = [];
-      if (pad?.clutch) sources.push('gamepad');
-      if (spaceHeld.current) sources.push('keyboard');
-      if (clutchBtn.current) sources.push('clutch button');
-      if (stickEngagesRef.current && (L.active || R.active)) sources.push('stick');
-      const want = sources.length > 0;
-      lastWant.current = want;
-      lastSource.current = sources[0] ?? null;
-
-      const block = blockReason();
-      lastBlock.current = block;
-      if (block) {
-        release();
-        if (want) needsRelease.current = true;
-      } else if (!want) {
-        needsRelease.current = false;
-        release();
-      } else if (!needsRelease.current) {
-        if (!engaged.current) {
-          integ.current.reset();
-          engaged.current = true;
-          startedAt.current ??= Date.now();
-        }
-        integ.current.step(twist ?? ZERO_TWIST, dt, effSpeedRef.current);
-        const dPos = integ.current.dPos;
-        const dRot = integ.current.dRot;
-        send({
-          seq: ++seq.current,
-          clutch: true,
-          d_pos: dPos.map((v) => round(v)) as V3,
-          d_rot: dRot.map((v) => round(v)) as V3,
-          gripper: round(gripperRef.current, 3),
-          speed_scale: round(effSpeedRef.current, 3),
-        });
-        if (Math.hypot(dPos[0], dPos[1], dPos[2]) >= 0.05) tick('clutch');
-        if (Math.abs(dPos[2]) >= 0.04) tick('lift');
-        if (Math.abs(dRot[2]) >= (20 * Math.PI) / 180) tick('turn');
-      }
-
-      // deliver commands whose (simulated) network delay has passed, then step the arm
+  const drive = useTdm106Drive({
+    blockReason,
+    send,
+    pressStop,
+    keysPaused: () => introRef.current,
+    assistTarget: () => {
+      const s = simRef.current;
+      const o = s?.taskObject();
+      return s && o && !o.held ? { tool: s.tool, obj: o.pos } : null;
+    },
+    afterTick: ({ now, dt }) => {
+      const s = simRef.current;
+      if (!s) return;
       const q = queue.current;
-      while (q.length && q[0].at <= now) sim.current.command(q.shift()!.cmd, now);
-      sim.current.step(dt, now);
-      for (const ev of sim.current.drainEvents()) {
-        if (ev.k === 'grasp') {
-          tick('grip');
-          say('Got it. Now carry it over the bin.', 'good');
-        } else if (ev.k === 'missed_grasp') say(ev.why, 'warn');
+      while (q.length && q[0].at <= now) s.command(q.shift()!.cmd, now);
+      s.step(dt, now);
+      const tr = travel.current;
+      if (tr.last) {
+        tr.xy += Math.hypot(s.tool[0] - tr.last[0], s.tool[1] - tr.last[1]);
+        tr.z += Math.abs(s.tool[2] - tr.last[2]);
+        if (tr.xy >= 0.04) tick('move');
+        if (tr.z >= 0.03) tick('updown');
+      }
+      tr.last = [...s.tool] as V3;
+      for (const ev of s.drainEvents()) {
+        if (ev.k === 'grasp') say(`Got it. Lift it (Q) and carry it to the ${goalName}.`, 'good');
+        else if (ev.k === 'missed_grasp') say(ev.why, 'warn');
         else if (ev.k === 'drop') {
-          if (ev.inBin) {
-            tick('place');
-            say('In the bin. That is a clean demo.', 'good');
-          } else say('Dropped outside the bin. Pick it up again.', 'warn');
+          if (ev.success) {
+            const ms = taskStart.current != null ? Date.now() - taskStart.current : null;
+            setTaskDone(true);
+            setTaskMs(ms);
+            if (ms != null) setBestMs((b) => (b == null || ms < b ? ms : b));
+            say(`On the ${goalName}${ms != null ? ` in ${fmtTime(ms)}` : ''}. That is a clean demo.`, 'good');
+          } else say(`Dropped ${ev.where === 'other' ? `next to the ${goalName}` : 'on the table'}. Pick it up again.`, 'warn');
         } else if (ev.k === 'stop') stopSeen.current = true;
         else if (ev.k === 'resume' && stopSeen.current) tick('stop');
       }
-      const st = sentTimes.current;
-      while (st.length && now - st[0] > 1000) st.shift();
-    }, TICK_MS);
-    return () => {
-      window.clearInterval(id);
-      release();
-    };
-  }, [blockReason, release, pressStop, send, tick]);
+    },
+  });
 
-  // ---- keyboard (same map as TDM-56)
+  // gripper lesson: closed once, then opened again
   useEffect(() => {
-    const typing = (t: EventTarget | null) =>
-      t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range') || t.isContentEditable);
-    const down = (e: KeyboardEvent) => {
-      if (typing(e.target) || introRef.current) return;
-      shift.current = e.shiftKey;
-      if (e.code === 'Escape') {
-        e.preventDefault();
-        pressStop();
-        return;
-      }
-      if (e.code === 'Space') {
-        e.preventDefault();
-        spaceHeld.current = true;
-        return;
-      }
-      if (TDM56_KEYS[e.code] || e.code === 'KeyF' || e.code === 'KeyR') {
-        e.preventDefault();
-        keys.current.add(e.code);
-      }
-    };
-    const up = (e: KeyboardEvent) => {
-      shift.current = e.shiftKey;
-      if (e.code === 'Space') {
-        e.preventDefault();
-        spaceHeld.current = false;
-      }
-      keys.current.delete(e.code);
-    };
-    const drop = () => {
-      keys.current.clear();
-      spaceHeld.current = false;
-      clutchBtn.current = false;
-      stickL.current = { x: 0, y: 0, active: false };
-      stickR.current = { x: 0, y: 0, active: false };
-    };
-    const vis = () => document.hidden && drop();
-    window.addEventListener('keydown', down, true);
-    window.addEventListener('keyup', up, true);
-    window.addEventListener('blur', drop);
-    document.addEventListener('visibilitychange', vis);
-    return () => {
-      window.removeEventListener('keydown', down, true);
-      window.removeEventListener('keyup', up, true);
-      window.removeEventListener('blur', drop);
-      document.removeEventListener('visibilitychange', vis);
-    };
-  }, [pressStop]);
+    if (drive.gripper < 0.5) gripSeen.current.closed = true;
+    else if (gripSeen.current.closed) tick('grip');
+  }, [drive.gripper, tick]);
 
-  // ---- UI snapshot at 10 Hz
-  const [ui, setUi] = useState({ engaged: false, want: false, needsRelease: false, block: null as Block, source: null as string | null, pad: null as string | null, hz: 0, z: 0.2, clamps: [] as string[], watchdog: false });
+  // ---- the coach + task clock, refreshed with the 10 Hz UI snapshot
+  const [guide, setGuide] = useState<Tdm106Guide | null>(null);
+  const [clock, setClock] = useState(0);
+  const [hud, setHud] = useState({ z: 0.2, clamps: [] as string[], watchdog: false });
   useEffect(() => {
     const id = window.setInterval(() => {
-      const s = sim.current.s;
-      setUi({
-        engaged: engaged.current,
-        want: lastWant.current,
-        needsRelease: needsRelease.current,
-        block: lastBlock.current,
-        source: lastSource.current,
-        pad: lastPad.current,
-        hz: sentTimes.current.length,
-        z: s.ee[2],
-        clamps: s.clamps,
-        watchdog: s.watchdog,
-      });
+      const s = simRef.current;
+      if (!s) return;
+      const o = s.taskObject();
+      setGuide(
+        tdm106Guide({
+          tool: s.tool,
+          gripperOpen: s.gripperCmd > 0.5,
+          gripperMoving: Math.abs(s.jaw - s.gripperCmd) > 0.02 && !o?.held,
+          obj: o,
+          goal: s.goal(),
+          done: s.succeeded,
+          objName,
+          goalName,
+        }),
+      );
+      setHud({ z: s.tool[2] - s.spec.table.top_z, clamps: s.clamps, watchdog: s.watchdog });
+      setClock(taskStart.current != null && !s.succeeded ? Date.now() - taskStart.current : 0);
     }, 100);
     return () => window.clearInterval(id);
-  }, []);
+  }, [objName, goalName]);
+
+  const resetScene = useCallback(
+    (newLayout = false) => {
+      const s = simRef.current;
+      if (!s) return;
+      s.reset(newLayout ? Math.floor(Math.random() * 1e9) : undefined);
+      s.drainEvents();
+      queue.current = [];
+      drive.resetInputs();
+      drive.setGripper(1);
+      setTaskDone(false);
+      setTaskMs(null);
+      taskStart.current = null;
+    },
+    [drive],
+  );
 
   // ---- network test (part of the readiness check)
   const [net, setNet] = useState<NetworkTest | null>(null);
@@ -376,51 +285,62 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
   }, []);
   useEffect(() => {
     void testNet();
+    // first visit: no blocking walkthrough any more, but keep the "seen" flag for the teleop page
+    if (!introSeen('practice')) markIntroSeen('practice');
   }, [testNet]);
 
   // ---- readiness
-  const lessonsDone = LESSON_IDS.filter((l) => done[l]).length;
-  const allLessons = lessonsDone === LESSON_IDS.length;
+  const basicsDone = BASICS.every((l) => done[l]);
   const netOk = net != null && net.advice.grade !== 'bad';
-  const ready = allLessons && netOk;
+  const ready = basicsDone && taskDone && netOk;
   const { status: readyStatus } = useTdm59Readiness();
   const saved = useRef(false);
   useEffect(() => {
     if (!ready || saved.current) return;
     saved.current = true;
     saveReadiness({
-      practiceMs: startedAt.current ? Date.now() - startedAt.current : 0,
-      lessons: LESSON_IDS,
+      practiceMs: practiceStart.current ? Date.now() - practiceStart.current : 0,
+      lessons: [...LESSONS.filter((l) => done[l.id]).map((l) => l.id), 'pick_place'],
       network: net ? { medianMs: net.medianMs, jitterMs: net.jitterMs, grade: net.advice.grade, type: net.net?.type } : null,
     });
-  }, [ready, net]);
+  }, [ready, net, done]);
 
-  const current = LESSONS.find((l) => !done[l.id]) ?? null;
-  const engagedRef = engaged;
+  // coach order: the basics, unless skipped; then the task; then any basic still missing (STOP)
+  const pending = LESSONS.find((l) => !done[l.id]) ?? null;
+  const inTask = !pending || (skipped && !taskDone);
+  const lesson = inTask ? null : pending;
+  const canSkip = !inTask && !taskDone && SKIP_AFTER.every((l) => done[l]);
+  const coach = lesson
+    ? { kind: 'lesson' as const, n: LESSONS.indexOf(lesson) + 1, title: lesson.title, detail: touch ? lesson.touch : lesson.key, keys: lesson.keys }
+    : guide
+      ? { kind: 'task' as const, n: guide.n, title: guide.title, detail: guide.detail, keys: guide.keys, step: guide.step }
+      : null;
+  const hintKeys = coach?.keys ?? [];
+
+  const ui = drive.ui;
   const status = useMemo(() => {
-    if (ui.engaged) return { tone: 'drive' as const, title: 'Driving', sub: `Clutch held (${ui.source ?? 'input'}). Let go to hold still.` };
-    if (ui.block && ui.block.code !== 'intro') return { tone: ui.want || ui.needsRelease ? ('blocked' as const) : ('idle' as const), title: ui.want ? 'Clutch released for safety' : 'Not driving', sub: ui.block.text };
-    if (ui.needsRelease) return { tone: 'blocked' as const, title: 'Let go of the clutch', sub: 'Then press it again to drive.' };
-    return { tone: 'idle' as const, title: 'Not driving', sub: touch ? 'Hold the clutch button or touch a stick to drive.' : 'Hold Space, RT or the on-screen clutch to drive.' };
+    if (ui.engaged) return { tone: 'drive' as const, title: 'Driving', sub: ui.source === 'gripper' ? 'Moving the gripper. The arm holds still.' : 'Let go of the keys to hold still.' };
+    if (ui.block && ui.block.code !== 'intro') return { tone: ui.want || ui.needsRelease ? ('blocked' as const) : ('idle' as const), title: ui.want ? 'Paused for safety' : 'Not driving', sub: ui.block.text };
+    if (ui.needsRelease) return { tone: 'blocked' as const, title: 'Let go of the keys', sub: 'Then press them again to drive.' };
+    return { tone: 'idle' as const, title: 'Holding still', sub: touch ? 'Drag a stick to move the hand.' : 'Hold W A S D to move, Q / E for up and down, tap G to grip.' };
   }, [ui, touch]);
 
-  const resetScene = () => {
-    sim.current.reset();
-    sim.current.drainEvents();
-    queue.current = [];
-    integ.current.reset();
-    setGripper(1);
-  };
+  const sceneLabel =
+    source.from === 'ticket'
+      ? `Ticket ${source.ticketId}'s scene${source.revision ? ` (rev ${source.revision})` : ''}`
+      : source.from === 'robot'
+        ? `Scene deployed on sim robot ${source.robotId}`
+        : 'Default sim scene';
 
   return (
-    <div style={{ ['--tdm56-drive' as string]: '#f0b400' }} data-testid="tdm59-practice">
+    <div style={{ ['--tdm56-drive' as string]: 'var(--melt)' }} data-testid="tdm59-practice">
       {/* ---------------- top bar, same shape as the real console */}
       <div className="sticky top-0 z-30 -mx-4 mb-3 border-b border-zinc-200 bg-zinc-50/95 px-4 py-2 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
         <div className="flex items-center gap-3">
           <div
             className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 transition-colors ${
               status.tone === 'drive'
-                ? 'bg-[#f0b400] text-black'
+                ? 'bg-melt text-on-melt'
                 : status.tone === 'blocked'
                   ? 'bg-red-50 text-red-900 ring-1 ring-red-200 dark:bg-red-950/50 dark:text-red-100 dark:ring-red-900'
                   : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-200'
@@ -429,7 +349,7 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
             data-testid="tdm59-practice-status"
             data-state={status.tone}
           >
-            <span className={`inline-block h-3 w-3 shrink-0 rounded-full ${status.tone === 'drive' ? 'animate-pulse bg-black' : status.tone === 'blocked' ? 'bg-red-600' : 'bg-zinc-400'}`} />
+            <span className={`inline-block h-3 w-3 shrink-0 rounded-full ${status.tone === 'drive' ? 'animate-pulse bg-on-melt' : status.tone === 'blocked' ? 'bg-red-600' : 'bg-zinc-400'}`} />
             <div className="min-w-0">
               <div className="truncate text-base font-semibold leading-tight sm:text-lg">{status.title}</div>
               <div className="truncate text-xs opacity-80 sm:text-sm">{status.sub}</div>
@@ -459,42 +379,71 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
         )}
       </div>
 
-      {/* ---------------- coach line: what to do next */}
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="tdm59-coach">
-        {current ? (
-          <p className="min-w-0 grow basis-64 text-[15px] leading-snug">
-            <span className="mr-2 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-zinc-900 px-1.5 text-xs font-bold text-white tabular-nums dark:bg-zinc-100 dark:text-zinc-900">
-              {lessonsDone + 1}/{LESSONS.length}
+      {/* ---------------- coach: the one next thing to do */}
+      <div
+        className={`mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-sm px-4 py-3 ring-1 ${
+          coach?.kind === 'task' && coach.step === 'done'
+            ? 'bg-arc-soft ring-arc'
+            : 'bg-surface ring-line-strong'
+        }`}
+        data-testid="tdm59-coach"
+        data-kind={coach?.kind}
+        data-step={coach?.kind === 'task' ? coach.step : lesson?.id}
+      >
+        {coach && (
+          <div className="flex min-w-0 grow basis-72 items-center gap-3">
+            <span className="gx-tag shrink-0 tabular-nums">
+              {coach.kind === 'lesson' ? `Basics ${coach.n}/${BASICS.length}` : `Task ${Math.min(coach.n, 5)}/5`}
             </span>
-            <b>{current.title}.</b> <span className="text-zinc-600 dark:text-zinc-300">{touch ? current.touch : current.key}</span>
-          </p>
-        ) : (
-          <p className="min-w-0 grow basis-64 text-[15px] font-semibold text-emerald-700 dark:text-emerald-300">All lessons done. Keep practising as long as you like.</p>
+            <div className="min-w-0">
+              <div className="gx-heading leading-tight">{coach.title}</div>
+              <div className="text-[15px] leading-snug text-ink-muted">{coach.detail}</div>
+            </div>
+          </div>
         )}
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-900 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-900">
-          Simulated arm. Nothing is recorded or sent to a robot.
-        </span>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {coach?.kind === 'task' && (
+            <span className="gx-data text-ink-muted" data-testid="tdm106-task-time">
+              {taskDone && taskMs != null ? `Done in ${fmtTime(taskMs)}` : clock ? `Task time ${fmtTime(clock)}` : 'Clock starts when you move'}
+              {bestMs != null && ` · best ${fmtTime(bestMs)}`}
+            </span>
+          )}
+          {canSkip && (
+            <button type="button" onClick={() => setSkipped(true)} className="gx-btn gx-btn-primary gx-btn-sm" data-testid="tdm106-skip-to-task">
+              Skip to the task
+            </button>
+          )}
+          {taskDone && (
+            <button type="button" onClick={() => resetScene(true)} className="gx-btn gx-btn-sm" data-testid="tdm106-again">
+              Go again (new layout)
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
         <div className="min-w-0">
-          {/* ---------------- views: side by side from sm up; on a phone the side view is an inset */}
-          <div className={`relative rounded-xl p-1 transition-colors ${ui.engaged ? 'bg-[#f0b400]' : 'bg-transparent'}`} data-testid="tdm59-practice-views">
-            <div className="relative grid grid-cols-1 gap-1 sm:grid-cols-2">
-              <SimFrame label="Top camera" lagMs={lag}>
-                <Tdm59SimView sim={sim} kind="top" engagedRef={engagedRef} />
-              </SimFrame>
-              <div className="absolute right-2 top-9 w-[36%] overflow-hidden rounded-lg ring-2 ring-zinc-950/70 sm:static sm:w-auto sm:rounded-none sm:ring-0">
-                <SimFrame label="Side camera" lagMs={lag} compact>
-                  <Tdm59SimView sim={sim} kind="side" engagedRef={engagedRef} />
-                </SimFrame>
+          {/* ---------------- 3D views of the scene */}
+          <div className={`relative rounded-xl p-1 transition-colors ${ui.engaged ? 'bg-melt' : 'bg-transparent'}`} data-testid="tdm59-practice-views">
+            <div className="grid grid-cols-3 gap-1 sm:h-[min(46vh,460px)] sm:grid-rows-2">
+              <View label="Driver's view (from behind the robot)" lagMs={lag} className="col-span-3 aspect-[16/10] sm:col-span-2 sm:row-span-2 sm:aspect-auto">
+                <PracticeTwin sim={sim} spec={spec} camera={DRIVER_CAM.id} lagMs={lag} controls ghost />
+              </View>
+              <View label="Side" lagMs={lag} compact className="aspect-[4/3] sm:aspect-auto">
+                <PracticeTwin sim={sim} spec={spec} camera="side" lagMs={lag} ghost />
+              </View>
+              <View label="Wrist camera" lagMs={lag} compact className="aspect-[4/3] sm:aspect-auto">
+                <PracticeTwin sim={sim} spec={spec} camera="wrist" lagMs={lag} />
+              </View>
+              <div className="flex flex-col justify-center gap-1 rounded-sm bg-surface-sunken px-2 py-1.5 text-[11px] leading-snug text-ink-muted sm:hidden">
+                <span>
+                  <b className="text-arc">Blue ghost</b>: where the hand lands if you lower straight down.
+                </span>
               </div>
             </div>
             {toast && (
               <div
-                className={`pointer-events-none absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[90%] rounded-full px-4 py-2 text-sm font-semibold shadow-lg ${
-                  toast.tone === 'good' ? 'bg-emerald-600 text-white' : 'bg-zinc-900/90 text-white'
-                }`}
+                className={`pointer-events-none absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[90%] rounded-full px-4 py-2 text-sm font-semibold shadow-lg ${toast.tone === 'good' ? 'bg-arc text-on-arc' : 'bg-zinc-900/90 text-white'}`}
                 role="status"
                 data-testid="tdm59-toast"
               >
@@ -504,77 +453,59 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
           </div>
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <div className="flex flex-wrap items-center gap-x-1 whitespace-nowrap">
-              <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={() => setShowSticks((s) => !s)}>
-                {showSticks ? 'Hide on-screen controls' : 'Show on-screen controls'}
-              </button>
-              <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={resetScene} data-testid="tdm59-reset-scene">
+            <div className="flex flex-wrap items-center gap-x-1">
+              <SimTag label={`Simulated · ${sceneLabel}`} className="mr-1" />
+              <span className="sr-only" data-testid="tdm106-sim-label">{sceneLabel}</span>
+              <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={() => resetScene(false)} data-testid="tdm59-reset-scene">
                 Reset the scene
+              </button>
+              <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={() => resetScene(true)}>
+                New layout
               </button>
               <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={() => setIntro(true)}>
                 How to drive
               </button>
             </div>
             <span className="text-xs tabular-nums text-zinc-500">
-              Hand {Math.round(ui.z * 100)} cm above the table
-              {ui.clamps.includes('clamped_workspace') && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-900 dark:bg-amber-950 dark:text-amber-200">Workspace edge</span>}
-              {ui.clamps.includes('table') && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-900 dark:bg-amber-950 dark:text-amber-200">Table</span>}
-              {ui.watchdog && <span className="ml-2 rounded bg-amber-500 px-1.5 py-0.5 font-semibold text-black">Watchdog hold</span>}
+              <span className="hidden sm:inline">
+                <b className="text-arc">Blue ghost</b> = where the hand lands if you lower straight down ·{' '}
+              </span>
+              Hand {Math.round(hud.z * 100)} cm above the table
+              {hud.clamps.includes('clamped_workspace') && <Chip>Workspace edge</Chip>}
+              {hud.clamps.includes('table') && <Chip>Table</Chip>}
+              {hud.clamps.includes('reach') && <Chip>Out of reach</Chip>}
+              {hud.watchdog && <span className="ml-2 rounded bg-amber-500 px-1.5 py-0.5 font-semibold text-black">Watchdog hold</span>}
             </span>
           </div>
-
-          {showSticks && (
-            <div className="sticky bottom-0 z-20 -mx-4 mt-2 border-t border-zinc-200 bg-zinc-50/95 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 sm:static sm:mx-0 sm:rounded-xl sm:border">
-              <div className="flex items-end justify-between gap-2">
-                <Tdm56Joystick label="Move" hint="forward, back, left, right" onChange={(v) => (stickL.current = v)} size={stickSize} />
-                <div className="flex flex-col items-center gap-2">
-                  <button
-                    type="button"
-                    className={`h-20 w-20 touch-none select-none rounded-full border-4 text-sm font-bold transition-colors ${
-                      ui.engaged ? 'border-black/20 bg-[#f0b400] text-black' : 'border-zinc-300 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
-                    }`}
-                    onPointerDown={(e) => {
-                      try {
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                      } catch {
-                        /* synthetic pointer */
-                      }
-                      clutchBtn.current = true;
-                    }}
-                    onPointerUp={() => (clutchBtn.current = false)}
-                    onPointerCancel={() => (clutchBtn.current = false)}
-                    onLostPointerCapture={() => (clutchBtn.current = false)}
-                    onContextMenu={(e) => e.preventDefault()}
-                    data-testid="tdm59-clutch-button"
-                  >
-                    Hold to
-                    <br />
-                    drive
-                  </button>
-                  <GripperSlider value={gripper} onChange={setGripper} compact />
-                </div>
-                <Tdm56Joystick label="Lift and turn" hint="up, down, turn" onChange={(v) => (stickR.current = v)} size={stickSize} />
-              </div>
-              <label className="mt-2 flex items-center justify-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
-                <input type="checkbox" checked={stickEngages} onChange={(e) => setStickEngages(e.target.checked)} />
-                Touching a stick holds the clutch
-              </label>
-            </div>
+          {source.note && (
+            <p className="mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:ring-amber-900" data-testid="tdm106-scene-note">
+              {source.note}
+            </p>
           )}
+
+          {/* ---------------- the controls, always on screen */}
+          <div className="mt-3 grid gap-3">
+            {!touch && !wide && <Tdm106KeyLegend drive={drive} hint={hintKeys} />}
+            <Tdm106OnScreenControls drive={drive} stickSize={stickSize} testPrefix="tdm59" />
+            {touch && <Tdm106KeyLegend drive={drive} hint={hintKeys} />}
+          </div>
         </div>
 
         {/* ---------------- side panel */}
         <aside className="flex flex-col gap-4 text-sm">
-          <Panel title="Readiness check" aside={<span className="tabular-nums text-zinc-500">{lessonsDone + (netOk ? 1 : 0)}/{LESSONS.length + 1}</span>}>
+          {!touch && wide && <Tdm106KeyLegend drive={drive} hint={hintKeys} />}
+          <Panel title="Readiness check" aside={<span className="tabular-nums text-zinc-500">{BASICS.filter((l) => done[l]).length + (taskDone ? 1 : 0) + (netOk ? 1 : 0)}/{BASICS.length + 2}</span>}>
             <ol className="space-y-1" data-testid="tdm59-lessons">
               {LESSONS.map((l, i) => (
-                <li key={l.id} className={`flex items-center gap-2 rounded-md px-1.5 py-1 ${current?.id === l.id ? 'bg-amber-50 dark:bg-amber-950/30' : ''}`} data-done={done[l.id]}>
-                  <Check on={done[l.id]} n={i + 1} />
-                  <span className={done[l.id] ? 'text-zinc-500 line-through decoration-zinc-400/60' : current?.id === l.id ? 'font-semibold' : ''}>{l.title}</span>
-                </li>
+                <Step key={l.id} n={i + 1} on={done[l.id]} current={!inTask && lesson?.id === l.id} id={l.id}>
+                  {l.title}
+                </Step>
               ))}
+              <Step n={BASICS.length + 1} on={taskDone} current={inTask && !taskDone} id="pick_place">
+                Task: put the {objName} on the {goalName}
+              </Step>
               <li className="flex items-start gap-2 rounded-md px-1.5 py-1" data-done={netOk}>
-                <Check on={netOk} n={LESSONS.length + 1} />
+                <Check on={netOk} n={BASICS.length + 2} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={netOk ? 'text-zinc-500' : 'font-medium'}>Your connection</span>
@@ -602,29 +533,20 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
                 </Link>
               </div>
             ) : (
-              <p className="mt-2 text-xs text-zinc-500">Finish every step to unlock claiming paid teleop tasks.</p>
+              <p className="mt-2 text-xs text-zinc-500">Four quick basics and the task once. That unlocks claiming paid teleop tasks.</p>
             )}
           </Panel>
 
-          <Panel title="Speed">
-            <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-semibold tabular-nums">{Math.round(effSpeed * 100)}%</span>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={slow} onChange={(e) => setSlow(e.target.checked)} />
-                Slow mode
-              </label>
-            </div>
-            <input type="range" min={0.1} max={1} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="mt-2 w-full accent-zinc-700 dark:accent-zinc-300" aria-label="Speed scale" />
-            <p className="mt-1 text-xs text-zinc-500">{slow ? `Slow mode caps speed at ${SLOW_CAP * 100}%.` : 'Full range. The real robot still applies its own limits.'}</p>
+          <Panel title="Driving">
+            <Tdm106DriveSettings drive={drive} snapAvailable snapNote={`Near the ${objName}, the hand is pulled toward its centre as you move, so lowering lines up by itself. Turn it off to practise without help.`} />
           </Panel>
 
-          <Panel title="Gripper">
-            <GripperSlider value={gripper} onChange={setGripper} />
-            <p className="mt-1 text-xs text-zinc-500">The gripper moves while you hold the clutch.</p>
-          </Panel>
-
-          <Panel title="Feel the lag" aside={<LatencyBadge videoMs={lag} cmdHz={ui.hz} driving={ui.engaged} simulated pauseAtMs={PAUSE_AT_MS} />}>
-            <div className="flex gap-1" role="group" aria-label="Simulated video delay">
+          <details className="gx-plate">
+            <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
+              Feel the lag
+              <LatencyBadge videoMs={lag} cmdHz={ui.hz} driving={ui.engaged} simulated pauseAtMs={PAUSE_AT_MS} />
+            </summary>
+            <div className="mt-2 flex gap-1" role="group" aria-label="Simulated video delay">
               {LAGS.map((l) => (
                 <button
                   key={l.ms}
@@ -641,45 +563,68 @@ export function PracticeConsole({ next, taskText }: { next?: string; taskText?: 
               ))}
             </div>
             <p className="mt-2 text-xs text-zinc-500">
-              Adds a delay to everything you send, like a slow network. Under 150 ms feels smooth; over 300 ms is too laggy to drive well; over 400 ms the real page pauses driving.
+              Adds a delay to everything you send, like a slow network. Under 150 ms feels smooth; over 300 ms is hard to drive; over 400 ms the real page pauses driving.
             </p>
-          </Panel>
-
-          <Panel title="Controls">
-            <p className="mb-2 text-xs text-zinc-500">{ui.pad ? `Gamepad connected: ${ui.pad}` : 'No gamepad found. Press any button on one to connect it.'}</p>
-            <KeyTable
-              rows={[
-                ['Drive (clutch)', 'Hold Space', 'Hold RT'],
-                ['Forward / back', 'W / S', 'Left stick'],
-                ['Left / right', 'A / D', 'Left stick'],
-                ['Up / down', 'Q / E', 'Right stick up/down'],
-                ['Turn', '← / →', 'Right stick left/right'],
-                ['Tilt', '↑ / ↓', 'D-pad up/down'],
-                ['Gripper', 'R open, F close', 'A toggles, LB/RB'],
-                ['Stop', 'Esc', 'B'],
-              ]}
-            />
-          </Panel>
+          </details>
         </aside>
       </div>
 
-      <InstructionsOverlay open={intro} onClose={closeIntro} kind="practice" taskText={taskText ?? 'Pick up the blue block and drop it in the bin'} doneLabel="Start practising" />
+      <InstructionsOverlay open={intro} onClose={closeIntro} kind="practice" taskText={taskText ?? source.spec.task} doneLabel="Back to practice" />
     </div>
   );
 }
 
-// ------------------------------------------------------------------ bits
+// ------------------------------------------------------------------ the twin, fed from the sim at ~30 Hz
 
-function SimFrame({ label, lagMs, compact, children }: { label: string; lagMs: number; compact?: boolean; children: ReactNode }) {
+function PracticeTwin({ sim, spec, camera, lagMs, controls = false, ghost = false }: { sim: Tdm106SceneSim; spec: SceneSpecV1; camera: string; lagMs: number; controls?: boolean; ghost?: boolean }) {
+  const [state, setState] = useState<RobotLiveState | null>(null);
+  const [rows, setRows] = useState<number[][] | undefined>(undefined);
+  const history = useRef<{ at: number; s: RobotLiveState }[]>([]);
+  const lagRef = useRef(lagMs);
+  lagRef.current = lagMs;
+  useEffect(() => {
+    let n = 0;
+    const id = window.setInterval(() => {
+      const now = performance.now();
+      const s = sim.liveState(Date.now());
+      // the simulated network delay applies to the picture too (as video would lag)
+      const h = history.current;
+      h.push({ at: now, s });
+      while (h.length > 2 && h[1].at <= now - lagRef.current) h.shift();
+      setState(lagRef.current ? h[0].s : s);
+      if (ghost && n++ % 3 === 0) {
+        const land = sim.landingJoints();
+        setRows(land ? [s.joints, land] : undefined);
+      }
+    }, 33);
+    return () => window.clearInterval(id);
+  }, [sim, ghost]);
+  return <RobotTwin3D state={state} spec={spec} camera={camera} sim controls={controls} ghost={rows} className="h-full w-full" />;
+}
+
+function View({ label, lagMs, compact, className = '', children }: { label: string; lagMs: number; compact?: boolean; className?: string; children: ReactNode }) {
   const tone = lagMs < 150 ? 'bg-emerald-600/85 text-white' : lagMs <= 300 ? 'bg-amber-500/90 text-black' : 'bg-red-600/90 text-white';
   return (
-    <div className="relative overflow-hidden rounded-lg bg-[#1d2630]" style={{ aspectRatio: String(SIM_VIEW_ASPECT) }}>
+    <div className={`relative overflow-hidden rounded-lg bg-[#2f2c40] ${className}`}>
       {children}
       <span className={`pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 font-medium text-white ${compact ? 'text-[10px] sm:text-xs' : 'text-xs'}`}>{label}</span>
-      <span className={`pointer-events-none absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs ${tone} ${compact ? 'hidden sm:inline' : ''}`}>
-        {lagMs} ms
-      </span>
+      {lagMs > 0 && (
+        <span className={`pointer-events-none absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs ${tone}`}>{lagMs} ms</span>
+      )}
     </div>
+  );
+}
+
+function Chip({ children }: { children: ReactNode }) {
+  return <span className="ml-2 rounded-sm bg-ochre-soft px-1.5 py-0.5 text-ink">{children}</span>;
+}
+
+function Step({ n, on, current, id, children }: { n: number; on: boolean; current: boolean; id: string; children: ReactNode }) {
+  return (
+    <li className={`flex items-center gap-2 rounded-md px-1.5 py-1 ${current ? 'bg-surface-sunken' : ''}`} data-done={on} data-lesson={id}>
+      <Check on={on} n={n} />
+      <span className={on ? 'text-zinc-500 line-through decoration-zinc-400/60' : current ? 'font-semibold' : ''}>{children}</span>
+    </li>
   );
 }
 
@@ -702,9 +647,9 @@ function Check({ on, n }: { on: boolean; n: number }) {
 
 function Panel({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="gx-plate">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+        <h2 className="gx-label uppercase">{title}</h2>
         {aside}
       </div>
       {children}
@@ -712,50 +657,7 @@ function Panel({ title, aside, children }: { title: string; aside?: ReactNode; c
   );
 }
 
-function GripperSlider({ value, onChange, compact }: { value: number; onChange: (v: number) => void; compact?: boolean }) {
-  return (
-    <div className={compact ? 'w-28' : 'w-full'}>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full touch-none accent-[#f0b400]"
-        aria-label="Gripper opening"
-        data-testid={compact ? 'tdm59-gripper-compact' : 'tdm59-gripper'}
-      />
-      <div className="flex justify-between text-xs text-zinc-500">
-        <span>Closed</span>
-        {!compact && <span className="tabular-nums">{Math.round(value * 100)}%</span>}
-        <span>Open</span>
-      </div>
-    </div>
-  );
-}
-
-function KeyTable({ rows }: { rows: [string, string, string][] }) {
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-left text-zinc-500">
-          <th className="pb-1 font-normal" />
-          <th className="pb-1 font-medium">Keyboard</th>
-          <th className="pb-1 font-medium">Gamepad</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([what, k, g]) => (
-          <tr key={what} className="border-t border-zinc-100 dark:border-zinc-800">
-            <td className="py-1 pr-2 text-zinc-600 dark:text-zinc-400">{what}</td>
-            <td className="py-1 pr-2">
-              <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1 font-sans dark:border-zinc-700 dark:bg-zinc-800">{k}</kbd>
-            </td>
-            <td className="py-1">{g}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+function fmtTime(ms: number) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

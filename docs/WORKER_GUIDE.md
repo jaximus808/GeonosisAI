@@ -47,3 +47,12 @@ Shared facts for every agent working tickets on Tandem canvas `HL4RZKEQ`. `CONTE
 - Python talks straight to the database over the WebSocket JSON protocol (`v1.json.spacetimedb`), with no sidecar. The reference client is `spikes/tdm-7-spacetime/stdb_ws.py` (only dependency: `websockets`), and TDM-16 turns it into the shared helper.
 - Reuse one keep-alive `httpx.Client` for HTTP reducer calls (~120 ms), or call reducers over the open socket. One-off requests cost 1–3 s in TLS handshakes.
 - Rows from other clients come in as positional arrays. The helper maps them to snake_case dicts using `/schema`.
+
+## SpacetimeDB reducer tickets (TDM-9..15): working together on one module
+- The schema is in `spacetime/spacetimedb/src/schema.ts` (and `enums.ts`); per-table notes are in `spacetime/schema.md`. Auth helpers are in `auth.ts`: `requireService`, `requireRole`, `requireOwner`. A foreign key of 0 means "none". Identity args over HTTP are `["0x<hex>"]`.
+- Put your reducers in **your own file** (`src/reducers/<area>.ts`) and add **one** re-export line to `src/index.ts`. Re-read `index.ts` right before you edit it, and check afterwards that the other tickets' lines are still there.
+- Change `schema.ts` only if your brief needs a new column or index. Keep it to one targeted edit, and say so in your result.
+- **Test locally first:** start a throwaway server on your own port (`spacetime start --listen-addr 127.0.0.1:<30xx>` with its own data dir under `spikes/` or `$TMPDIR`) and publish there.
+- **Publishing to maincloud is serialized.** Take the lock with `mkdir spacetime/.publish-lock` (retry every 10 s if it exists). Then run `npx tsc --noEmit` for the whole module; if another ticket's half-written file breaks the build, wait and retry rather than editing it. Publish with `--delete-data=never --yes=remote,migrate`, then `rmdir spacetime/.publish-lock`. Never leave the lock behind.
+- Every state-changing reducer appends an `event_log` row (actor, type, payload_json). Important reducers check `ctx.sender` with the auth helpers.
+- The **one-time event_log wipe is held** until right before the Saturday-night real run (TDM-72). Until then, test rows on maincloud are fine. Tag them `test.*`.

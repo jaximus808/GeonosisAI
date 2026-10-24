@@ -1,3 +1,4 @@
 node_modules/
 spacetimedb/dist/
 module_bindings/
+.publish-lock/

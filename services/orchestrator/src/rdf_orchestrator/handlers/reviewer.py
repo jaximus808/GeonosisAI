@@ -1,7 +1,7 @@
 """TDM-25: review every training-data episode as it lands.
 
-``episode`` entering ``review_status == 'pending'`` with kind clean_teleop / recovery_takeover /
-purchased (baseline and eval rollouts are created ``not_reviewed`` and never come here) ->
+``episode`` entering ``review_status == 'pending'`` with kind clean_teleop / recovery_takeover
+(purchased episodes go through dataset QA, TDM-92 + TDM-93; baseline and eval rollouts are created ``not_reviewed`` and never come here) ->
 ``reviewer.review_episode`` (deterministic checks, then Claude) -> ``record_review`` (qa_result rows +
 ``submit_review``; an accept reserves the payout in the same reducer).
 
@@ -50,11 +50,16 @@ make_judge: Callable[[rv.ReviewConfig], rv.Judge | None] = lambda cfg: rv.Claude
 make_stdb: Callable[[], Any] = _default_stdb
 
 
+# Purchased (dataset-offer) episodes are reviewed by the dataset QA pipeline instead: TDM-92's
+# deterministic checks, then TDM-93's LLM judgement (handlers/llm_qa.py), which writes the review.
+HANDLER_KINDS = tuple(k for k in rv.REVIEW_KINDS if k != "purchased")
+
+
 def already_reviewed(bus, episode_id: int) -> bool:
     return any(int(r.get("episode_id") or 0) == episode_id for r in bus.rows("review"))
 
 
-@on_enter("episode", where=lambda r: r.review_status == "pending" and r.kind in rv.REVIEW_KINDS,
+@on_enter("episode", where=lambda r: r.review_status == "pending" and r.kind in HANDLER_KINDS,
           name="tdm25_review_episode")
 def review_episode(ev: Event) -> None:
     ep = ev.row

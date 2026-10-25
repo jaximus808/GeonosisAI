@@ -18,7 +18,7 @@ from rdf_orchestrator import text_offers as tx
 from rdf_orchestrator.stream_api import get_identity_verifier, get_stream_stdb
 from rdf_orchestrator.text_offers_api import get_text_offers, text_offers_router
 
-TDM113_SECRET = "whsec_tdm113_test_key"
+TDM113_SECRET = "fake-webhook-key-test"
 TDM113_ME = "c3" + "ab" * 31
 TDM113_TOKEN = "browser-token-tdm113"
 

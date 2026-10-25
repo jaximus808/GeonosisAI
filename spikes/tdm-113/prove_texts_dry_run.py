@@ -26,7 +26,7 @@ from rdf_orchestrator.text_offers_api import get_text_offers, text_offers_router
 
 PORT = 8113
 TMP = Path(__file__).resolve().parent / "tmp" / "proof"
-SECRET = "whsec_tdm113_proof_only"
+SECRET = "fake-webhook-key-proof-only"
 ME, TOKEN = "c3" + "ab" * 31, "browser-token-tdm113-proof"
 PHONE = "(415) 555-0113"  # fictional
 

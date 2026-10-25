@@ -58,7 +58,8 @@ cmd_install() {
   "${SSH[@]}" 'set -e; d=$HOME/.config/geonosis; mkdir -p "$d"; chmod 700 "$d"; cat >"$d/robot.local.env"; chmod 600 "$d/robot.local.env"' \
     <"$REPO/services/robot-client/config/tdm118_northstar.env"
   step "user-level setup on the Jetson (no sudo)"
-  "${SSH[@]}" 'bash $HOME/geonosis/app/scripts/jetson/remote/tdm118_user_setup.sh --cloudflared'
+  # LARP's i2rt fork (docs/real-arm-safety.md): copied from the dist vrteleop_env_rh was installed from
+  "${SSH[@]}" "bash \$HOME/geonosis/app/scripts/jetson/remote/tdm118_user_setup.sh --cloudflared --i2rt-larp ${I2RT_LARP_SRC:-/home/northstar/arc-dist-0.3.2/arc-dist/i2rt-minimal}"
 }
 
 cmd_status() {

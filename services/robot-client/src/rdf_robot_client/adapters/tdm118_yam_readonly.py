@@ -16,6 +16,11 @@ How it reads the joints without moving anything:
   * ``connect()`` first listens on the bus for ``busy_listen_s`` (0.3 s) **without sending**. If any motor
     or controller frame is seen, another runtime (vrteleop) is driving the arm and we refuse. It also refuses
     while ``vrteleop-rh.service`` is active.
+  * It takes **LARP's bus flock** (``/run/lock/vrteleop-arm-<channel>.lock``) for as long as it is connected, so
+    it and vrteleop (or the motion adapter) can never share a bus (docs/real-arm-safety.md "Do" 1).
+  * ``TDM118_YAM_READ=disable_query`` is LARP's own passive read (``vrteleop doctor --identify``): the DM disable
+    frame, which an idle motor answers with its feedback frame. It is only safe on an idle arm, which is why the
+    flock and the busy-bus check come first. The default ``refresh`` changes no motor state at all.
   * ``TDM118_YAM_READ=listen`` sends nothing at all and only decodes feedback frames that are already on the
     bus. That's useful only while something else is talking to the motors.
 
@@ -45,6 +50,7 @@ from typing import Any, Protocol
 
 from .base import ArmError, ArmNotConnected, ArmState, ArmStatus
 from .yam import YamArm
+from .yam_larp import LARP_YAM_LIMITS, larp_release_bus_lock, larp_take_bus_lock
 
 log = logging.getLogger("rdf_robot_client.tdm118_yam_readonly")
 
@@ -52,6 +58,7 @@ log = logging.getLogger("rdf_robot_client.tdm118_yam_readonly")
 TDM118_REFRESH_ID = 0x7FF
 TDM118_REFRESH_OP = 0xCC
 TDM118_FEEDBACK_OFFSET = 0x10
+TDM118_DM_DISABLE = bytes([0xFF] * 7 + [0xFD])  # LARP's passive-read query (idle motors only)
 # (CAN id, motor type) for YAM v1 (i2rt robots/config/yam.yml) + the linear_4310 gripper on id 7.
 TDM118_YAM_MOTORS: tuple[tuple[int, str], ...] = (
     (1, "DM4340"), (2, "DM4340"), (3, "DM4340"), (4, "DM4310"), (5, "DM4310"), (6, "DM4310"), (7, "DM4310"),
@@ -87,13 +94,15 @@ class Tdm118Bus(Protocol):
 class Tdm118TxGuard:
     """Wraps a bus so the ONLY frame that can be transmitted is a refresh query to a YAM motor id."""
 
-    def __init__(self, bus: Tdm118Bus, motor_ids: Sequence[int]):
+    def __init__(self, bus: Tdm118Bus, motor_ids: Sequence[int], *, disable_query: bool = False):
         self.bus = bus
-        self.allowed = {tdm118_refresh_frame(m) for m in motor_ids}
+        self.allowed = {(TDM118_REFRESH_ID, tdm118_refresh_frame(m)) for m in motor_ids}
+        if disable_query:
+            self.allowed |= {(m, TDM118_DM_DISABLE) for m in motor_ids}
         self.sent = 0
 
     def send(self, arb_id: int, data: bytes) -> None:
-        if arb_id != TDM118_REFRESH_ID or bytes(data) not in self.allowed:
+        if (arb_id, bytes(data)) not in self.allowed:
             raise ReadOnlyArmError(f"TDM-118 read-only: refusing to transmit id=0x{arb_id:X} data={bytes(data).hex()}")
         self.bus.send(arb_id, bytes(data))
         self.sent += 1
@@ -193,6 +202,7 @@ class Tdm118ReadOnlyYamArm(YamArm):
         reply_timeout_s: float = 0.02,
         bus_factory: Callable[[str], Tdm118Bus] | None = None,
         vrteleop_check: Callable[[], bool] | None = tdm118_vrteleop_active,
+        lock_dir: str | None = None,
         **kw: Any,
     ) -> None:
         kw.setdefault("smoothing", False)
@@ -200,13 +210,16 @@ class Tdm118ReadOnlyYamArm(YamArm):
         if self.sim:
             raise ArmError("yam_readonly reads the real arm; use --adapter sim / mujoco for a simulator")
         self.read_mode = (read_mode or os.environ.get("TDM118_YAM_READ") or "refresh").strip().lower()
-        if self.read_mode not in ("refresh", "listen"):
-            raise ArmError(f"TDM118_YAM_READ must be refresh|listen, not {self.read_mode!r}")
+        if self.read_mode not in ("refresh", "disable_query", "listen"):
+            raise ArmError(f"TDM118_YAM_READ must be refresh|disable_query|listen, not {self.read_mode!r}")
+        self.limits = LARP_YAM_LIMITS  # the real arm's limits (docs/real-arm-safety.md), for FK/IK and the twin
         self.read_hz = float(read_hz or os.environ.get("TDM118_YAM_READ_HZ") or 20.0)
         self.busy_listen_s = busy_listen_s
         self.reply_timeout_s = reply_timeout_s
         self._bus_factory = bus_factory or Tdm118SocketCanBus
         self._vrteleop_check = vrteleop_check
+        self.lock_dir = lock_dir
+        self._lock_fd: int | None = None
         motors = TDM118_YAM_MOTORS if self.has_gripper else TDM118_YAM_MOTORS[: self.dof]
         self.motors = dict(motors)
         self._bus: Tdm118TxGuard | None = None
@@ -235,9 +248,15 @@ class Tdm118ReadOnlyYamArm(YamArm):
             if self._vrteleop_check is not None and self._vrteleop_check():
                 raise ArmError("vrteleop-rh is running and owns the CAN buses: the user stops it first "
                                "(sudo systemctl stop vrteleop-rh). Refusing to open CAN.")
-            bus = self._bus_factory(self.channel)
+            self._lock_fd = larp_take_bus_lock(self.channel, self.lock_dir)
             try:
-                if self.read_mode == "refresh":
+                bus = self._bus_factory(self.channel)
+            except BaseException:
+                larp_release_bus_lock(self._lock_fd)
+                self._lock_fd = None
+                raise
+            try:
+                if self.read_mode != "listen":
                     deadline = time.monotonic() + self.busy_listen_s
                     while (left := deadline - time.monotonic()) > 0:
                         got = bus.recv(left)
@@ -246,8 +265,10 @@ class Tdm118ReadOnlyYamArm(YamArm):
                                            "anything): another runtime is driving this arm. Refusing.")
             except BaseException:
                 bus.close()
+                larp_release_bus_lock(self._lock_fd)
+                self._lock_fd = None
                 raise
-            self._bus = Tdm118TxGuard(bus, list(self.motors))
+            self._bus = Tdm118TxGuard(bus, list(self.motors), disable_query=self.read_mode == "disable_query")
             self._fault = None
             self._reader_stop.clear()
             self._poll_t0 = time.monotonic()
@@ -271,6 +292,8 @@ class Tdm118ReadOnlyYamArm(YamArm):
                     pass
             self._bus = None
             self._reader = None
+            larp_release_bus_lock(self._lock_fd)
+            self._lock_fd = None
 
     # ------------------------------------------------------------------ reading
     def _read_loop(self) -> None:
@@ -297,7 +320,11 @@ class Tdm118ReadOnlyYamArm(YamArm):
         if self.read_mode == "refresh":
             for mid in self.motors:
                 bus.send(TDM118_REFRESH_ID, tdm118_refresh_frame(mid))
-        deadline = time.monotonic() + (self.reply_timeout_s if self.read_mode == "refresh" else 1.0 / self.read_hz)
+        elif self.read_mode == "disable_query":
+            for mid in self.motors:
+                bus.send(mid, TDM118_DM_DISABLE)
+        polling = self.read_mode != "listen"
+        deadline = time.monotonic() + (self.reply_timeout_s if polling else 1.0 / self.read_hz)
         seen: set[int] = set()
         while seen != want and (left := deadline - time.monotonic()) > 0:
             got = bus.recv(left)

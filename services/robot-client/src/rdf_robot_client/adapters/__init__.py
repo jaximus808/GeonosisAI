@@ -7,6 +7,9 @@ Registered names:
   * ``yam``  I2RT YAM (TDM-46), imported lazily from ``adapters/yam.py`` so laptops without the
              I2RT SDK can still import this package. TDM-46: define ``YamArm(ArmAdapter)`` there,
              accepting ``**kwargs`` from ``make_adapter("yam", **kwargs)``.
+  * ``yam`` on hardware is ``LarpSafeYamArm`` (``adapters/yam_larp.py``): LARP's i2rt fork, LARP's flock,
+             gains and limits, <= 0.3 rad/s rate limit, damp-until-settled release (docs/real-arm-safety.md).
+             In sim it is plain YamArm on stock i2rt.
   * ``yam_readonly``  TDM-118: the real YAM read over CAN with every motion path refused
              (``adapters/tdm118_yam_readonly.py``; DM refresh-status query only).
 """
@@ -35,7 +38,7 @@ from .base import (
 # name -> "module:Class" (lazy, so a missing SDK only fails when that adapter is chosen)
 ADAPTERS: dict[str, str] = {
     "sim": "rdf_robot_client.adapters.sim:SimArm",
-    "yam": "rdf_robot_client.adapters.yam:YamArm",
+    "yam": "rdf_robot_client.adapters.yam_larp:LarpSafeYamArm",  # YamArm + docs/real-arm-safety.md on hardware
     "mujoco": "rdf_robot_client.adapters.mujoco_sim:MujocoSimArm",
     "yam_readonly": "rdf_robot_client.adapters.tdm118_yam_readonly:Tdm118ReadOnlyYamArm",  # TDM-118: joint reads, no motion
 }

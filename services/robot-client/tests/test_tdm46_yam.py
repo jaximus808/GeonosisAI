@@ -128,7 +128,8 @@ def _arm(smoothing: bool = False, q0: tuple[float, ...] = YAM_READY, g0: float =
 
 
 def test_make_adapter_yam_without_hardware() -> None:
-    arm = make_adapter("yam", kinematics="poe")
+    # sim = stock i2rt 120c3c8 limits; on hardware "yam" is LarpSafeYamArm with LARP's (tests/test_tdm119_yam_larp.py)
+    arm = make_adapter("yam", kinematics="poe", sim=True)
     assert isinstance(arm, YamArm) and arm.name == "yam" and arm.dof == 6
     assert arm.limits.lower == YAM_V1_LOWER and arm.limits.upper == YAM_V1_UPPER
     assert arm.sdk_clip_limits.lower[1] == pytest.approx(-0.15)

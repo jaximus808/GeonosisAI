@@ -2,47 +2,48 @@
 # Laptop: `python -m rdf_robot_client.cameras check --synthetic` swaps every camera for a fake one
 # with the same size/fps/orientation; `--webcam 0` uses the laptop webcam as the reference camera.
 # Jetson setup steps: services/robot-client/docs/cameras-jetson-checklist.md
+#
+# TDM-120: the northstar Jetson (docs/jetson-inventory.md section 3, docs/real-arm-safety.md "Cameras").
+# RealSense colour over plain V4L2 (UVC). The colour nodes are YUYV only (no MJPG) and are the index4 node
+# of each D405 and the interface-3 node of the D435 (video4 / video10 / video16 today; never use /dev/videoN).
+# 640x360 like LARP and the allenai training data (both letterbox to 224 for the policy). There is no
+# cp311/aarch64 pyrealsense2 wheel, so we can't open them by RealSense serial.
+#   top   = LARP "exo"    D435 SN 420222071940, USB port 1-1.1.3. Its colour node has no by-id link: by-path.
+#   wrist = LARP "wristR" D405 SN 353322271521 (right arm, can_right), USB serial 344123071140: by-id.
+#           (wristL D405 SN 260322276368 is USB serial 260323072101 -> ...Camera_405_260323072101-video-index4.)
+# D405 firmware: 5.12.14.100 opens but sends no frames, 5.15.1.55 works (LARP). Check: rs-enumerate-devices -s.
 
 reference: top            # its frames define the synced timeline; others pair to the nearest frame
-pair_tolerance_ms: 20     # a pair is in_sync when every camera is within this of the reference frame
-buffer_seconds: 1.0       # ring buffer per camera (full-res frames, ~0.9 MB each at 640x480)
+pair_tolerance_ms: 40     # 15 fps = 67 ms frame period
+buffer_seconds: 1.0       # ring buffer per camera
 policy_size: 224          # S-05a: pi0.5 images, letterboxed (resize_with_pad)
-stream: {width: 424, jpeg_quality: 70, fps: 15}   # MJPEG feed for the browser (TDM-55)
+stream: {width: 640, jpeg_quality: 70, fps: 15}   # MJPEG feed for the browser (TDM-55)
 
 cameras:
   top:                    # exo / scene camera -> observation.images.top -> policy observation/image
     source: v4l2
-    # Prefer a by-id path (follows the camera) or by-path (follows the USB port). Globs are allowed.
-    # TODO on the Jetson: replace with the real path from `python -m rdf_robot_client.cameras list`.
-    device: /dev/video0
+    device: /dev/v4l/by-path/platform-3610000.usb-usb-0:1.1.3:1.3-video-index0
     width: 640
-    height: 480
-    fps: 30
-    fourcc: MJPG          # needed: two YUYV 640x480@30 streams do not fit on one USB 2 bus
+    height: 360
+    fps: 15
+    fourcc: YUYV
     rotate: 0             # 0/90/180/270 clockwise; set so the table is at the bottom of the image
     flip: none            # none / horizontal / vertical
     timestamps: auto      # driver (V4L2 buffer stamp, CLOCK_MONOTONIC) if plausible, else host
-    v4l2_controls:        # applied with v4l2-ctl after open; old/new kernel names both work
-      exposure_dynamic_framerate: 0   # do NOT let auto-exposure drop to 15 fps in dim light
-      power_line_frequency: 2         # 60 Hz mains (US): avoids flicker banding
   wrist:                  # wrist camera -> observation.images.wrist -> policy observation/wrist_image
     source: v4l2
-    device: /dev/video2   # UVC cameras take two nodes each (video0+1, video2+3)
+    device: /dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_405_Intel_R__RealSense_TM__Depth_Camera_405_344123071140-video-index4
     width: 640
-    height: 480
-    fps: 30
-    fourcc: MJPG
+    height: 360
+    fps: 15
+    fourcc: YUYV
     rotate: 0             # set so the gripper fingers are at the bottom of the image
     flip: none
     timestamps: auto
-    v4l2_controls:
-      exposure_dynamic_framerate: 0
-      power_line_frequency: 2
 
 # GStreamer alternative (needs the JetPack system OpenCV built with GStreamer; the pip wheel has none):
 #   top:
 #     source: gstreamer
 #     pipeline: >-
-#       v4l2src device=/dev/video0 io-mode=2 ! image/jpeg,width=640,height=480,framerate=30/1 !
-#       nvv4l2decoder mjpeg=1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert !
-#       video/x-raw,format=BGR ! appsink drop=1 max-buffers=2 sync=false
+#       v4l2src device=/dev/video16 io-mode=2 ! video/x-raw,format=YUY2,width=640,height=360,framerate=15/1 !
+#       videoconvert ! video/x-raw,format=BGR ! appsink drop=1 max-buffers=2 sync=false

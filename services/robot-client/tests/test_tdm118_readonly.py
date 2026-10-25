@@ -65,6 +65,12 @@ class Tdm118FakeDmBus:
 REST = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0, 7: 0.5}
 
 
+@pytest.fixture(autouse=True)
+def tdm118_lock_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("YAM_LOCK_DIR", str(tmp_path))
+    return tmp_path
+
+
 def _arm(bus: Tdm118FakeDmBus, **kw) -> Tdm118ReadOnlyYamArm:
     kw.setdefault("vrteleop_check", lambda: False)
     return Tdm118ReadOnlyYamArm(channel="can_right", bus_factory=lambda ch: bus, read_hz=100, kinematics="poe", **kw)
@@ -198,10 +204,38 @@ def test_tdm120_northstar_camera_config_check(capsys, monkeypatch):
 
     from rdf_robot_client import tdm118_readonly
 
-    cfg = Path(__file__).resolve().parents[1] / "config" / "cameras.tdm120_northstar.yaml"
+    cfg = Path(__file__).resolve().parents[1] / "config" / "cameras.yaml"
     monkeypatch.setenv("RDF_CAMERAS_CONFIG", str(cfg))
     assert tdm118_readonly.run(["--check", "--no-vrteleop-check", "--cameras", "config"]) == 0
     out = json.loads(capsys.readouterr().out)
     cams = {c["name"]: c for c in out["camera_rig"]["cameras"]}
-    assert set(cams) == {"top", "wrist"} and all(c["fourcc"] == "YUYV" and c["size"] == [640, 480] for c in cams.values())
+    assert set(cams) == {"top", "wrist"} and all(c["fourcc"] == "YUYV" and c["size"] == [640, 360] for c in cams.values())
     assert 15 <= out["camera_rig"]["stream"]["fps"] <= 20
+
+
+def test_takes_larps_bus_lock(tdm118_lock_dir):
+    import fcntl
+    import os
+
+    from rdf_robot_client.adapters.yam_larp import larp_lock_path
+
+    fd = os.open(larp_lock_path("can_right"), os.O_RDWR | os.O_CREAT, 0o666)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    bus = Tdm118FakeDmBus(REST)
+    try:
+        with pytest.raises(ArmError, match="in use"):
+            _arm(bus).connect()
+        assert bus.sent == []
+    finally:
+        os.close(fd)
+    arm = _arm(Tdm118FakeDmBus(REST))
+    arm.connect()
+    arm.disconnect()
+
+
+def test_disable_query_mode_is_larps_passive_read():
+    bus = Tdm118FakeDmBus(REST)
+    g = Tdm118TxGuard(bus, [1, 2, 3, 4, 5, 6, 7], disable_query=True)
+    g.send(0x03, bytes([0xFF] * 7 + [0xFD]))
+    with pytest.raises(ReadOnlyArmError):
+        g.send(0x03, bytes([0xFF] * 7 + [0xFC]))  # enable is never allowed

@@ -12,7 +12,7 @@ What runs:
     refuses every ``command_*`` call too.
   * the TDM-55 stream server with ``/ws/state`` (TDM-96 live state for RobotView) and, with
     ``--cameras config`` (TDM-120; ``$TDM118_CAMERAS``), ``/ws/cameras`` from ``$RDF_CAMERAS_CONFIG``
-    (northstar: ``config/cameras.tdm120_northstar.yaml``). **No ``/ws/control``** is mounted, so there is no
+    (northstar: ``config/cameras.yaml``). **No ``/ws/control``** is mounted, so there is no
     teleop input path. Cameras are read-only devices; a camera that fails to open just retries.
 
 Refuses to start (exit 3) while ``vrteleop-rh`` is active: it owns the CAN buses and the cameras.

@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # TDM-118: user-level (no sudo) setup of the GeonosisAI robot client on the northstar Jetson.
 # Run by scripts/jetson/tdm118_geonosis.sh install after the bundle is synced to ~/geonosis/app.
-#   bash tdm118_user_setup.sh [--cloudflared] [--dry-run]
+#   bash tdm118_user_setup.sh [--cloudflared] [--i2rt-larp SRC_DIR] [--dry-run]
 # * venv: uv sync of services/robot-client (Python 3.11, uv-managed; the system python is untouched)
+# * --i2rt-larp SRC_DIR: LARP's patched i2rt fork (docs/real-arm-safety.md), COPIED read-only from SRC_DIR
+#   (e.g. ~/arc-dist-0.3.2/arc-dist/i2rt-minimal, what vrteleop_env_rh was installed from) to
+#   ~/geonosis/i2rt-larp-<version>, its sources hash-checked against LARP's installed copy, then installed
+#   into our venv. LARP's own files and venv are only read.
 # * cloudflared (optional): the static arm64 binary into ~/.local/bin (for the /ws/state tunnel)
 # * geonosis-robot.service into ~/.config/systemd/user/, daemon-reload, NOT enabled, NOT started
 # Never touches vrteleop, CAN, the cameras, /etc or anything outside ~/geonosis, ~/.config, ~/.local/bin.
 set -euo pipefail
-CLOUDFLARED=0; DRY=0
-for a in "$@"; do case "$a" in --cloudflared) CLOUDFLARED=1 ;; --dry-run) DRY=1 ;; *) echo "unknown arg $a" >&2; exit 2 ;; esac; done
+CLOUDFLARED=0; DRY=0; I2RT_LARP=""
+while [ $# -gt 0 ]; do case "$1" in --cloudflared) CLOUDFLARED=1 ;; --dry-run) DRY=1 ;; --i2rt-larp) I2RT_LARP="$2"; shift ;;
+  *) echo "unknown arg $1" >&2; exit 2 ;; esac; shift; done
 APP="$HOME/geonosis/app"; RC="$APP/services/robot-client"; UNIT_DIR="$HOME/.config/systemd/user"
 CFG="$HOME/.config/geonosis"
 CF_VER="${CLOUDFLARED_VERSION:-latest}"   # a release tag, or latest
@@ -25,6 +30,31 @@ if [ "$DRY" = 1 ]; then say "would: uv sync --locked --inexact in $RC"; else
   (cd "$RC" && { uv sync --locked --inexact --quiet 2>/dev/null || { say "uv.lock stale for this bundle: syncing without --locked"; uv sync --inexact --quiet; }; })
   "$RC/.venv/bin/python" -c 'import rdf_robot_client.tdm118_readonly, rdf_robot_client.stream, cv2, numpy, websockets; print("  [geonosis] imports ok")'
   say "venv: $("$RC/.venv/bin/python" -V) $(du -sh "$RC/.venv" | cut -f1)"
+fi
+
+# 1b. LARP's i2rt fork (copy, verify, install). Never stock i2rt on the real arm.
+if [ -n "$I2RT_LARP" ]; then
+  [ -f "$I2RT_LARP/pyproject.toml" ] && [ -d "$I2RT_LARP/i2rt" ] || { echo "not an i2rt source dir: $I2RT_LARP" >&2; exit 3; }
+  ver="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$I2RT_LARP/pyproject.toml" | head -1)"
+  src_hash() { (cd "$1" && find i2rt -name '*.py' | sort | xargs sha256sum | sha256sum | cut -d' ' -f1); }
+  want="$(src_hash "$I2RT_LARP")"
+  larp_site="$(ls -d "$HOME"/vrteleop_env_rh/lib/python3*/site-packages 2>/dev/null | head -1)"
+  if [ -n "$larp_site" ] && [ -d "$larp_site/i2rt" ]; then
+    have="$(src_hash "$larp_site")"
+    [ "$have" = "$want" ] && say "i2rt fork $ver: sources match LARP's installed copy ($want)" \
+      || { echo "i2rt sources in $I2RT_LARP differ from LARP's installed copy ($want vs $have); refusing" >&2; exit 3; }
+  fi
+  dst="$HOME/geonosis/i2rt-larp-$ver"
+  if [ "$DRY" = 1 ]; then say "would: copy $I2RT_LARP -> $dst and uv pip install it"; else
+    if [ ! -f "$dst/.src-sha256" ] || [ "$(cat "$dst/.src-sha256")" != "$want" ]; then
+      rm -rf "$dst"; mkdir -p "$dst"; cp -a "$I2RT_LARP/." "$dst/"; printf '%s\n' "$want" >"$dst/.src-sha256"
+    fi
+    if [ "$("$RC/.venv/bin/python" -c 'import importlib.metadata as m; print(m.version("i2rt"))' 2>/dev/null)" != "$ver" ] \
+       || [ "$(cat "$RC/.venv/.i2rt-larp" 2>/dev/null)" != "$want" ]; then
+      uv pip install --quiet --python "$RC/.venv/bin/python" "$dst" && printf '%s\n' "$want" >"$RC/.venv/.i2rt-larp"
+    fi
+    "$RC/.venv/bin/python" -c 'import importlib.metadata as m, inspect; from i2rt.robots.motor_chain_robot import MotorChainRobot as R; assert "release_motors" in inspect.signature(R.close).parameters; print("  [geonosis] i2rt", m.version("i2rt"), "(LARP fork) ok")'
+  fi
 fi
 
 # 2. cloudflared (user binary, no package install)

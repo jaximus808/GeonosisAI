@@ -239,3 +239,17 @@ def test_disable_query_mode_is_larps_passive_read():
     g.send(0x03, bytes([0xFF] * 7 + [0xFD]))
     with pytest.raises(ReadOnlyArmError):
         g.send(0x03, bytes([0xFF] * 7 + [0xFC]))  # enable is never allowed
+
+
+def test_passive_read_prints_joints_and_releases(capsys, monkeypatch):
+    import json
+
+    from rdf_robot_client import tdm118_readonly
+
+    bus = Tdm118FakeDmBus({**REST, 2: 0.25})
+    arm = _arm(bus)
+    assert tdm118_readonly.tdm118_passive_read(arm, 0.0, lambda: False) == 0
+    line = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert line["joints"][1] == pytest.approx(0.25, abs=1e-3) and line["fault"] is None
+    assert bus.closed and all(a == TDM118_REFRESH_ID for a, _ in bus.sent)
+    assert tdm118_readonly.tdm118_passive_read(_arm(Tdm118FakeDmBus(REST)), 0.0, lambda: True) == 3

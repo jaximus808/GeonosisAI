@@ -2,6 +2,8 @@
 
     python -m rdf_robot_client.tdm118_readonly            # what geonosis-robot.service runs on the Jetson
     python -m rdf_robot_client.tdm118_readonly --check    # config check only: no CAN, no SpacetimeDB
+    python -m rdf_robot_client.tdm118_readonly --passive-read 10   # joints only: CAN refresh queries, prints
+                                                                   # 2 lines/s, no SpacetimeDB, no stream, exits
 
 What runs:
   * the real ``RobotClient`` command loop: registers ``$ROBOT_ID`` (``yam-01``) with embodiment
@@ -52,6 +54,43 @@ def tdm118_handlers() -> dict[str, Any]:
     return {n: tdm118_refuse for n in sorted(names) if n not in TDM118_ALLOWED_JOBS}
 
 
+def tdm118_passive_read(arm: Any, seconds: float, vr_check: Any) -> int:
+    """The first hardware step: joints over CAN, nothing else. Prints one JSON line every 0.5 s."""
+    import time
+
+    if vr_check is not None and vr_check():
+        print(f"vrteleop-rh is running. Stop it first: {TDM118_STOP_VRTELEOP}", file=sys.stderr)
+        return TDM118_EXIT_REFUSED
+    try:
+        arm.connect()
+    except Exception as e:  # noqa: BLE001 - lock held, bus busy, CAN down: one clear line
+        print(f"passive read refused: {e}", file=sys.stderr)
+        return TDM118_EXIT_REFUSED
+    first: list[float] | None = None
+    try:
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            st = arm.status()
+            line: dict[str, Any] = {"t": round(time.time(), 2), "fault": st.fault,
+                                    "read_hz": st.detail.get("read_hz"), "frames_sent": st.detail.get("frames_sent"),
+                                    "motor_states": {m: v["state"] for m, v in st.detail.get("motors", {}).items()},
+                                    "gripper_raw": st.detail.get("gripper_raw")}
+            try:
+                q = [round(v, 4) for v in arm.read_state().joints]
+                first = first or q
+                line.update(joints=q, moved=[round(b - a, 4) for a, b in zip(first, q)])
+            except Exception as e:  # noqa: BLE001
+                line["joints"] = None
+                line["error"] = str(e)[:200]
+            print(json.dumps(line), flush=True)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
+    finally:
+        arm.disconnect()
+    return 0 if first is not None else 1
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="tdm118_readonly", description="GeonosisAI read-only YAM client (TDM-118)")
     p.add_argument("--name", default=None, help="robot.name (default $ROBOT_ID, else yam-01)")
@@ -60,6 +99,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--port", type=int, default=None, help="stream server port (default $RDF_STREAM_PORT or 8091)")
     p.add_argument("--cameras", choices=["off", "config"], default=None,
                    help="off (default) | config: real cameras from $RDF_CAMERAS_CONFIG (default $TDM118_CAMERAS)")
+    p.add_argument("--passive-read", type=float, default=None, metavar="SECONDS",
+                   help="open only the read-only arm, print joints (2 Hz) for SECONDS, then exit")
     p.add_argument("--check", action="store_true", help="offline config check: build the adapter, open nothing")
     p.add_argument("--no-vrteleop-check", action="store_true", help=argparse.SUPPRESS)  # tests only
     return p.parse_args(argv)
@@ -87,6 +128,8 @@ def run(argv: list[str] | None = None) -> int:
                 for c in rc.cameras]}
         print(json.dumps(out, default=str, indent=1))
         return 0
+    if a.passive_read is not None:
+        return tdm118_passive_read(arm, a.passive_read, vr_check)
     if vr_check is not None and vr_check():
         print(f"vrteleop-rh is running and owns the CAN buses and cameras. Stop it first: {TDM118_STOP_VRTELEOP}",
               file=sys.stderr)

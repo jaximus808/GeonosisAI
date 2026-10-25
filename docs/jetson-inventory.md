@@ -166,3 +166,32 @@ After the session, give the hardware back to vrteleop (stop ours first so the ca
 sudo systemctl start vrteleop-rh
 ```
 `vrteleop-rh` is `enabled`, so it also comes back on its own at the next reboot.
+
+## 9. GeonosisAI on northstar (TDM-118 / TDM-120): what is installed and how to run it
+
+Rules: `docs/real-arm-safety.md` (from LARP). Everything is user-level, with no sudo and nothing of vrteleop's touched.
+Installed by `scripts/jetson/tdm118_geonosis.sh install` from committed HEAD:
+
+| what | where |
+|---|---|
+| code bundle | `~/geonosis/app` (robot-client, common, scripts/jetson) |
+| venv (py3.11, 316 MB) + **LARP's i2rt fork 1.1.1** | `~/geonosis/app/services/robot-client/.venv`; fork copied from `~/arc-dist-0.3.2/arc-dist/i2rt-minimal` to `~/geonosis/i2rt-larp-1.1.1` (sources sha256 `1819a1b2...` match `vrteleop_env_rh`) |
+| env | `~/.config/geonosis/robot.env` (0600: SpacetimeDB host/db, the `robot_client@northstar` token, `ROBOT_ID=yam-01`, stream secret, media URL) and `robot.local.env` (`YAM_CAN_CHANNEL=can_right`, cameras, stream) |
+| tunnel | `~/.local/bin/cloudflared` |
+| service | `~/.config/systemd/user/geonosis-robot.service`, **disabled**; runs `rdf_robot_client.tdm118_readonly` (read-only arm, `/ws/state` + `/ws/cameras`, no `/ws/control`). Its `ExecStartPre` guard refuses while `vrteleop-rh` is active |
+
+D405 firmware: not readable while vrteleop holds the cameras. USB `bcdDevice` differs between the two D405s:
+wristR (USB serial 344123071140) is `0x50ce`, while wristL (260323072101) and the D435 are `0x50f1`. Read the real
+version with `rs-enumerate-devices -s` once vrteleop is stopped. LARP: 5.12.14.100 opens but sends no frames.
+
+### The user's commands
+
+Run them on the Jetson, or from the laptop with `ssh -t northstar@northstar '<cmd>'`.
+
+1. Free the hardware: `sudo systemctl stop vrteleop-rh`
+2. Check (agent can run): `pgrep -af "vrteleop|yam_robot_relay" || echo none`; `flock -n /run/lock/vrteleop-arm-can_right.lock true && echo lock free`; `ip -details link show can_right | grep -o "ERROR-[A-Z]*"` (want `ERROR-ACTIVE`)
+3. **First hardware step, passive joint read only** (right arm, 10 s, DM refresh-status queries, no enable, no SpacetimeDB):
+   `cd ~/geonosis/app/services/robot-client && set -a && . ~/.config/geonosis/robot.local.env && set +a && .venv/bin/python -m rdf_robot_client.tdm118_readonly --passive-read 10`
+   (move the right arm by hand during it: `moved` should change only for that arm)
+4. Read-only client (yam-01 online, live joints on `/ws/state`, cameras): `systemctl --user start geonosis-robot`, then logs: `journalctl --user -u geonosis-robot -f`
+5. Back to vrteleop: `systemctl --user stop geonosis-robot && sudo systemctl start vrteleop-rh`

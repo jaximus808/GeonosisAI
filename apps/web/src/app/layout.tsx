@@ -22,6 +22,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: '#13110f',
   colorScheme: 'dark light',
+  // env(safe-area-inset-*) is non-zero only with cover: the teleop phone console pads its sticks above the home bar
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

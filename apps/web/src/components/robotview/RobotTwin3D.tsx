@@ -252,7 +252,8 @@ function Body({ body, geoms, materials, jointRefs, graspRef, shadows, only }: {
   );
 }
 
-function Arm({ read, materials, graspRef, shadows = true, only }: {
+/** Exported for the landing hero (components/landing/HeroForgeScene.tsx): the same posed YAM, its own materials. */
+export function Arm({ read, materials, graspRef, shadows = true, only }: {
   /** Draw only these bodies' meshes (the chain is still posed in full). */
   only?: ReadonlySet<string>;
   read: () => { q: number[]; gripper: number } | null;

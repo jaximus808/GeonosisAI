@@ -3,10 +3,12 @@ import Link from 'next/link';
 import { ButtonLink } from '@/components/brand/Button';
 import { GX_LINE_STATIONS, Line, gxTicketStations } from '@/components/brand/Line';
 import { Wordmark } from '@/components/brand/Wordmark';
+import { HeroForge } from '@/components/landing/HeroForge';
 import { LandingLiveStrip } from '@/components/tdm111/LandingLiveStrip';
 
 // TDM-111: the public landing page. Open without the access code (lib/tdm110/access.ts, public_guard.py);
-// the operator dashboard moved to /dashboard. No three.js here: text, the brand Line and four live numbers.
+// the operator dashboard moved to /dashboard. Text, the brand Line and four live numbers; the hero's 3D arm
+// (components/landing/HeroForge) loads its three.js chunk after first paint.
 
 export const metadata: Metadata = {
   title: 'GeonosisAI: ticket in, deployed robot out',
@@ -40,26 +42,33 @@ export default function Landing() {
       {/* the hero wordmark scales with the viewport so it fits a 390px phone */}
       <style>{`.tdm111-landing .gx-wordmark-hero{font-size:clamp(46px,13vw,104px)}@media (min-width:640px){.tdm111-landing .tdm111-tag{font-size:56px;line-height:56px}}`}</style>
 
-      <section className="flex flex-col gap-6 pt-4 sm:pt-10" aria-labelledby="tdm111-tagline">
-        <Wordmark size="hero" />
-        <h1 id="tdm111-tagline" className="gx-display-l tdm111-tag max-w-[18ch]">
-          Ticket in. Deployed robot out.
-        </h1>
-        <p className="max-w-[60ch] text-lg leading-7 text-ink-muted">
-          File a ticket for a robot task. The foundry runs a baseline, buys exactly the data that fixes the failures
-          from people on their phones, fine-tunes π0.5 and ships it.
-        </p>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <ButtonLink href="/join" variant="primary" className="justify-center">
-            Earn by teaching a robot
-          </ButtonLink>
-          <ButtonLink href="/ops/login?next=/tickets/new" className="justify-center">
-            File a ticket
-          </ButtonLink>
-          <Link href="/live" className="gx-small px-1 py-2 text-arc underline-offset-2 hover:underline sm:ml-2">
-            Watch live
-          </Link>
+      <section
+        className="grid grid-cols-1 gap-8 pt-4 sm:pt-10 min-[900px]:grid-cols-[minmax(480px,1.08fr)_minmax(0,1fr)] min-[900px]:items-center min-[900px]:gap-6"
+        aria-labelledby="tdm111-tagline"
+      >
+        <div className="flex flex-col gap-6">
+          <Wordmark size="hero" />
+          <h1 id="tdm111-tagline" className="gx-display-l tdm111-tag max-w-[18ch]">
+            Ticket in. Deployed robot out.
+          </h1>
+          <p className="max-w-[60ch] text-lg leading-7 text-ink-muted">
+            File a ticket for a robot task. The foundry runs a baseline, buys exactly the data that fixes the failures
+            from people on their phones, fine-tunes π0.5 and ships it.
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <ButtonLink href="/join" variant="primary" className="justify-center">
+              Earn by teaching a robot
+            </ButtonLink>
+            <ButtonLink href="/ops/login?next=/tickets/new" className="justify-center">
+              File a ticket
+            </ButtonLink>
+            <Link href="/live" className="gx-small px-1 py-2 text-arc underline-offset-2 hover:underline sm:ml-2">
+              Watch live
+            </Link>
+          </div>
         </div>
+        {/* the showpiece: the YAM picking a cube onto a plate (three.js loads after first paint; the box is reserved) */}
+        <HeroForge className="h-[260px] min-[640px]:h-[340px] min-[900px]:-my-6 min-[900px]:h-[clamp(400px,38vw,500px)]" />
       </section>
 
       <LandingLiveStrip />

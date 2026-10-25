@@ -113,3 +113,41 @@ describe('FactoryIso uses the same liveness', async () => {
     assert.equal(b.thinking, true);
   });
 });
+
+describe('awResetAsk (real robot reset between eval trials)', () => {
+  const reset = (id: number, status = 'open', robotId = 4, trialId = 7) => ({
+    id: BigInt(id), type: 'reset', status, robotId: BigInt(robotId), instructions: `Reset the scene. Pays $2.00. [ref eval_trial:${trialId}]`,
+  });
+  const trials = [{ id: 7n, evalRunId: 3n, trialIndex: 1 }];
+  const runs = [{ id: 3n, trials: 3 }];
+  const real = (rid: number) => rid !== 9;
+
+  it('asks for the newest open reset on a real robot, with the trial', () => {
+    const a = aw.awResetAsk({ tasks: [reset(30), reset(31)], trials, runs, isSim: (r) => !real(r) })!;
+    assert.equal(a.taskId, 31);
+    assert.equal(a.trial, 'after trial 2/3');
+    assert.equal(a.ask, 'Reset the scene: put the cube back at the start, then tap Done');
+    assert.equal(a.wait, 'Waiting for you to reset the scene (after trial 2/3)');
+  });
+  it('never asks for a sim robot, a done reset or another task type', () => {
+    assert.equal(aw.awResetAsk({ tasks: [reset(30, 'open', 9)], trials, runs, isSim: (r) => !real(r) }), null);
+    assert.equal(aw.awResetAsk({ tasks: [reset(30, 'completed')], trials, runs, isSim: () => false }), null);
+    assert.equal(aw.awResetAsk({ tasks: [{ ...reset(30), type: 'clean_teleop' }], trials, runs, isSim: () => false }), null);
+  });
+  it('the eval workbench waits on you, with the ask as headline and a ⏸ line', () => {
+    const events = [moved(0, 'train', 'eval'), step(1, 'eval', 'Trial 2/3: fail')];
+    const nowUs = (T0 + 20) * 1e6;
+    const floor = tdm112Floor({ ticket: ticket('eval'), events, nowUs });
+    const st = floor.stations.find((s) => s.key === 'eval')!;
+    const ask = aw.awResetAsk({ tasks: [reset(30)], trials, runs, isSim: () => false });
+    const w = aw.awWorkbench(st, events, nowUs, tdm112Words, ask);
+    assert.equal(w.mode, 'waiting');
+    assert.equal(w.headline, aw.AW_RESET_ASK);
+    assert.equal(w.reset?.taskId, 30);
+    const last = w.lines[w.lines.length - 1];
+    assert.equal(last.glyph, 'wait');
+    assert.equal(`${aw.AW_GLYPH[last.glyph]} ${last.text}`, '⏸ Waiting for you to reset the scene (after trial 2/3)');
+    // without an ask: the old behaviour
+    assert.equal(aw.awWorkbench(st, events, nowUs, tdm112Words).reset, null);
+  });
+});

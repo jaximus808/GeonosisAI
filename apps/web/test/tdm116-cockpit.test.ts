@@ -146,3 +146,27 @@ describe('dashboard view prefs', () => {
     assert.equal(m.tdm116IsListToggleKey({ key: ']' }), false);
   });
 });
+
+describe('tdm116EvalCamViews (real robot eval cameras)', () => {
+  it('offers Twin / Top / Wrist / All from the announced stream cams', () => {
+    const v = m.tdm116EvalCamViews(JSON.stringify({ sim: false, stream: { cams: ['top', 'wrist'] } }));
+    assert.deepEqual(v.map((x) => x.id), ['twin', 'top', 'wrist', 'all']);
+    assert.deepEqual(v.find((x) => x.id === 'all')!.cams, ['top', 'wrist']);
+  });
+  it('groups the exo cam with Top and two wrist cams as Wrists', () => {
+    const v = m.tdm116EvalCamViews(JSON.stringify({ stream: { cams: ['wrist_left', 'exo', 'wrist_right'] } }));
+    assert.deepEqual(v.find((x) => x.id === 'top')!.cams, ['exo']);
+    assert.equal(v.find((x) => x.id === 'wrist')!.label, 'Wrists');
+    assert.deepEqual(v.find((x) => x.id === 'all')!.cams, ['exo', 'wrist_left', 'wrist_right']);
+  });
+  it('no cams or junk: the twin only', () => {
+    assert.deepEqual(m.tdm116EvalCamViews('{}').map((x) => x.id), ['twin']);
+    assert.deepEqual(m.tdm116EvalCamViews('not json').map((x) => x.id), ['twin']);
+  });
+  it('picks the stored view when offered, else All', () => {
+    const v = m.tdm116EvalCamViews(JSON.stringify({ stream: { cams: ['top', 'wrist'] } }));
+    assert.equal(m.tdm116PickEvalView(v, 'wrist').id, 'wrist');
+    assert.equal(m.tdm116PickEvalView(v, 'side').id, 'all');
+    assert.equal(m.tdm116PickEvalView(v, null).id, 'all');
+  });
+});

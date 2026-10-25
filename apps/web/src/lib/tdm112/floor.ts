@@ -374,6 +374,8 @@ export function tdm112Words(e: Pick<Tdm112Event, 'type' | 'payload'>): string {
     }
     case 'eval.solo_reset':
       return 'Scene reset by the simulator (unattended)';
+    case 'eval.reset_done':
+      return `Scene reset by the operator${s(p.via) === 'cockpit' ? ' (Done in the cockpit)' : ''}`;
     case 'eval.aborted':
       return `Eval stopped${reason ? `: ${reason}` : ''}`;
     case 'rollout.started':

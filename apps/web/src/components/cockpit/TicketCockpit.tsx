@@ -33,6 +33,7 @@ import {
   type Tdm116StageKey,
   type Tdm116TabKey,
 } from '@/lib/tdm116/cockpit';
+import { awResetAsk } from '@/lib/agentwork/workbench';
 import { AgentWorkbench } from './AgentWorkbench';
 import { Tdm116Panel } from './Panels';
 import { Tdm116Stage } from './Stages';
@@ -82,6 +83,11 @@ export function TicketCockpit({ id, embedded = false }: { id: string; embedded?:
       setViewRaw('stage');
     },
     [live, setStageParam, setViewRaw],
+  );
+  // A real robot's eval waiting on a reset task: the workbench asks the operator ("Done, scene reset").
+  const resetAsk = useMemo(
+    () => awResetAsk({ tasks: d.tasks, trials: d.trials, runs: d.evalRuns, isSim: (rid) => d.simRobotIds.has(BigInt(rid)) }),
+    [d.tasks, d.trials, d.evalRuns, d.simRobotIds],
   );
 
   if (tid < 0n) return <Frame embedded={embedded}><Notice>“{id}” is not a ticket number.</Notice></Frame>;
@@ -141,7 +147,7 @@ export function TicketCockpit({ id, embedded = false }: { id: string; embedded?:
         {tab === 'overview' ? (
           <>
             <StageHead d={d} shown={shown} live={live} pinned={!!pinned} onBack={backToLive} view={view} onView={setView} />
-            <AgentWorkbench station={d.floor?.stations.find((s) => s.key === shown)} events={d.floorEvents} ended={d.floor?.ended} />
+            <AgentWorkbench station={d.floor?.stations.find((s) => s.key === shown)} events={d.floorEvents} ended={d.floor?.ended} reset={resetAsk} />
             {view === 'factory' ? (
               <div key="factory" className="tdm116-stage tdm116-shutter is-factory" data-testid="cockpit-stage" data-stage={shown} data-view="factory">
                 <FactoryIso ticketId={Number(d.tid)} onStationClick={pinFromFactory} />

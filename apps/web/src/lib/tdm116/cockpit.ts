@@ -223,6 +223,7 @@ export const TDM116_PREF_KEYS = {
   ticketsCollapsed: 'gx.dash.ticketsCollapsed',
   hideCancelled: 'gx.dash.hideCancelled',
   overviewView: 'gx.cockpit.overviewView',
+  evalView: 'gx.cockpit.evalView',
 } as const;
 
 export type Tdm116OverviewView = 'stage' | 'factory';
@@ -274,4 +275,37 @@ export function tdm116TicketHref(id: bigint | number | string): string {
 /** Keep the ticket inside /dashboard (the "Preview here" link). */
 export function tdm116PreviewHref(id: bigint | number | string): string {
   return `/dashboard?ticket=${id.toString()}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Eval stage on a REAL robot: watch the policy through the robot's own cameras (the exo / top camera and
+// the wrist cams), like teleop. The views come from the robot row's announced stream cams
+// (camera_config_json.stream.cams); 'twin' is the 3D twin (RobotWell), always offered.
+
+export interface Tdm116CamView { id: string; label: string; cams: string[] }
+
+const TOP_CAMS = ['exo', 'top', 'front', 'scene'];
+
+/** Twin / Top / Wrist / All for a real robot's announced cameras (Top and Wrist only when present). */
+export function tdm116EvalCamViews(cameraConfigJson: string | null | undefined): Tdm116CamView[] {
+  let cams: string[] = [];
+  try {
+    const c = JSON.parse(cameraConfigJson || '{}') as { stream?: { cams?: unknown } };
+    if (Array.isArray(c?.stream?.cams)) cams = c.stream.cams.filter((x): x is string => typeof x === 'string' && x.length > 0);
+  } catch {
+    /* no cams */
+  }
+  if (!cams.length) return [{ id: 'twin', label: 'Twin', cams: [] }];
+  const top = cams.filter((c) => TOP_CAMS.includes(c.toLowerCase()));
+  const wrist = cams.filter((c) => /wrist|hand|arm/i.test(c));
+  const views: Tdm116CamView[] = [{ id: 'twin', label: 'Twin', cams: [] }];
+  if (top.length) views.push({ id: 'top', label: 'Top', cams: top });
+  if (wrist.length) views.push({ id: 'wrist', label: wrist.length > 1 ? 'Wrists' : 'Wrist', cams: wrist });
+  views.push({ id: 'all', label: 'All', cams: [...top, ...wrist, ...cams.filter((c) => !top.includes(c) && !wrist.includes(c))] });
+  return views;
+}
+
+/** The stored eval view if this robot offers it, else All (the policy seen from every camera). */
+export function tdm116PickEvalView(views: readonly Tdm116CamView[], stored: string | null | undefined): Tdm116CamView {
+  return views.find((v) => v.id === stored) ?? views.find((v) => v.id === 'all') ?? views[0];
 }

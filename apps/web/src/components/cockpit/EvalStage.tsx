@@ -4,15 +4,21 @@
 // strip filling in, trial x of N with the robot's phase and an ETA (TDM-114 floor.evalPhase), the last
 // failure note, and when the ticket is waiting for its robot, who holds it and what an operator can do
 // (TDM-114's WaitingForRobot / EvalProgressLine / RobotQueueList, mounted as they are).
+// On a REAL robot the left pane gets the teleop view switcher: Twin (the 3D view) or the robot's own
+// cameras, Top / Wrist / All (EvalCams.tsx), remembered per viewer.
 
+import { useMemo } from 'react';
 import { Tag } from '@/components/brand/StatusTag';
 import { gxCx } from '@/components/brand/cx';
 import { SeededBadge, StatusPill } from '@/components/ticket/Badges';
 import { isSeededTrial } from '@/components/ticket/util';
 import type { Tdm114LivePolicy } from '@/lib/tdm114/arbitration';
 import { tdm112Words } from '@/lib/tdm112/floor';
-import { tdm116LastFailure } from '@/lib/tdm116/cockpit';
+import { TDM116_PREF_KEYS, tdm116EvalCamViews, tdm116LastFailure, tdm116PickEvalView } from '@/lib/tdm116/cockpit';
 import { EvalProgressLine, RobotQueueList, WaitingForRobot } from '@/components/tdm114/WaitingForRobot';
+import { isFakeRobot } from '@/components/ticket/util';
+import { Tdm116EvalCams, Tdm116EvalViewTabs } from './EvalCams';
+import { useTdm116Stored } from './hooks';
 import { Tdm116RobotWell } from './RobotWell';
 import type { Tdm116Data } from './useCockpitData';
 
@@ -39,11 +45,23 @@ export function Tdm116EvalStage({ d, which, onPolicy }: { d: Tdm116Data; which: 
   const recent = station ? station.eventIds.slice(-6).reverse() : [];
   const evById = new Map(d.floorEvents.map((e) => [e.id, e]));
   const label = which === 'baseline' ? 'Baseline eval' : 'Fine-tuned eval';
+  // The robot this eval runs on (the run's, else the ticket's): real -> its cameras can be watched.
+  const evalRobotId = run ? run.robotId : d.robotId;
+  const evalRobot = d.allRobots.find((r) => r.id === evalRobotId);
+  const real = !!evalRobot && !d.simRobotIds.has(evalRobot.id) && !isFakeRobot(evalRobot);
+  const camViews = useMemo(() => (real ? tdm116EvalCamViews(evalRobot?.cameraConfigJson) : []), [real, evalRobot?.cameraConfigJson]);
+  const [storedView, setStoredView] = useTdm116Stored(TDM116_PREF_KEYS.evalView);
+  const camView = camViews.length > 1 ? tdm116PickEvalView(camViews, storedView) : null;
 
   return (
     <div className="tdm116-cols" style={{ gridTemplateColumns: 'minmax(0, 1.7fr) minmax(320px, 1fr)' }} data-testid="stage-eval">
       <div className="tdm116-col">
-        <Tdm116RobotWell d={d} onPolicy={onPolicy} />
+        {camView && <Tdm116EvalViewTabs views={camViews} value={camView.id} onChange={setStoredView} />}
+        {camView && camView.id !== 'twin' ? (
+          <Tdm116EvalCams robotId={Number(evalRobotId)} view={camView} />
+        ) : (
+          <Tdm116RobotWell d={d} onPolicy={onPolicy} />
+        )}
       </div>
 
       <div className="tdm116-col tdm116-scroll">

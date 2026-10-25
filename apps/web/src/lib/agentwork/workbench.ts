@@ -183,6 +183,8 @@ export interface AwWorkbench extends AwLiveness {
   /** The one line under the droid: what it is doing right now. */
   headline: string;
   lines: AwLine[];
+  /** Set while a real robot's eval waits on the operator to reset the scene ("Done, scene reset"). */
+  reset: AwResetAsk | null;
 }
 
 const MAX_LINES = 80;
@@ -192,8 +194,17 @@ const MAX_LINES = 80;
  * `live` (spinner); while Claude thinks a live "Thinking… 12s" line ticks locally between heartbeat rows;
  * while it waits the last line says on what.
  */
-export function awWorkbench(station: Tdm112StationView, events: readonly Tdm112Event[], nowUs: number, words: AwWords = fallbackWords): AwWorkbench {
-  const live = awLiveness(station, events, nowUs);
+export function awWorkbench(
+  station: Tdm112StationView,
+  events: readonly Tdm112Event[],
+  nowUs: number,
+  words: AwWords = fallbackWords,
+  reset?: AwResetAsk | null,
+): AwWorkbench {
+  let live = awLiveness(station, events, nowUs);
+  // A real robot's reset between eval trials: the run waits for the operator, not for nobody.
+  const asking = !!reset && (station.key === 'baseline' || station.key === 'eval') && (station.state === 'working' || station.state === 'waiting');
+  if (asking) live = { ...live, mode: 'waiting', waitingFor: reset!.wait, freshness: 'none', llm: null };
   const evs = awStationEvents(station, events);
   const narrated = evs.some((e) => e.type === 'agent.step');
   const covered = new Set(narrated ? COVERED[station.key] ?? [] : []);
@@ -222,7 +233,7 @@ export function awWorkbench(station: Tdm112StationView, events: readonly Tdm112E
   } else if (live.mode === 'working') {
     lines.push({ id: 'live-start', glyph: 'step', text: station.activity || 'Starting', tsUs: nowUs, live: true });
   } else if (live.mode === 'waiting' && live.waitingFor) {
-    lines.push({ id: 'live-wait', glyph: 'wait', text: live.waitingFor, tsUs: nowUs });
+    lines.push({ id: asking ? `live-reset-${reset!.taskId}` : 'live-wait', glyph: 'wait', text: live.waitingFor, tsUs: nowUs });
   } else if (live.mode === 'stalled') {
     lines.push({ id: 'live-stall', glyph: 'error', text: `No activity for ${awAgo(live.ageS ?? 0)}. The agent may be stuck.`, tsUs: nowUs });
   } else if (!lines.length) {
@@ -245,7 +256,53 @@ export function awWorkbench(station: Tdm112StationView, events: readonly Tdm112E
               : live.mode === 'idle'
                 ? station.waitsFor
                 : lastReal?.text ?? station.activity;
-  return { ...live, station: station.key, agent, headline, lines: lines.slice(-MAX_LINES) };
+  return { ...live, station: station.key, agent, headline: asking ? reset!.ask : headline, lines: lines.slice(-MAX_LINES), reset: asking ? reset! : null };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The reset ask: a REAL robot's eval waits between trials for a person to put the scene back. The
+// dispatcher posts a reset task with "[ref eval_trial:<trial id>]" in its instructions (dispatcher.py
+// request_reset); a sim robot resets itself and is never asked.
+
+export interface AwResetTaskLike { id: bigint | number; type: string; status: string; robotId: bigint | number; instructions: string }
+export interface AwTrialLike { id: bigint | number; evalRunId: bigint | number; trialIndex: number }
+export interface AwRunLike { id: bigint | number; trials: number }
+
+export interface AwResetAsk {
+  taskId: number;
+  /** "after trial 2/3" ('' when the reset is not an eval trial's). */
+  trial: string;
+  /** The one-line ask under the droid. */
+  ask: string;
+  /** The transcript line: "Waiting for you to reset the scene (after trial 2/3)". */
+  wait: string;
+}
+
+export const AW_RESET_ASK = 'Reset the scene: put the cube back at the start, then tap Done';
+const TRIAL_REF = /\[ref eval_trial:(\d+)\]/;
+
+/** The open (or claimed) reset task of a real robot this eval waits on, newest first; null when none. */
+export function awResetAsk(input: {
+  tasks: readonly AwResetTaskLike[];
+  trials: readonly AwTrialLike[];
+  runs: readonly AwRunLike[];
+  isSim: (robotId: number) => boolean;
+}): AwResetAsk | null {
+  const open = input.tasks
+    .filter((t) => t.type === 'reset' && (t.status === 'open' || t.status === 'claimed') && !input.isSim(Number(t.robotId)))
+    .sort((a, b) => Number(b.id) - Number(a.id));
+  const t = open[0];
+  if (!t) return null;
+  let trial = '';
+  const m = TRIAL_REF.exec(t.instructions ?? '');
+  if (m) {
+    const tr = input.trials.find((x) => Number(x.id) === Number(m[1]));
+    if (tr) {
+      const run = input.runs.find((r) => Number(r.id) === Number(tr.evalRunId));
+      trial = run?.trials ? `after trial ${tr.trialIndex + 1}/${run.trials}` : `after trial ${tr.trialIndex + 1}`;
+    }
+  }
+  return { taskId: Number(t.id), trial, ask: AW_RESET_ASK, wait: `Waiting for you to reset the scene${trial ? ` (${trial})` : ''}` };
 }
 
 /** "4s", "2m 05s", "1h 03m". */

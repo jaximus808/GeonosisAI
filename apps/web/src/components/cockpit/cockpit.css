@@ -195,6 +195,11 @@
 
 /* Robot well: the live view sits in a sunken well that scrolls if the panes run taller than the stage. */
 .tdm116-robot { min-height: 0; overflow: auto; scrollbar-width: thin; }
+/* Eval on a real robot: the teleop view switcher (Twin / Top / Wrist / All) and the camera pane. One fixed
+ * band for the tabs and a pane that fills the column, so switching views never moves the page. */
+.tdm116-evalcam-tabs { position: relative; flex: none; height: 48px; }
+.tdm116-evalcam { flex: 1 1 auto; min-height: 320px; min-width: 0; overflow: auto; scrollbar-width: thin; }
+.tdm116-evalcam > .tdm116-empty { min-height: 320px; }
 
 /* Cluster cards */
 .tdm116-clusters { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-4); align-content: start; }

@@ -51,8 +51,9 @@ class Tdm113Transport:
 class Tdm113Market:
     """claim_task with SpacetimeDB's semantics: atomic, the first claim of an open task wins."""
 
-    def __init__(self, tasks: list[dict]) -> None:
+    def __init__(self, tasks: list[dict], sim: bool = True) -> None:
         self.tasks = {t["id"]: dict(t) for t in tasks}
+        self.sim = sim
         self.lock = threading.Lock()
         self.claims: list[tuple[int, int]] = []
         self.heartbeats: list[int] = []
@@ -61,6 +62,8 @@ class Tdm113Market:
         if table == "task":
             return [dict(t) for t in self.tasks.values()]
         if table == "robot":
+            if not self.sim:
+                return [{"id": 1, "name": "yam-01", "camera_config_json": "{}"}]
             return [{"id": 1, "name": "sim-yam-mujoco", "camera_config_json": json.dumps({"sim": True})}]
         if table == "ticket":
             return [{"id": 4, "task_description": "Pick up the cube"}]
@@ -212,7 +215,8 @@ def test_daily_cap_and_already_offered():
 
 
 def test_resets_only_go_to_in_person_and_busy_is_skipped():
-    m = Tdm113Market([task(20, "reset", 200), task(21), task(9, status="claimed", assignee_id=2)])
+    # a real arm's reset (a sim robot resets itself and its resets are never offered)
+    m = Tdm113Market([task(20, "reset", 200), task(21), task(9, status="claimed", assignee_id=2)], sim=False)
     o, m, tr, _, _ = make(m)
     opt(o, 1, "4155550101", in_person=False)
     opt(o, 2, "4155550102", in_person=True)  # in person but busy (holds task 9)
@@ -221,7 +225,7 @@ def test_resets_only_go_to_in_person_and_busy_is_skipped():
     out = o.on_page(req([20], "reset", 200), m.rows)
     assert out["contributors"] == [3]
     assert out["skipped"] == {"not_in_person": 1, "busy": 1, "rate_limited": 0, "daily_cap": 0}
-    assert "reset on yam sim" in tr.sent[0][1]
+    assert "reset on the real YAM arm" in tr.sent[0][1]
 
 
 def test_operator_tasks_are_never_texted():
@@ -423,3 +427,12 @@ def test_api_webhook_route(tdm113_api):
     assert c.post("/texts/webhook", content=raw, headers=h).status_code == 200  # unknown number: verified, ignored
     assert tr.sent == []
     assert c.post("/texts/webhook", content=raw, headers={**h, "x-inkbox-signature": "sha256=00"}).status_code == 401
+
+
+def test_sim_robot_resets_are_never_texted():
+    m = Tdm113Market([task(20, "reset", 200)])
+    o, m, tr, _, _ = make(m)
+    opt(o, 3, "4155550103", in_person=True)
+    tr.sent.clear()
+    o.on_page(req([20], "reset", 200), m.rows)
+    assert tr.sent == []

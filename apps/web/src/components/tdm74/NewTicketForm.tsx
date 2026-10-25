@@ -117,7 +117,9 @@ export function NewTicketForm() {
   }, [robotId, robotsReady, robots.shown]);
 
   // ------------------------------------------------------------ request + validation
-  const inputs: Tdm74Inputs = { prompt, robotId, robotMode, budgetUsd, targetPct, advanced };
+  const [collectRobotId, setCollectRobotId] = useState(''); // TDM-125: '' = collect on the same robot
+  const realRobots = useMemo(() => robotRows.filter((r) => !tdm107IsSimRobot(r) && (showTest || !r.name.startsWith('test.'))), [robotRows, showTest]);
+  const inputs: Tdm74Inputs = { prompt, robotId, robotMode, budgetUsd, targetPct, advanced, collectRobotId };
   const stale = !!preview && prompt.trim() !== previewPrompt;
   const { body, errors: localErrors } = tdm74Body(inputs, preview && !stale ? preview.parsed : undefined);
   const localCount = Object.keys(localErrors).filter((k) => k !== 'prompt' || showLocal).length;
@@ -404,6 +406,29 @@ export function NewTicketForm() {
             )}
           </div>
           <FieldError id="tdm74-robot-err" msg={shown.robot} />
+          {robotMode === 'sim' && realRobots.length > 0 && (
+            <div className="mt-3" data-testid="tdm125-create-collect">
+              <label className="block text-sm font-medium" htmlFor="tdm125-collect">
+                Collect data on a real robot <span className="text-xs font-normal text-zinc-500">(optional)</span>
+              </label>
+              <select
+                id="tdm125-collect"
+                className="mt-1 w-full rounded-sm border border-zinc-300 bg-white px-2 py-1 text-sm"
+                value={collectRobotId}
+                onChange={(e) => setCollectRobotId(e.target.value)}
+              >
+                <option value="">No: collect on the sim robot too</option>
+                {realRobots.map((r) => (
+                  <option key={String(r.id)} value={String(r.id)}>
+                    {r.name} (REAL) · {r.status}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">
+                Baseline and evals run in sim; the paid teleop demos drive the real arm. Only clean demos are bought there.
+              </p>
+            </div>
+          )}
         </fieldset>
 
         {/* ---------------------------------------------------- budget + target */}

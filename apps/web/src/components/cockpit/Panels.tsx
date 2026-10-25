@@ -26,6 +26,7 @@ import type { Tdm116StageKey, Tdm116TabKey } from '@/lib/tdm116/cockpit';
 import { TDM116_STAGE_KEYS } from '@/lib/tdm116/cockpit';
 import { RobotQueueList, WaitingForRobot } from '@/components/tdm114/WaitingForRobot';
 import { Tdm116CancelBlock } from './CancelTicket';
+import { Tdm125CollectPicker } from '@/components/tdm125/CollectRobot';
 import { Tdm116RobotWell } from './RobotWell';
 import type { Tdm116Data } from './useCockpitData';
 
@@ -359,6 +360,7 @@ function SettingsPanel({ d }: { d: Tdm116Data }) {
               <p className="gx-small m-0">No run settings row yet.</p>
             )}
           </section>
+          <Tdm125CollectPicker ticketId={d.tid} split={d.split} robots={d.allRobots} frozen={['shipped', 'failed', 'cancelled'].includes(d.ticket?.status ?? '')} />
           <Tdm116CancelBlock ticketId={Number(d.tid)} status={d.ticket?.status ?? 'created'} />
         </div>
         <div className="tdm116-scroll">
@@ -389,6 +391,12 @@ function ReportPanel({ d }: { d: Tdm116Data }) {
           <span className="gx-id">Wilson 95% · live as trials finish</span>
         </div>
         <EvalCards runs={d.evalRuns} events={d.events} settings={d.settings} robotFake={d.robotFake} iterationOf={d.iterationOf} simRobotIds={d.simRobotIds} mode={d.mode} />
+        {d.split.line && (
+          <p className="mt-3 mb-0 text-sm font-semibold" data-testid="tdm125-report-split">
+            {d.split.line}
+            {d.split.collectMode === 'real' && d.split.evalMode === 'sim' ? ' (trained on real-arm data; eval numbers are sim, not real-arm success rates)' : ''}
+          </p>
+        )}
         <p className="gx-small mt-4 mb-0">
           The full report (timeline per iteration, data bought, spend, the decision trail) prints and shares without a login.
         </p>

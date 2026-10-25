@@ -67,6 +67,8 @@ export interface Tdm74Inputs {
   budgetUsd: string; // '' = use the prompt's budget
   targetPct: string; // '' = use the prompt's target (or the 80% default)
   advanced: Tdm79Form;
+  /** TDM-125: collect the data on this robot (e.g. the real yam-01) while evals run on robotId. '' = same robot. */
+  collectRobotId?: string;
 }
 
 export type Tdm74Field = 'prompt' | 'robot' | 'budget' | 'target' | 'form' | Tdm79Field;
@@ -91,6 +93,7 @@ export function tdm74Body(
 
   if (inp.robotId) body.robot_id = Number(inp.robotId);
   if (inp.robotMode) body.robot_mode = inp.robotMode;
+  if (inp.collectRobotId && inp.collectRobotId !== inp.robotId) body.collect_robot_id = Number(inp.collectRobotId); // TDM-125
 
   const b = inp.budgetUsd.trim().replace(/^\$/, '').replace(/,/g, '');
   if (b) {

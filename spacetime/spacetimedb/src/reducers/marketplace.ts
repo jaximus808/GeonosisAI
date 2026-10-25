@@ -179,11 +179,31 @@ export const create_task = spacetimedb.reducer(
     }
     const price =
       price_cents === 0n ? DEFAULT_PRICES_CENTS[type as keyof typeof DEFAULT_PRICES_CENTS] : price_cents;
+    // TDM-125: a split-robot ticket collects on another robot (run_settings hyperparams.collect_robot_id).
+    // payload.robot_id names it; absent / 0 / the ticket's own robot = ticket.robot_id (unchanged).
+    let robot_id = ticket.robot_id;
+    if (payload.robot_id !== undefined && payload.robot_id !== null && payload.robot_id !== 0) {
+      const raw = payload.robot_id;
+      if (typeof raw !== 'number' && typeof raw !== 'string') throw new SenderError('payload.robot_id must be an integer');
+      let rid: bigint;
+      try {
+        rid = BigInt(raw);
+      } catch {
+        throw new SenderError('payload.robot_id must be an integer');
+      }
+      if (rid !== ticket.robot_id) {
+        if (!['clean_teleop', 'recovery_takeover', 'reset'].includes(type)) {
+          throw new SenderError(`payload.robot_id may only move collection tasks, not ${type}`);
+        }
+        if (!ctx.db.robot.id.find(rid)) throw new SenderError(`robot ${rid} not found`);
+        robot_id = rid;
+      }
+    }
 
     const row = ctx.db.task.insert({
       id: 0n,
       ticket_id,
-      robot_id: ticket.robot_id,
+      robot_id,
       data_plan_id,
       type,
       status: 'open',
@@ -198,7 +218,7 @@ export const create_task = spacetimedb.reducer(
     tdm10Log(ctx, role, 'task.created', {
       task_id: row.id,
       ticket_id,
-      robot_id: ticket.robot_id,
+      robot_id,
       data_plan_id,
       type,
       price_cents: price,

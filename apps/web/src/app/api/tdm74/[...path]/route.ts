@@ -25,7 +25,7 @@ const TDM74_ORCH = (
   'http://localhost:8000'
 ).replace(/\/$/, '');
 
-const TDM74_BODY_KEYS = new Set(['prompt', 'robot_id', 'robot_mode', 'settings_overrides', 'budget_cents', 'target_success', 'parsed']);
+const TDM74_BODY_KEYS = new Set(['prompt', 'robot_id', 'robot_mode', 'collect_robot_id', 'settings_overrides', 'budget_cents', 'target_success', 'parsed']); // collect_robot_id: TDM-125
 // create_ticket overrides (budget_cents is its own argument, not an override).
 const TDM74_OVERRIDE_KEYS = new Set([
   'eval_trials',
@@ -65,6 +65,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (extra.length) return tdm74Invalid(['body', extra[0]], `${extra[0]} is not a ticket field`, 'extra_forbidden');
   if (body.robot_mode !== undefined && body.robot_mode !== 'sim' && body.robot_mode !== 'real') {
     return tdm74Invalid(['body', 'robot_mode'], 'robot_mode must be sim or real'); // TDM-107
+  }
+  if (body.collect_robot_id !== undefined && body.collect_robot_id !== null && !(Number.isInteger(body.collect_robot_id) && (body.collect_robot_id as number) > 0)) {
+    return tdm74Invalid(['body', 'collect_robot_id'], 'collect_robot_id must be a robot id'); // TDM-125
   }
   const ov = body.settings_overrides;
   if (ov !== undefined && ov !== null) {

@@ -112,6 +112,12 @@ const TDM9_HYPERPARAM_CHECKS: Record<string, (v: unknown) => unknown> = {
     if (typeof v !== 'boolean') throw new SenderError('hyperparams.include_sim_data must be true or false');
     return v;
   },
+  // TDM-125: split-robot tickets. The robot that collection tasks (demos, takeovers, their resets)
+  // drive; baseline/eval stay on ticket.robot_id. 0 / null = same robot as the ticket.
+  collect_robot_id: (v) => {
+    if (v === null) return 0;
+    return tdm9Int('hyperparams.collect_robot_id', v, 0, Number.MAX_SAFE_INTEGER);
+  },
 };
 
 /**

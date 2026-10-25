@@ -697,6 +697,7 @@ def assemble(t: Tables, ticket_id: int, *, now_micros: int | None = None) -> dic
         "include_sim_data": include_sim_data(settings, mode),
         "by_mode": by_mode,
         "switches": switches,
+        "split": _tdm125_split(mine["eval_run"], episode_views, robots, ticket, settings),
     }
     return {
         "report_version": REPORT_VERSION,
@@ -811,6 +812,12 @@ def render_markdown(r: dict) -> str:
         add(f"Sim and real results are never pooled. Training {'includes' if rm.get('include_sim_data') else 'excludes'} "
             "sim-robot episodes (run_settings include_sim_data).")
         add("")
+        sp = rm.get("split")
+        if sp:  # TDM-125: split-robot ticket
+            add(f"**{sp['line']}**")
+            add("")
+            add(sp["note"])
+            add("")
         for sw in rm.get("switches") or []:
             add(f"- {sw.get('at') or iso(sw.get('ts'))}: switched {sw.get('from_mode')} robot {sw.get('from_robot_id')} -> "
                 f"{sw.get('to_mode')} robot {sw.get('to_robot_id')} in {sw.get('status')} by {sw.get('by')}"
@@ -970,6 +977,31 @@ async def load_tables(sql: Sql, ticket_id: int) -> Tables:
                                     for r in tables["eval_run"]))
     tables["eval_trial"] = [row for rows in trials for row in rows]
     return tables
+
+
+def _tdm125_split(eval_runs: list, episode_views: list, robots: dict, ticket: dict, settings: Any) -> dict | None:
+    """TDM-125: a ticket that collects on another robot than it evals on. 'Data: N real-arm episodes
+    (yam-01) · Evals: sim robot'. Eval numbers stay labelled with the eval robot's mode."""
+    from .robot_mode import collect_robot_id, is_split, robot_mode as _mode
+
+    if not is_split(settings, ticket):
+        return None
+    crid, erid = collect_robot_id(settings, ticket), _i(ticket.get("robot_id"))
+    crobot, erobot = robots.get(crid), robots.get(erid)
+    cmode, emode = _mode(crobot), _mode(erobot)
+    eps = [v for v in episode_views if (v.get("robot_id") or 0) == crid]
+    acc = sum(1 for v in eps if v.get("review_status") == "accepted")
+    cname = (crobot or {}).get("name") or f"robot {crid}"
+    arm = "real-arm" if cmode == "real" else "sim-robot"
+    line = f"Data: {acc} {arm} episodes ({cname}) · Evals: {'sim robot' if emode == 'sim' else 'real robot'}"
+    note = (f"Split-robot ticket: training data was collected on {cname} ({cmode}); baseline and evals ran on "
+            f"{(erobot or {}).get('name') or f'robot {erid}'} ({emode}).")
+    if cmode == "real" and emode == "sim":
+        note += (" The policy was trained on real-arm episodes but evaluated in sim only: the success rates above "
+                 "are SIM eval numbers, not real-arm success rates.")
+    return {"collect_robot_id": crid, "collect_robot_name": cname, "collect_mode": cmode, "eval_robot_id": erid,
+            "eval_mode": emode, "episodes": len(eps), "episodes_accepted": acc, "line": line, "note": note,
+            "eval_runs_on_eval_robot": sum(1 for r in eval_runs if _i(r.get("robot_id")) == erid)}
 
 
 async def build(sql: Sql, ticket_id: int) -> dict:

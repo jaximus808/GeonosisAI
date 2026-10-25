@@ -8,6 +8,7 @@ import { useRows, useTicket } from '@/lib/spacetime/hooks';
 import { useTdm112Floor } from '@/lib/tdm112/useFloor';
 import type { Tdm114LivePolicy } from '@/lib/tdm114/arbitration';
 import { tdm107ModeOf, tdm107SimIds } from '@/lib/tdm107/robotMode';
+import { tdm125Split } from '@/lib/tdm125/collect';
 import { isFakeRobot, parseObj, ticketEvents, type EvalRun } from '@/components/ticket/util';
 import type { Tdm116EventLike } from '@/lib/tdm116/cockpit';
 
@@ -40,6 +41,8 @@ export function useTdm116Cockpit(tid: bigint, opts: { livePolicy?: Tdm114LivePol
   const trials = useMemo(() => allTrials.filter((t) => runIds.has(t.evalRunId)), [allTrials, runIds]);
   const settings = settingsRows[0];
   const mode = tdm107ModeOf(robot);
+  // TDM-125: the robot collection drives (a split ticket collects on e.g. the real yam-01, evals in sim).
+  const split = useMemo(() => tdm125Split(ticket, settings, allRobots, episodes), [ticket, settings, allRobots, episodes]);
 
   // Job drops and claims: job_drop.claimed carries no ticket id, so these are read from every row and
   // matched by task id in tdm116Drops.
@@ -87,6 +90,7 @@ export function useTdm116Cockpit(tid: bigint, opts: { livePolicy?: Tdm114LivePol
     robotId,
     robotFake: isFakeRobot(robot),
     mode,
+    split,
     allRobots,
     simRobotIds,
     settings,

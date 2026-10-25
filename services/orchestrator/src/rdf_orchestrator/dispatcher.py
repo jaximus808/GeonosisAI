@@ -453,9 +453,25 @@ class Dispatcher:
             if n <= 0:
                 return st
             ticket = self.m.get("ticket", tid) or {}
+            # TDM-125: a split-robot ticket collects on run_settings hyperparams.collect_robot_id.
+            from .robot_mode import collect_robot_id as _collect_rid, is_split as _is_split
+
+            rs = self.m.get("run_settings", tid) or {}
+            crid = _collect_rid(rs, ticket)
+            if _is_split(rs, ticket):
+                crobot = self.m.get("robot", crid)
+                cstatus = (crobot or {}).get("status")
+                if crobot is None or cstatus in ("offline", "estop"):
+                    st.state = "waiting_for_robot"
+                    name = (crobot or {}).get("name") or f"robot {crid}"
+                    st.reason = f"Waiting for {name} ({cstatus or 'unknown robot'})"
+                    self.event("dispatch.waiting_for_robot", {**base, "robot_id": crid, "robot_name": name,
+                                                              "robot_status": cstatus, "reason": st.reason},
+                               dedup=("wait_robot", plan_id, cstatus))
+                    return st
             instructions = self._instructions(plan, ticket, unit)
             payload = {"instructions": instructions, "data_plan_id": plan_id, "ticket_id": tid,
-                       "robot_id": _i(ticket.get("robot_id")), "data_type": st.data_type,
+                       "robot_id": crid, "data_type": st.data_type,
                        "policy_prompt": self._policy_prompt(tid, ticket),
                        "task_description": ticket.get("task_description") or "", "source": "dispatcher"}
             def plan_ids() -> set[int]:
@@ -473,6 +489,10 @@ class Dispatcher:
             # Hold the ticket lock until the mirror shows the new rows, so the next reconcile counts them.
             self._wait_for(lambda: len(plan_ids() - before) >= made)
             st.created_task_ids = sorted(plan_ids() - before)
+            wrong = [t for t in st.created_task_ids if _i((self.m.get("task", t) or {}).get("robot_id")) not in (crid, 0)]
+            if wrong:  # TDM-125: the live module predates create_task's payload.robot_id
+                self.event("dispatch.collect_robot_unsupported", {**base, "task_ids": wrong, "wanted_robot_id": crid,
+                                                                  "note": "create_task ignored payload.robot_id: publish the module"})
             st.in_flight += made
             st.open_task_ids += st.created_task_ids
             self.event("dispatch.plan_dispatched", {
@@ -617,8 +637,13 @@ class Dispatcher:
         if takeover:
             log.info("dispatch.pause_is_takeover", extra={"fields": {"robot_id": rid, "task_ids": [t["id"] for t in takeover]}})
             return None  # the paused failure is what the takeover contributor records
-        tickets = [t for t in self.m.rows("ticket") if _i(t.get("robot_id")) == rid
-                   and t.get("status") not in TERMINAL_TICKET]
+        from .robot_mode import collect_robot_id as _collect_rid
+
+        def on_robot(t: dict) -> bool:  # TDM-125: a split ticket's collect robot is also "its" robot here
+            if _i(t.get("robot_id")) == rid:
+                return True
+            return t.get("status") == "dispatch" and _collect_rid(self.m.get("run_settings", _i(t["id"])) or {}, t) == rid
+        tickets = [t for t in self.m.rows("ticket") if on_robot(t) and t.get("status") not in TERMINAL_TICKET]
         if not tickets:
             return None
         ticket = max(tickets, key=lambda t: _i(t["id"]))

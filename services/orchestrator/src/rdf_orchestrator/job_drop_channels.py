@@ -82,6 +82,7 @@ class DropPost:
     access_code: str | None = None
     test_mode: bool = True
     sample: bool = False
+    arm: str = ""  # TDM-125: "real robot arm" | "sim arm" ("" = not said)
 
 
 @dataclass
@@ -154,7 +155,8 @@ def headline(p: DropPost) -> str:
     """Numbers first: "$3.50 test mode. Recovery takeover, about 2 min, from your phone." """
     money = f"{p.price} test mode" if p.test_mode else p.price
     many = f"{p.count} paid tasks at {money} each" if p.count > 1 else f"Paid task: {money}"
-    return f"{many}. {p.kind}, about {p.minutes} min, {p.where.lower()}."
+    on = f" on the {p.arm}" if p.arm else ""  # TDM-125: say which arm the job drives
+    return f"{many}. {p.kind}{on}, about {p.minutes} min, {p.where.lower()}."
 
 
 def access_line(p: DropPost) -> str:

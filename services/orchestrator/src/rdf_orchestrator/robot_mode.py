@@ -99,6 +99,59 @@ def include_sim_data(settings: Any, mode: str | None) -> bool:
     return v if isinstance(v, bool) else mode == SIM
 
 
+# --------------------------------------------------------------------------- TDM-125: split-robot tickets
+# A ticket may collect its data on another robot than the one it evals on: run_settings
+# ``hyperparams.collect_robot_id`` (0 / unset = the ticket's robot). Collection tasks (demos,
+# takeovers) and their resets go to that robot; baseline / eval stay on ``ticket.robot_id``.
+COLLECT_ROBOT_EVENT = "ticket.collect_robot_set"
+
+
+def collect_robot_id(settings: Any, ticket: Any = None) -> int:
+    """The robot collection runs on: hyperparams.collect_robot_id, else the ticket's robot."""
+    v = _i(hyperparams(settings).get("collect_robot_id"))
+    if v > 0:
+        return v
+    return _i((ticket or {}).get("robot_id") if isinstance(ticket, dict) else getattr(ticket, "robot_id", 0))
+
+
+def is_split(settings: Any, ticket: Any) -> bool:
+    """True when the ticket collects on another robot than it evals on."""
+    v = _i(hyperparams(settings).get("collect_robot_id"))
+    tr = _i((ticket or {}).get("robot_id") if isinstance(ticket, dict) else getattr(ticket, "robot_id", 0))
+    return v > 0 and v != tr
+
+
+def collect_capabilities(collect_robot: Any, eval_robot: Any) -> dict:
+    """What collection on ``collect_robot`` can produce (the planner's input).
+
+    The collect robot of a split ticket (e.g. the real yam-01) has no policy of this ticket running on
+    it (the policy is deployed to the eval robot), so only clean demos can be collected there: a recovery
+    takeover needs the policy rolling out on the arm. A real one's resets go to people in person and
+    never auto-resolve (sim auto-reset is for sim robots only)."""
+    split = collect_robot is not None and eval_robot is not None and _i(_get(collect_robot, "id")) != _i(_get(eval_robot, "id"))
+    mode = robot_mode(collect_robot)
+    clean_only = bool(split)
+    return {
+        "robot_id": _i(_get(collect_robot, "id")) or None,
+        "robot_name": _get(collect_robot, "name"),
+        "robot_mode": mode,
+        "status": _get(collect_robot, "status"),
+        "split_from_eval_robot": split,
+        "data_types": ["clean_teleop"] if clean_only else ["clean_teleop", "recovery_takeover"],
+        "clean_only": clean_only,
+        "why": (f"data is collected on {_get(collect_robot, 'name')} ({'the real arm' if mode == REAL else 'a sim robot'}), "
+                "which has no policy deployed for this ticket (evals run on another robot), so recovery takeovers "
+                "are impossible there; only clean teleop demos") if clean_only else "",
+        "resets": "in_person" if mode == REAL else "auto_sim",
+    }
+
+
+def _get(row: Any, k: str) -> Any:
+    if row is None:
+        return None
+    return row.get(k) if isinstance(row, dict) else getattr(row, k, None)
+
+
 def robots_by_id(rows: Iterable[dict]) -> dict[int, dict]:
     return {_i(r.get("id")): r for r in rows}
 

@@ -546,7 +546,8 @@ class Dropper:
         return chans.DropPost(task_id=info.task_id, kind=info.kind, title=f.title, instructions=f.instructions,
                               price=info.price, price_note=info.price_note, minutes=MINUTES.get(f.task_type, 2),
                               robot=f.robot, where=info.facts[2], link=link, count=info.count,
-                              access_code=info.access_code, test_mode=info.test_mode, sample=f.sample)
+                              access_code=info.access_code, test_mode=info.test_mode, sample=f.sample,
+                              arm="" if f.sample else ("sim arm" if f.sim else "real robot arm"))  # TDM-125
 
     def build(self, f: DropFacts) -> Drop:
         base = public_base(self.s)

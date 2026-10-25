@@ -56,6 +56,9 @@ class HyperparamsPatch(BaseModel):
     prompt: str = Field(default=None, description="language instruction given to the policy")
     include_sim_data: bool = Field(default=None, description="TDM-107: train on sim-robot episodes too "
                                                              "(unset = on for a sim ticket, off for a real one)")
+    collect_robot_id: int = Field(default=None, ge=0, le=TDM20_MAX_SAFE_INT,
+                                  description="TDM-125: the robot collection tasks (teleop demos) drive, e.g. the "
+                                              "real yam-01 while evals stay on the sim robot. 0 = the ticket's robot")
 
 
 class RunSettingsPatch(BaseModel):
@@ -197,6 +200,28 @@ def _check_against_ticket(ticket_id: int, ticket: dict, patch: dict) -> None:
         raise HTTPException(status_code=422, detail=errors)
 
 
+async def _tdm125_collect_event(stdb: Tdm20Stdb, ticket_id: int, ticket: dict, patch: dict) -> dict | None:
+    """TDM-125: validate hyperparams.collect_robot_id (the robot must exist) -> the event payload to log."""
+    hp = patch.get("hyperparams") or {}
+    if "collect_robot_id" not in hp:
+        return None
+    from .robot_mode import robot_mode
+
+    rid = int(hp["collect_robot_id"])
+    eval_rid = int(ticket.get("robot_id") or 0)
+    try:
+        robots = await stdb.sql("SELECT * FROM robot")
+    except Exception as e:  # noqa: BLE001
+        raise _stdb_down(e) from e
+    by_id = {int(r["id"]): r for r in robots}
+    if rid and rid not in by_id:
+        raise _err(422, ["body", "hyperparams", "collect_robot_id"], f"unknown robot {rid}", "unknown_robot")
+    collect = by_id.get(rid or eval_rid)
+    return {"ticket_id": ticket_id, "collect_robot_id": rid or eval_rid, "split": bool(rid and rid != eval_rid),
+            "collect_robot_name": (collect or {}).get("name"), "collect_mode": robot_mode(collect),
+            "eval_robot_id": eval_rid, "eval_mode": robot_mode(by_id.get(eval_rid)), "by": "run_settings"}
+
+
 def _reducer_error(ticket_id: int, e: Exception) -> HTTPException:
     msg = getattr(e, "message", None) or str(e)
     status = getattr(e, "status", None)
@@ -232,6 +257,7 @@ async def patch_run_settings(
         patch = body.to_patch()
         ticket, _ = await _load(stdb, ticket_id)
         _check_against_ticket(ticket_id, ticket, patch)
+        collect_event = await _tdm125_collect_event(stdb, ticket_id, ticket, patch)
         try:
             await stdb.call_reducer("update_run_settings", ticket_id, json.dumps(patch))
         except Exception as e:  # noqa: BLE001 - SpacetimeError or transport error
@@ -246,6 +272,11 @@ async def patch_run_settings(
             audit_logged = False
             log.error("run_settings.audit_failed", extra={"fields": {"actor": actor, "error": str(e)}})
 
+        if collect_event is not None:  # TDM-125
+            try:
+                await stdb.call_reducer("append_event", actor, "ticket.collect_robot_set", json.dumps(collect_event))
+            except Exception as e:  # noqa: BLE001 - the setting is saved
+                log.error("run_settings.collect_event_failed", extra={"fields": {"error": str(e)[:300]}})
         ticket, row = await _load(stdb, ticket_id)  # read back: proves the patch is visible
         log.info("run_settings.patched", extra={"fields": {"actor": actor, "patch": patch}})
         out = _view(ticket, row)

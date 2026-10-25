@@ -10,6 +10,7 @@
   reset task enters completed                               -> reserve_task_payment + resume_policy
   clean_teleop task claimed / no longer claimed             -> start_teleop / stop_teleop on its robot
   clean_teleop episode accepted, task still claimed         -> complete_task (frees the robot's lease)
+  TDM-125: a robot's status changes / run_settings change   -> dispatch the split tickets collecting on it
 
 Every path is idempotent: the dispatcher decides from rows, so a resync replaying an event is a no-op.
 """
@@ -80,6 +81,27 @@ def dispatch_teleop_on_task(ev: Event) -> None:
         log.info("dispatch.teleop", extra={"fields": {"task_id": ev.row.get("id"), "outcome": out}})
 
 
+def dispatch_on_collect_robot(ev: Event) -> None:
+    """TDM-125: a split ticket's collect robot came back (or went away), or its collect_robot_id changed:
+    re-run the ticket's plans so waiting collection tasks get posted on it."""
+    from ..robot_mode import collect_robot_id, is_split
+
+    if ev.table == "robot":
+        if ev.old is not None and ev.old.get("status") == ev.row.get("status"):
+            return
+        rid = int(ev.row["id"])
+        tids = [int(t["id"]) for t in ev.bus.rows("ticket") if t.get("status") == "dispatch"
+                and is_split(ev.bus.get("run_settings", int(t["id"])) or {}, t)
+                and collect_robot_id(ev.bus.get("run_settings", int(t["id"])) or {}, t) == rid]
+    else:
+        if ev.old is not None and ev.old.get("hyperparams_json") == ev.row.get("hyperparams_json"):
+            return
+        t = ev.bus.get("ticket", int(ev.row["ticket_id"]))
+        tids = [int(t["id"])] if t is not None and t.get("status") == "dispatch" else []
+    for tid in tids:
+        _d(ev).dispatch_ticket(tid)
+
+
 def register(reg: Registry) -> Registry:
     """Put the dispatcher handlers on ``reg`` (the default registry at import; tests use their own)."""
     for t in dsp.TABLES:
@@ -93,6 +115,8 @@ def register(reg: Registry) -> Registry:
     reg.on_enter("robot", where=lambda r: r.status == "paused", include_existing=False, name="reset_on_robot_paused")(reset_on_robot_paused)
     reg.on_enter("task", where=lambda r: r.type == "reset" and r.status == "completed", name="resume_after_reset")(resume_after_reset)
     reg.on_update("task", where=lambda r: r.type == "clean_teleop", name="dispatch_teleop_on_task")(dispatch_teleop_on_task)
+    reg.on_update("robot", name="dispatch_on_collect_robot")(dispatch_on_collect_robot)  # TDM-125
+    reg.on_update("run_settings", name="dispatch_on_collect_robot_setting")(dispatch_on_collect_robot)  # TDM-125
     return reg
 
 

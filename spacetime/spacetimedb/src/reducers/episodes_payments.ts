@@ -312,11 +312,15 @@ export const create_episode = spacetimedb.reducer(
     }
 
     let contributor_id = args.contributor_id;
+    // TDM-125: an episode is labelled with the robot it was recorded on. A task's episode is
+    // recorded on the task's robot (a split-robot ticket collects on another robot than it evals on).
+    let robot_id = ticket.robot_id;
     if (args.task_id !== 0n) {
       const task = ctx.db.task.id.find(args.task_id);
       if (!task || task.ticket_id !== ticket.id) {
         throw new SenderError(`task ${args.task_id} not found on ticket ${ticket.id}`);
       }
+      if (task.robot_id !== 0n) robot_id = task.robot_id;
       if (task.status === 'cancelled') throw new SenderError(`task ${task.id} is cancelled`);
       if (task.assignee_id === 0n) throw new SenderError(`task ${task.id} was never claimed`);
       if (contributor_id === 0n) contributor_id = task.assignee_id;
@@ -341,7 +345,7 @@ export const create_episode = spacetimedb.reducer(
     const ep = ctx.db.episode.insert({
       id: 0n,
       ticket_id: ticket.id,
-      robot_id: ticket.robot_id,
+      robot_id,
       task_id: args.task_id,
       contributor_id,
       dataset_offer_id: 0n,
@@ -364,10 +368,10 @@ export const create_episode = spacetimedb.reducer(
       total_count = ds.total_count + 1;
       ctx.db.dataset.id.update({ ...ds, total_count, updated_at: ctx.timestamp });
     }
-    tdm11Log(ctx, role === 'robot_client' ? `robot:${ticket.robot_id}` : role, 'episode.created', {
+    tdm11Log(ctx, role === 'robot_client' ? `robot:${robot_id}` : role, 'episode.created', {
       episode_id: ep.id,
       ticket_id: ticket.id,
-      robot_id: ticket.robot_id,
+      robot_id,
       task_id: args.task_id,
       contributor_id,
       kind,

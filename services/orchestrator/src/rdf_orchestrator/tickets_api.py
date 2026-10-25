@@ -58,6 +58,9 @@ class CreateTicketRequest(BaseModel):
     robot_mode: Literal["sim", "real"] | None = Field(
         None, description="TDM-107: run on the sim robot (MuJoCo scene) or the real YAM. Default: whatever "
                           "robot is picked (the only online one).")
+    collect_robot_id: int | None = Field(
+        None, ge=1, description="TDM-125: collect the data (teleop demos) on this robot, e.g. the real yam-01, while "
+                                "baseline/evals run on robot_id. Default: collect on the ticket's robot.")
     settings_overrides: dict[str, Any] | None = Field(
         None, description="update_run_settings keys minus budget_cents: eval_trials, success_threshold, "
                           "require_ci_low, target_episodes, max_iterations, hyperparams{lr,steps,batch_size,lora_rank,prompt}")
@@ -298,6 +301,13 @@ class TicketsService:
 
         robot, selection = await self.pick_robot(req.robot_id, req.robot_mode)
         rid = int(robot["id"])
+        collect = None
+        if req.collect_robot_id is not None and req.collect_robot_id != rid:  # TDM-125 split-robot ticket
+            collect = next((r for r in await self.stdb.sql("SELECT * FROM robot") if int(r["id"]) == req.collect_robot_id), None)
+            if collect is None:
+                raise TicketError(422, "unknown_collect_robot", f"No robot with id {req.collect_robot_id}.")
+            overrides = {**overrides, "hyperparams": {**(overrides.get("hyperparams") or {}),
+                                                      "collect_robot_id": int(req.collect_robot_id)}}
         from rdf_common.spacetime_client import SpacetimeError
 
         async with self._create_lock:
@@ -316,6 +326,15 @@ class TicketsService:
         ticket = new[0]
         settings = await self._rows("run_settings", "ticket_id", ticket["id"])
         mode = _public_robot(robot)["robot_mode"]
+        if collect is not None:
+            from .robot_mode import COLLECT_ROBOT_EVENT, robot_mode as _mode_of
+            try:
+                await self.stdb.call_reducer("append_event", "orchestrator:tickets", COLLECT_ROBOT_EVENT, json.dumps({
+                    "ticket_id": int(ticket["id"]), "collect_robot_id": int(collect["id"]),
+                    "collect_robot_name": collect.get("name"), "collect_mode": _mode_of(collect),
+                    "eval_robot_id": rid, "eval_mode": mode, "by": "ticket_create"}))
+            except Exception as e:  # noqa: BLE001 - the setting is saved; the event is the audit trail
+                log.error("tickets.collect_robot_event_failed", extra={"fields": {"error": str(e)[:300]}})
         log.info("tickets.created", extra={"fields": {"ticket_id": ticket["id"], "robot_id": rid, "selection": selection,
                                                       "budget_cents": budget_cents, "target_success": target,
                                                       "robot_mode": mode}})
@@ -323,6 +342,7 @@ class TicketsService:
             "ticket_id": ticket["id"],
             "robot": _public_robot(robot),
             "robot_mode": mode,
+            "collect_robot": _public_robot(collect) if collect is not None else None,
             "robot_selection": selection,
             "ticket": ticket,
             "run_settings": _with_hyperparams(settings[0] if settings else None),

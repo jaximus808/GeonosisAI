@@ -117,6 +117,8 @@ class PlannerInputs:
     cluster_iteration: int | None = None
     prices: dict = field(default_factory=lambda: dict(PRICES_CENTS))
     fixture: str | None = None  # set by tests/proof scripts: the plan is labelled as a fixture
+    # TDM-125: the robot collection runs on and what it can produce (robot_mode.collect_capabilities)
+    collect_robot: dict | None = None
 
 
 # --------------------------------------------------------------------------- stage heuristic
@@ -179,6 +181,10 @@ def guardrail(inp: PlannerInputs) -> Guardrail:
     late_s = late / total if total else 0.0
     ev = inp.latest_eval
     zero = ev is not None and ev.trials > 0 and ev.successes == 0
+    cr = inp.collect_robot or {}
+    if cr.get("clean_only"):  # TDM-125: beats the override too; a takeover is impossible on that robot
+        return Guardrail("collect_robot", "clean_teleop", str(cr.get("why") or "the collect robot can only "
+                         "record clean teleop demos"), total, na_s, late_s)
     if inp.data_type_override in DATA_TYPES:
         return Guardrail("override", inp.data_type_override,
                          f"the user fixed data_type to {inp.data_type_override}", total, na_s, late_s)
@@ -246,6 +252,9 @@ half of the failures, choose recovery_takeover.
 3. Otherwise weigh the clusters yourself: their counts, where in the trajectory they fail, and the eval.
 4. If data_type_override is set, use it. You still choose the amount, and you must say plainly if the \
 failure data argues against the override.
+5. If collect_robot.clean_only is true, choose clean_teleop whatever rules 2 and 4 say: the data is \
+collected on a different robot (often the real arm) that has no policy deployed for this ticket, so a \
+recovery takeover cannot happen there. Say so in the reasoning.
 Each cluster carries stage_hint (no_approach, late or unknown), computed by code from the diagnosis \
 step's phase when there is one, otherwise from keywords in the label. phase and recoverable_mid_episode \
 come from the diagnosis step, which looked at the failed episodes' camera frames. Use your own judgment of \
@@ -340,6 +349,7 @@ def facts(inp: PlannerInputs, b: Budget) -> dict:
         "previous_plans": inp.previous_plans,
         "dataset_sellers": {"registered_sellers": inp.dataset_sellers, "open_offers": inp.dataset_offers},
         "data_type_override": inp.data_type_override,
+        "collect_robot": inp.collect_robot,
     }
 
 
@@ -384,7 +394,8 @@ def violations(d: dict, inp: PlannerInputs, g: Guardrail, b: Budget) -> list[str
         out.append(f"data_type must be one of {DATA_TYPES}, got {t!r}")
         return out
     if g.required_type and t != g.required_type:
-        rule = "data_type_override" if g.rule == "override" else f"decision rule {g.rule[1]}"
+        rule = {"override": "data_type_override", "collect_robot": "the collect robot (TDM-125)"}.get(
+            g.rule or "", f"decision rule {(g.rule or 'R?')[1:]}")
         out.append(f"{rule} requires data_type={g.required_type} ({g.why}); you chose {t}")
     want = g.required_type or t
     mx = b.max_amount[want]
@@ -705,6 +716,17 @@ def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
     if col in DATA_TYPES:
         override = col
     note = str(diag.get("reasoning"))[:4000] if diag and diag.get("reasoning") else None
+    collect = None  # TDM-125: a split-robot ticket collects on hyperparams.collect_robot_id
+    try:
+        from .robot_mode import collect_capabilities
+
+        crid = int(hp.get("collect_robot_id") or 0)
+        robots = {int(_g(r, "id")): (dict(r) if isinstance(r, dict) else r) for r in rows("robot")}
+        erid = int(_g(ticket, "robot_id", 0) or 0)
+        if crid and crid != erid:
+            collect = collect_capabilities(robots.get(crid) or {"id": crid, "name": f"robot {crid}"}, robots.get(erid) or {"id": erid})
+    except Exception:  # noqa: BLE001 - rows without a robot table (old fixtures): no split
+        collect = None
 
     return PlannerInputs(
         ticket_id=tid, iteration=it, task_description=str(_g(ticket, "task_description", "")),
@@ -722,6 +744,7 @@ def gather_inputs(rows: Rows, ticket: Any) -> PlannerInputs:
         failed_trials=[trial_view(r) for r in failed],
         previous_plans=prev, dataset_offers=offers, dataset_sellers=sellers,
         data_type_override=override, diagnosis_note=note, cluster_iteration=citer,
+        collect_robot=collect,
     )
 
 

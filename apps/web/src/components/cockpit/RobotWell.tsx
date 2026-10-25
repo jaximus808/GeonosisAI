@@ -27,14 +27,18 @@ function PolicyReporter({ policy, onPolicy }: { policy: Tdm114LivePolicy | null 
   return null;
 }
 
-export function Tdm116RobotWell({ d, compact = false, hud = true, onPolicy }: {
+export function Tdm116RobotWell({ d, compact = false, hud = true, onPolicy, robotOverride }: {
   d: Tdm116Data;
   compact?: boolean;
   hud?: boolean;
   onPolicy?: (p: Tdm114LivePolicy | null) => void;
+  /** TDM-125: show another robot than the ticket's (a split ticket's collect robot). */
+  robotOverride?: { id: bigint; robot: Tdm116Data['robot']; mode: Tdm116Data['mode'] };
 }) {
   const visible = useTdm116PageVisible();
-  const pinned = Number(d.robotId);
+  const pinned = Number(robotOverride?.id ?? d.robotId);
+  const shownRobot = robotOverride ? robotOverride.robot : d.robot;
+  const shownMode = robotOverride ? robotOverride.mode : d.mode;
   if (pinned <= 0) {
     return (
       <div className="tdm116-empty">
@@ -51,7 +55,7 @@ export function Tdm116RobotWell({ d, compact = false, hud = true, onPolicy }: {
       </div>
     );
   }
-  const defaultMode = tdm100DefaultMode(d.robot, d.mode === 'sim' ? 'sim' : d.mode === 'real' ? 'live' : undefined);
+  const defaultMode = tdm100DefaultMode(shownRobot, shownMode === 'sim' ? 'sim' : shownMode === 'real' ? 'live' : undefined);
   const ticketId = Number(d.tid);
   return (
     <div className="tdm116-robot" data-testid="cockpit-robot">

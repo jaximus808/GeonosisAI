@@ -39,6 +39,7 @@ import { WaitingForRobot } from '@/components/tdm114/WaitingForRobot';
 import { Tdm116PrimaryButton } from './Actions';
 import { Tdm116EvalStage } from './EvalStage';
 import { Tdm116RobotWell } from './RobotWell';
+import { Tdm125SplitLine } from '@/components/tdm125/CollectRobot';
 import { useTdm116Now } from './hooks';
 import type { Tdm116Data } from './useCockpitData';
 
@@ -449,7 +450,8 @@ function CollectStage({ d }: { d: Tdm116Data }) {
       </div>
 
       <div className="tdm116-col tdm116-scroll">
-        {d.floor?.waitingFor?.stationKey === 'collect' && <WaitingForRobot waitingFor={d.floor.waitingFor} ticketId={Number(t.id)} />}
+        <Tdm125SplitLine split={d.split} status={t.status} stationIndex={station?.index ?? 3} ticketId={Number(t.id)} />
+        {!d.split.split && d.floor?.waitingFor?.stationKey === 'collect' && <WaitingForRobot waitingFor={d.floor.waitingFor} ticketId={Number(t.id)} />}
         <section className={gxCx('tdm116-plate is-tight', station?.state === 'waiting' && 'is-waiting')} aria-label="Driving now">
           <p className="gx-label m-0">Driving now</p>
           {driving ? (
@@ -463,7 +465,12 @@ function CollectStage({ d }: { d: Tdm116Data }) {
             <p className="m-0 mt-1 text-sm text-ink-muted">{station?.activity ?? 'Nobody is driving.'}</p>
           )}
         </section>
-        <Tdm116RobotWell d={d} compact hud={false} />
+        <Tdm116RobotWell
+          d={d}
+          compact
+          hud={false}
+          robotOverride={d.split.split ? { id: d.split.collectRobotId, robot: d.allRobots.find((r) => r.id === d.split.collectRobotId), mode: d.split.collectMode } : undefined}
+        />
       </div>
     </div>
   );

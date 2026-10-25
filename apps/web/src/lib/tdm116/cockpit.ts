@@ -265,3 +265,13 @@ export function tdm116IsListToggleKey(e: { key: string; metaKey?: boolean; ctrlK
   const tag = (el?.tagName ?? '').toUpperCase();
   return !(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable);
 }
+
+/** The full ticket cockpit page. A plain click on a /dashboard ticket (list item or the embedded title) opens it. */
+export function tdm116TicketHref(id: bigint | number | string): string {
+  return `/tickets/${id.toString()}`;
+}
+
+/** Keep the ticket inside /dashboard (the "Preview here" link). */
+export function tdm116PreviewHref(id: bigint | number | string): string {
+  return `/dashboard?ticket=${id.toString()}`;
+}

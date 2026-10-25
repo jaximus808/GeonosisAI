@@ -100,6 +100,7 @@ export function TicketCockpit({ id, embedded = false }: { id: string; embedded?:
     <div className={gxCx('tdm116-shell', !embedded && 'tdm116-fill')} data-embedded={embedded || undefined} data-testid="ticket-cockpit" data-stage={shown} data-live-stage={live} data-tab={tab}>
       <Tdm116TopBar
         d={d}
+        embedded={embedded}
         shown={shown}
         onPick={pick}
         action={action}

@@ -2,7 +2,8 @@
 
 // TDM-116: /dashboard as the same app shell. Robots with their current job across the top, the tickets
 // down the left (status, the line in miniature, spend), and the selected ticket's cockpit on the right.
-// `?ticket=N` selects one; without it, the newest ticket still on the line.
+// `?ticket=N` selects one; without it, the newest ticket still on the line. A plain click on a ticket in the
+// list opens its full page (/tickets/N); "Preview here" keeps it in this shell.
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -14,7 +15,7 @@ import { useRows } from '@/lib/spacetime/hooks';
 import { fmtCents } from '@/lib/format';
 import { TDM101_ENDED, tdm101ParseTicketParam, tdm101PickTicket } from '@/lib/tdm101/live';
 import { tdm107IsSimRobot } from '@/lib/tdm107/robotMode';
-import { TDM116_PREF_KEYS, tdm116IsListToggleKey, tdm116ListTickets, tdm116ParseFlag } from '@/lib/tdm116/cockpit';
+import { TDM116_PREF_KEYS, tdm116IsListToggleKey, tdm116ListTickets, tdm116ParseFlag, tdm116PreviewHref, tdm116TicketHref } from '@/lib/tdm116/cockpit';
 import { useTdm116Stored } from './hooks';
 import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import { TicketCockpit } from './TicketCockpit';
@@ -144,8 +145,8 @@ export function Tdm116DashboardShell({ ticketParam }: { ticketParam?: string | n
               const stations = gxTicketStations(t.status);
               const budget = Number(t.budgetCents);
               return (
-                <li key={t.id.toString()}>
-                  <Link href={`/dashboard?ticket=${t.id}`} className="tdm116-tkt" aria-current={t.id === selected ? 'page' : undefined} scroll={false}>
+                <li key={t.id.toString()} className="tdm116-tkt-li">
+                  <Link href={tdm116TicketHref(t.id)} className="tdm116-tkt" aria-current={t.id === selected ? 'page' : undefined} data-testid="dashboard-ticket-link">
                     <span className="flex items-center gap-2">
                       <span className="gx-id shrink-0 whitespace-nowrap text-ink">TKT-{t.id.toString().padStart(4, '0')}</span>
                       <StatusTag status={t.status} />
@@ -162,6 +163,15 @@ export function Tdm116DashboardShell({ ticketParam }: { ticketParam?: string | n
                       ))}
                     </span>
                     <span className="gx-id">{robotName.get(t.robotId) ?? `robot #${t.robotId}`}</span>
+                  </Link>
+                  <Link
+                    href={tdm116PreviewHref(t.id)}
+                    scroll={false}
+                    className="tdm116-tkt-preview gx-id"
+                    title={`Preview ${tkt(t.id)} here on the dashboard`}
+                    data-testid="dashboard-ticket-preview"
+                  >
+                    Preview here
                   </Link>
                 </li>
               );

@@ -10,7 +10,7 @@ import { StatusTag, Tag } from '@/components/brand/StatusTag';
 import { gxCx } from '@/components/brand/cx';
 import { fmtCents } from '@/lib/format';
 import type { Tdm112Floor } from '@/lib/tdm112/floor';
-import { TDM116_TERMINAL, type Tdm116Action, type Tdm116StageKey } from '@/lib/tdm116/cockpit';
+import { TDM116_TERMINAL, tdm116TicketHref, type Tdm116Action, type Tdm116StageKey } from '@/lib/tdm116/cockpit';
 import { FakeBadge, SimBadge } from '@/components/ticket/Badges';
 import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import { Button } from '@/components/brand/Button';
@@ -34,7 +34,7 @@ function RunNum({ run, label }: { run?: { status: string; trials: number; comple
   );
 }
 
-export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false, onFactory }: {
+export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false, onFactory, embedded = false }: {
   d: Tdm116Data;
   shown: Tdm116StageKey;
   onPick: (k: Tdm116StageKey) => void;
@@ -43,6 +43,8 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false,
   /** The Overview is showing the factory cell (TDM-115) instead of the stage. */
   factory?: boolean;
   onFactory?: () => void;
+  /** Rendered inside /dashboard: the ticket id and title link to the full ticket page. */
+  embedded?: boolean;
 }) {
   const t = d.ticket!;
   const floor = d.floor;
@@ -53,7 +55,13 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false,
     <header className="tdm116-top" data-testid="cockpit-top">
       <div className="tdm116-who">
         <div className="tdm116-who-meta">
-          <span className="gx-id text-ink">{ref4}</span>
+          {embedded ? (
+            <Link href={tdm116TicketHref(t.id)} className="gx-id text-ink hover:underline" data-testid="cockpit-ticket-link">
+              {ref4}
+            </Link>
+          ) : (
+            <span className="gx-id text-ink">{ref4}</span>
+          )}
           <StatusTag status={t.status} />
           {d.mode === 'sim' && <SimBadge title="This ticket runs on the SIM robot (MuJoCo YAM). Its numbers are sim results, never real-arm success rates." />}
           {d.mode === 'real' && <Tag tone="cancelled">Real robot</Tag>}
@@ -69,8 +77,14 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false,
           {floor?.iterationLabel && <span className="gx-id">{floor.iterationLabel}</span>}
           <Tdm116RobotReleased status={t.status} robotStatus={d.robot?.status} holderTicketId={floor?.holder?.ticketId} ticketId={Number(t.id)} />
         </div>
-        <h1 className="tdm116-title" title={t.taskDescription}>
-          {t.taskDescription}
+        <h1 className="tdm116-title" title={embedded ? `Open ${ref4}: ${t.taskDescription}` : t.taskDescription}>
+          {embedded ? (
+            <Link href={tdm116TicketHref(t.id)} className="no-underline hover:underline" style={{ color: 'inherit' }} data-testid="cockpit-title-link">
+              {t.taskDescription}
+            </Link>
+          ) : (
+            t.taskDescription
+          )}
         </h1>
       </div>
 

@@ -190,3 +190,18 @@ def test_check_mode_opens_nothing(capsys, monkeypatch):
     monkeypatch.setenv("YAM_CAN_CHANNEL", "can_right")
     assert tdm118_readonly.run(["--check", "--no-vrteleop-check"]) == 0
     assert '"read_only": true' in capsys.readouterr().out
+
+
+def test_tdm120_northstar_camera_config_check(capsys, monkeypatch):
+    import json
+    from pathlib import Path
+
+    from rdf_robot_client import tdm118_readonly
+
+    cfg = Path(__file__).resolve().parents[1] / "config" / "cameras.tdm120_northstar.yaml"
+    monkeypatch.setenv("RDF_CAMERAS_CONFIG", str(cfg))
+    assert tdm118_readonly.run(["--check", "--no-vrteleop-check", "--cameras", "config"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    cams = {c["name"]: c for c in out["camera_rig"]["cameras"]}
+    assert set(cams) == {"top", "wrist"} and all(c["fourcc"] == "YUYV" and c["size"] == [640, 480] for c in cams.values())
+    assert 15 <= out["camera_rig"]["stream"]["fps"] <= 20

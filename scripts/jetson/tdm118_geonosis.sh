@@ -15,7 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; REPO="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="${RDF_DOTENV:-$REPO/.env}"
 BUNDLE_PATHS=(services/robot-client services/common scripts/jetson)
-val() { [ -f "$ENV_FILE" ] || return 0; grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
+val() { [ -f "$ENV_FILE" ] || return 0; { grep -E "^$1=" "$ENV_FILE" || true; } | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 JETSON_HOST="${JETSON_HOST:-$(val JETSON_HOST)}"; JETSON_USER="${JETSON_USER:-$(val JETSON_USER)}"
 [ -n "$JETSON_HOST" ] || { echo "JETSON_HOST not set (.env)" >&2; exit 2; }
 TARGET="${JETSON_USER:+$JETSON_USER@}$JETSON_HOST"

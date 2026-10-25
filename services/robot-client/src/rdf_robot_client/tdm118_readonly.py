@@ -10,8 +10,10 @@ What runs:
     could move the arm (home, run_baseline, run_eval, start_teleop, reset_request, ...) is replaced by a
     handler that fails the command, so a motion command fails before it reaches the arm. The adapter
     refuses every ``command_*`` call too.
-  * the TDM-55 stream server with ``/ws/state`` only (TDM-96 live state for RobotView). **No ``/ws/control``**
-    is mounted, so there is no teleop input path. No cameras yet (TDM-120 adds them).
+  * the TDM-55 stream server with ``/ws/state`` (TDM-96 live state for RobotView) and, with
+    ``--cameras config`` (TDM-120; ``$TDM118_CAMERAS``), ``/ws/cameras`` from ``$RDF_CAMERAS_CONFIG``
+    (northstar: ``config/cameras.tdm120_northstar.yaml``). **No ``/ws/control``** is mounted, so there is no
+    teleop input path. Cameras are read-only devices; a camera that fails to open just retries.
 
 Refuses to start (exit 3) while ``vrteleop-rh`` is active: it owns the CAN buses and the cameras.
 """
@@ -56,6 +58,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--heartbeat-s", type=float, default=5.0)
     p.add_argument("--stream", default=None, help="cloudflared | none | off (default $RDF_STREAM or cloudflared)")
     p.add_argument("--port", type=int, default=None, help="stream server port (default $RDF_STREAM_PORT or 8091)")
+    p.add_argument("--cameras", choices=["off", "config"], default=None,
+                   help="off (default) | config: real cameras from $RDF_CAMERAS_CONFIG (default $TDM118_CAMERAS)")
     p.add_argument("--check", action="store_true", help="offline config check: build the adapter, open nothing")
     p.add_argument("--no-vrteleop-check", action="store_true", help=argparse.SUPPRESS)  # tests only
     return p.parse_args(argv)
@@ -70,9 +74,18 @@ def run(argv: list[str] | None = None) -> int:
     arm = make_adapter("yam_readonly", vrteleop_check=vr_check)
     name = a.name or os.environ.get("ROBOT_ID") or "yam-01"
     handlers = tdm118_handlers()
+    cameras = a.cameras or os.environ.get("TDM118_CAMERAS") or "off"
     if a.check:
-        print(json.dumps({"ok": True, "robot": name, "arm": arm.describe(), "refused_jobs": sorted(handlers),
-                          "vrteleop_active": tdm118_vrteleop_active()}, default=str, indent=1))
+        out: dict[str, Any] = {"ok": True, "robot": name, "arm": arm.describe(), "refused_jobs": sorted(handlers),
+                               "vrteleop_active": tdm118_vrteleop_active(), "cameras": cameras}
+        if cameras == "config":
+            from .cameras import load_config
+
+            rc = load_config(os.environ.get("RDF_CAMERAS_CONFIG"))
+            out["camera_rig"] = {"stream": rc.stream, "cameras": [
+                {"name": c.name, "device": c.device, "size": [c.width, c.height], "fps": c.fps, "fourcc": c.fourcc}
+                for c in rc.cameras]}
+        print(json.dumps(out, default=str, indent=1))
         return 0
     if vr_check is not None and vr_check():
         print(f"vrteleop-rh is running and owns the CAN buses and cameras. Stop it first: {TDM118_STOP_VRTELEOP}",
@@ -85,17 +98,27 @@ def run(argv: list[str] | None = None) -> int:
     cfg, _env_name = _stdb_config(argparse.Namespace(adapter="yam_readonly", host=None, db=None, token_file=None))
     client = RobotClient(
         arm, name=name, stdb=cfg, heartbeat_s=a.heartbeat_s, handlers=handlers, services={},
-        camera_config={"cameras": "off", "sim": False, "read_only": True,
+        camera_config={"cameras": cameras, "sim": False, "read_only": True,
                        "motion": "disabled (TDM-118 read-only; TDM-119 enables it)"},
         clear_estop_on_boot=False,
     )
     stream_mode = a.stream or os.environ.get("RDF_STREAM") or "cloudflared"
     stream = None
+    rig: Any = None
+    if cameras == "config":
+        try:
+            from .cameras import CameraRig
+
+            rig = CameraRig.from_config(os.environ.get("RDF_CAMERAS_CONFIG")).start()
+        except Exception as e:  # noqa: BLE001 - a bad camera config must not take the joint feed down
+            _log("cameras NOT started", error=repr(e)[:300])
+            rig = None
+            client.camera_config["cameras"] = "off"
     if stream_mode != "off":
         try:
             from .stream import NoCameraRig, install_state_feed, start_stream
 
-            stream = start_stream(NoCameraRig(), robot_name=name, tunnel=stream_mode,
+            stream = start_stream(rig if rig is not None else NoCameraRig(), robot_name=name, tunnel=stream_mode,
                                   port=a.port or int(os.environ.get("RDF_STREAM_PORT") or 8091))
         except (Exception, SystemExit) as e:  # noqa: BLE001 - run without /ws/state rather than not at all
             _log("stream NOT started (no /ws/state)", error=repr(e)[:300])
@@ -126,6 +149,8 @@ def run(argv: list[str] | None = None) -> int:
         _log("TDM-118 client did not start", error=str(e)[:400])
         if stream is not None:
             stream.stop()
+        if rig is not None:
+            rig.stop()
         arm.disconnect()
         return TDM118_EXIT_REFUSED
     _log("TDM-118 read-only client running: joint reads only, every motion command is refused",
@@ -134,6 +159,8 @@ def run(argv: list[str] | None = None) -> int:
     client.stop()
     if stream is not None:
         stream.stop()
+    if rig is not None:
+        rig.stop()
     return 0
 
 

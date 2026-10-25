@@ -155,7 +155,8 @@ def test_sim_takeover_episode_passes_review_checks(sim_rig, tmp_root):
     assert m["fixture"] is True and "[SIM]" in m["note"]
     act = read_actions(ep.actions_path)
     assert set(REQUIRED_COLUMNS) <= set(act.columns) and "joint_cmd" in act.columns
-    assert act.n == m["frame_count"] and abs(act.n - 7 * 30) <= 6
+    fps = float(m["fps"])  # the reference camera's fps (cameras.yaml: 15 since the northstar RealSense config)
+    assert act.n == m["frame_count"] and abs(act.n - 7 * fps) <= 6
     assert list(act.frame_index) == list(range(act.n))
     # one video frame per parquet row, every camera, H.264
     for cam, p in ep.video_paths.items():
@@ -163,18 +164,20 @@ def test_sim_takeover_episode_passes_review_checks(sim_rig, tmp_root):
         probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                                 "stream=codec_name,pix_fmt", "-of", "csv=p=0", str(p)], capture_output=True, text=True)
         assert probe.stdout.strip() == "h264,yuv420p"
-    # clocks: 30 fps on the wall clock, takeover/handback inside the span, sources switch at the marks
+    # clocks: ``fps`` on the wall clock, takeover/handback inside the span, sources switch at the marks
     dt = (act.timestamp_us[1:] - act.timestamp_us[:-1]) / 1000
-    assert 30 < float(sorted(dt)[len(dt) // 2]) < 37
+    period_ms = 1000.0 / fps
+    assert 0.9 * period_ms < float(sorted(dt)[len(dt) // 2]) < 1.11 * period_ms
     tk, hb = m["takeover_ts"], m["handback_ts"]
     assert act.timestamp_us[0] < tk < hb < act.timestamp_us[-1]
     src = act.control_source
+    g = int(1.2 * period_ms * 1000)  # one frame period of slack around each mark
     for t, s in zip(act.timestamp_us, src):
-        if t < tk - 40_000:
+        if t < tk - g:
             assert s == "policy"
-        elif tk + 40_000 <= t < hb - 40_000:
+        elif tk + g <= t < hb - g:
             assert s == "human"  # including the idle pause, relabeled inside the takeover window
-        elif t >= hb + 40_000:
+        elif t >= hb + g:
             assert s == "policy"
     assert m["takeover"]["idle_relabeled_human"] > 0
     assert m["duration_ms"] == round((act.timestamp_us[-1] - act.timestamp_us[0]) / 1000)
@@ -467,7 +470,8 @@ def test_end_to_end_robot_client_upload_create_episode(stack, media_api, sim_rig
         ep_eval = rec.stop(success=None)
         assert ep_eval.meta["status"] == "recorded", ep_eval.meta["problems"]
         counts = ep_eval.meta["control_source_counts"]
-        assert counts.get("policy", 0) >= 100, counts  # ~4 s of streamed policy ticks at 30 Hz
+        # ~4 s of streamed policy ticks, one row per reference camera frame
+        assert counts.get("policy", 0) / float(ep_eval.meta["fps"]) >= 3.3, (counts, ep_eval.meta["fps"])
         assert check_local(ep_eval).passed, check_local(ep_eval).reason()
 
         # 2) a takeover recording, uploaded by the same queue while the media API is briefly unreachable

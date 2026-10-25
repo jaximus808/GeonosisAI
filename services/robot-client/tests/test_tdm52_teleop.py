@@ -13,6 +13,7 @@ import math
 import threading
 import time
 
+import numpy as np
 import pytest
 import websockets
 from rdf_common.stream_token import mint
@@ -490,8 +491,25 @@ def test_takeover_handback_episode_passes_review_checks(bench, via):
     ep = out["ep"]
     m = ep.meta
     assert m["takeover_ts"] < m["handback_ts"], m
-    assert m["control_source_counts"].get("human", 0) > 30
-    assert m["control_source_counts"].get("policy", 0) > 100
+    # Assert the behaviour, not a frame count: rows are sampled at the reference camera's fps (cameras.yaml;
+    # 15 fps since the northstar RealSense config), so durations are frame counts / fps.
+    from rdf_common.episode_format import read_actions
+
+    fps = float(m["fps"])
+    act = read_actions(ep.actions_path)
+    src, ts = list(act.control_source), act.timestamp_us
+    tk, hb = m["takeover_ts"], m["handback_ts"]
+    before = sum(1 for s, t in zip(src, ts) if s == "policy" and t < tk)
+    human = sum(1 for s in src if s == "human")
+    after = sum(1 for s, t in zip(src, ts) if s == "policy" and t > hb)
+    assert before / fps > 3.0, (before, fps)  # ~4 s of policy before the pause
+    assert human / fps > 1.5, (human, fps)  # the 2 s browser drive
+    assert after / fps > 1.0, (after, fps)  # the policy resumed after handback (~2 s left of max_seconds)
+    assert out["stats"].ended == "max_seconds", out["stats"]  # it finished its run, it did not stall
+    # no jump anywhere, in particular across the takeover and handback seams
+    assert bench.arm.stats().get("rejected_jump", 0) == 0, bench.arm.stats()
+    step = np.max(np.abs(np.diff(np.asarray(act.joint_pos, dtype=float), axis=0)), axis=1)
+    assert float(step.max()) < 0.1, float(step.max())
     assert "handback" in out["signals"]
     assert out["handback_payloads"][-1]["success"] is True  # the answer reaches the rollout runner
     from pathlib import Path

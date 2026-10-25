@@ -78,8 +78,12 @@ export interface Tdm74Inputs {
 export type Tdm74Field = 'prompt' | 'robot' | 'budget' | 'target' | 'form' | Tdm79Field;
 export type Tdm74Errors = Partial<Record<Tdm74Field, string>>;
 
+// Demo-sized starting values for a new ticket: a 3-trial eval and one demo to buy per round, so one person can
+// run the whole loop in a few minutes. They differ from the module defaults, so they are sent as overrides.
+export const TDM74_START: Partial<Tdm79Settings> = { eval_trials: 3, target_episodes: 1 };
+
 export function tdm74EmptyAdvanced(): Tdm79Form {
-  return toForm(TDM74_DEFAULTS);
+  return toForm({ ...TDM74_DEFAULTS, ...TDM74_START });
 }
 
 /**

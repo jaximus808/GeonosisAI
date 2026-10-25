@@ -9,6 +9,7 @@ import { Component, useEffect, useImperativeHandle, useRef, useState, type React
 import { gxCx } from '@/components/brand/cx';
 import { useInView, useStillness } from '@/components/factory-iso/kit/react/live';
 import { usePageVisible } from '@/lib/teleop/useViewQuality';
+import { FeedLayer, type FeedHandle } from './HeroFeed';
 import { HeroFoundry } from './HeroFoundry';
 import type { OverlayRefs, Palette } from './HeroSchematicScene';
 
@@ -84,8 +85,12 @@ function SheetMarks({ handle }: { handle: Ref<OverlayRefs> }) {
   const ty = useRef<SVGTextElement>(null);
   const tz = useRef<SVGTextElement>(null);
   const svg = useRef<SVGSVGElement>(null);
+  const feed = useRef<FeedHandle>(null);
 
   useImperativeHandle(handle, () => ({
+    feed(anchors, t, still) {
+      feed.current?.update(anchors, t, still);
+    },
     seam(x, y, flash) {
       const box = svg.current?.getBoundingClientRect();
       if (!box || !leader.current || !dot.current || !label.current) return;
@@ -123,6 +128,7 @@ function SheetMarks({ handle }: { handle: Ref<OverlayRefs> }) {
 
   return (
     <>
+      <FeedLayer handle={feed} />
       <svg ref={svg} className="pointer-events-none absolute inset-0 hidden h-full w-full overflow-visible min-[640px]:block" aria-hidden="true">
         <polyline ref={leader} points="0,0 0,0" fill="none" stroke="var(--melt)" strokeWidth="1" style={{ opacity: 'var(--seam-o, 0.6)' }} />
         <circle ref={dot} r="2.5" fill="var(--melt)" />

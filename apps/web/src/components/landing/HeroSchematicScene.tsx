@@ -15,6 +15,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { createYamKinematics } from '@/components/robotview/yamFk';
 import { YAM_BODIES, YAM_MODEL } from '@/components/robotview/yamModel';
+import { LOOP_S, START_T, STILL_T, handAt, type FeedKey } from './heroBeat';
 
 const GLB_URL = '/robot/yam/yam.glb';
 const KIN = createYamKinematics(YAM_MODEL);
@@ -25,9 +26,6 @@ const GRIPPER = 0.55;
 /** The bodies that slide home in the assembly beat: the hand and everything hung off it. */
 const HAND = new Set(['gripper', 'tip_left', 'tip_right', 'wrist_cam_mount']);
 
-export const LOOP_S = 48; // one turntable revolution
-const BEAT = { out: 0.0, slideStart: 2.2, slideEnd: 3.6, coolEnd: 6.4 }; // seconds into the loop
-export const STILL_T = 14; // reduced motion: a settled three-quarter view
 const SLIDE_M = 0.055;
 
 export interface Palette { ground: string; ink: string; muted: string; faint: string; melt: string }
@@ -39,8 +37,6 @@ declare global {
   }
 }
 
-const ease = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
-const ramp = (t: number, a: number, b: number) => ease((t - a) / (b - a));
 
 // ------------------------------------------------------------------------------------------ materials
 /** Silhouette: back faces pushed out along their normals by a fixed number of pixels (an inverted hull). */
@@ -183,12 +179,15 @@ function gantryLines(): number[] {
   return p;
 }
 
-function Cell({ pal, live, overlay }: { pal: Palette; live: Live; overlay: RefObject<OverlayRefs | null> }) {
+function Cell({ pal, live, overlay, still }: { pal: Palette; live: Live; overlay: RefObject<OverlayRefs | null>; still: boolean }) {
   const arm = useSchematicArm(pal);
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
     live.armed = true;
     invalidate(); // the still (demand) frame waits for the meshes
+    // and redraws once framing and the overlay's measurements (fonts) have settled, so its marks line up
+    const ids = [250, 900].map((ms) => window.setTimeout(invalidate, ms));
+    return () => ids.forEach(window.clearTimeout);
   }, [live, invalidate]);
   const size = useThree((s) => s.size);
   const camera = useThree((s) => s.camera);
@@ -269,10 +268,12 @@ function Cell({ pal, live, overlay }: { pal: Palette; live: Live; overlay: RefOb
     const t = live.t;
     if (spin.current) spin.current.rotation.z = (t / LOOP_S) * Math.PI * 2 - 0.55;
 
-    // assembly beat: the hand starts backed off along its approach axis, slides home, the seam flashes, cools
-    const slide = SLIDE_M * (1 - ramp(t, BEAT.slideStart, BEAT.slideEnd));
-    const flash = t >= BEAT.slideEnd ? 1 - ramp(t, BEAT.slideEnd, BEAT.coolEnd) : 0;
-    const heat = t < BEAT.slideEnd ? 1 : flash; // the new part arrives hot and cools to ink
+    // assembly beat (heroBeat.ts): the hand backs off along its approach axis while the last packets land, slides
+    // home, the seam flashes, and the part cools from molten to ink
+    const hand = handAt(t);
+    const slide = SLIDE_M * hand.slide;
+    const flash = hand.flash;
+    const heat = hand.heat;
     tmp.g.fromArray(world.gripper as unknown as number[]);
     tmp.gi.copy(tmp.g).invert();
     tmp.d.makeTranslation(0, 0, slide);
@@ -316,6 +317,16 @@ function Cell({ pal, live, overlay }: { pal: Palette; live: Live; overlay: RefOb
       const [mx, my] = gantryAt(-GANTRY.half - 0.07);
       const mid = new THREE.Vector3(mx, my, GANTRY.h / 2).applyMatrix4(g.matrixWorld).project(camera);
       o.dim((mid.x * 0.5 + 0.5) * size.width, (-mid.y * 0.5 + 0.5) * size.height);
+      // where each agent's conduit docks: data into the base, train into the shoulder, review the wrist, eval the hand
+      const at = (body: string, z = 0) => {
+        const m = world[body];
+        return proj(new THREE.Vector3(m[12], m[13], m[14] + z));
+      };
+      FEED_ANCHORS.data = proj(new THREE.Vector3(0, 0, 0.03));
+      FEED_ANCHORS.train = at('link2');
+      FEED_ANCHORS.review = at('link4');
+      FEED_ANCHORS.eval = s;
+      o.feed(FEED_ANCHORS, t, still);
     }
   });
 
@@ -337,7 +348,10 @@ function Cell({ pal, live, overlay }: { pal: Palette; live: Live; overlay: RefOb
 // ------------------------------------------------------------------------------------------ camera + draw
 interface Live { t: number; armed?: boolean }
 
+const FEED_ANCHORS = {} as Record<FeedKey, readonly [number, number]>;
+
 export interface OverlayRefs {
+  feed: (anchors: Record<FeedKey, readonly [number, number]>, t: number, still: boolean) => void;
   seam: (x: number, y: number, flash: number) => void;
   axes: (x: readonly number[], y: readonly number[], z: readonly number[]) => void;
   dim: (x: number, y: number) => void;
@@ -346,6 +360,7 @@ export interface OverlayRefs {
 /** An orthographic three-quarter view: an axonometric plate, framed to the box on every resize. */
 function Framing() {
   const camera = useThree((s) => s.camera) as THREE.OrthographicCamera;
+  const invalidate = useThree((s) => s.invalidate);
   const size = useThree((s) => s.size);
   useEffect(() => {
     const el = 0.42;
@@ -359,7 +374,8 @@ function Framing() {
     // the cell spans about 0.95 m across and 0.85 m tall on screen; the title block sits in the corner
     camera.zoom = Math.min(size.width / 1.06, size.height / 0.97);
     camera.updateProjectionMatrix();
-  }, [camera, size]);
+    invalidate();
+  }, [camera, size, invalidate]);
   return null;
 }
 
@@ -415,7 +431,7 @@ export interface HeroSchematicSceneProps {
 }
 
 export default function HeroSchematicScene({ still = false, running, palette, overlay, onReady }: HeroSchematicSceneProps) {
-  const live = useMemo<Live>(() => ({ t: still ? STILL_T : 0 }), [still]);
+  const live = useMemo<Live>(() => ({ t: still ? STILL_T : START_T }), [still]);
   const frameloop: 'always' | 'demand' | 'never' = still ? 'demand' : running ? 'always' : 'never';
   const [dpr] = useState(() => (typeof window === 'undefined' ? 1 : Math.min(1.5, window.devicePixelRatio || 1)));
   const gl = useMemo(() => ({ antialias: true, alpha: true, powerPreference: 'low-power' as const }), []);
@@ -443,7 +459,7 @@ export default function HeroSchematicScene({ still = false, running, palette, ov
       {/* robot base frame, z up: (x, y, z) -> three (x, z, -y) */}
       <group rotation={[-Math.PI / 2, 0, 0]}>
         <Suspense fallback={null}>
-          <Cell pal={palette} live={live} overlay={overlay} />
+          <Cell pal={palette} live={live} overlay={overlay} still={still} />
         </Suspense>
       </group>
     </Canvas>

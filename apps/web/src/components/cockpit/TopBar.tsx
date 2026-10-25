@@ -214,6 +214,11 @@ function Tdm116Menu({ ticketId, status, robotId, onTab }: { ticketId: number; st
           <button type="button" role="menuitem" onClick={() => go('robot')}>
             Robot view
           </button>
+          {status === 'shipped' && (
+            <Link role="menuitem" href={`/tickets/${ticketId}/deployment`} onClick={() => setOpen(false)} data-testid="tdm116-menu-deployment">
+              Open deployment
+            </Link>
+          )}
           <Link role="menuitem" href={`/tickets/${ticketId}/report`} onClick={() => setOpen(false)}>
             Open the report
           </Link>

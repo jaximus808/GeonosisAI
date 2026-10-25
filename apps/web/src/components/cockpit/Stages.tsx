@@ -698,9 +698,16 @@ function ShipStage({ d }: { d: Tdm116Data }) {
             <dd className="m-0 gx-data" title={t.deployedCheckpointUri ?? undefined}>{t.deployedCheckpointUri ? shortUri(t.deployedCheckpointUri, 3) : 'not deployed'}</dd>
           </div>
         </dl>
-        <ButtonLink href={`/tickets/${t.id}/report`} small className="ml-auto">
-          Open the report
-        </ButtonLink>
+        <span className="ml-auto flex flex-wrap gap-2">
+          {t.status === 'shipped' && t.deployedCheckpointUri && (
+            <ButtonLink href={`/tickets/${t.id}/deployment`} small variant="primary" data-testid="ship-open-deployment">
+              Open deployment
+            </ButtonLink>
+          )}
+          <ButtonLink href={`/tickets/${t.id}/report`} small>
+            Open the report
+          </ButtonLink>
+        </span>
         <p className="gx-small m-0 basis-full">
           {shipEv ? `${tdm112Words({ type: shipEv.row.type, payload: shipEv.payload })} · ${fmtTs(shipEv.row.ts)}. ` : ''}
           Ships when an eval meets the target.

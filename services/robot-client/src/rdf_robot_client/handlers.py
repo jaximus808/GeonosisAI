@@ -25,11 +25,22 @@ def _snapshot(ctx: JobContext) -> dict[str, Any]:
     return {"joints": [round(v, 4) for v in st.joints], "gripper": round(st.gripper, 3), "ee_pose": st.ee_pose.to_dict()}
 
 
+REAL_HOME_TOLERANCE_RAD = 0.05
+REAL_HOME_SETTLE_S = 4.0
+
+
 @job_handler("home")
 def home(ctx: JobContext) -> dict[str, Any]:
     ctx.enter(RobotState.HOMING, "home")
-    speed = float(ctx.payload.get("speed_fraction") or 0.25)
-    arrived = ctx.arm.move_joints(ctx.arm.home_joints, speed_fraction=speed, should_abort=ctx.should_abort)
+    # A real arm under gravity settles a few hundredths of a radian off a commanded pose (J2/J3 carry the
+    # load), so the sim's 0.01 rad / 2 s arrival check never passed on the YAM. Real arms: 0.05 rad (~3 deg)
+    # within 4 s, and the full safety-layer cap (itself x the safety speed scale, and the adapter's own
+    # <= 0.3 rad/s per joint) instead of a quarter of it.
+    sim = "sim" in str(getattr(ctx.arm, "embodiment", "") or "")
+    speed = float(ctx.payload.get("speed_fraction") or (0.25 if sim else 1.0))
+    tol, settle = (0.01, 2.0) if sim else (REAL_HOME_TOLERANCE_RAD, REAL_HOME_SETTLE_S)
+    arrived = ctx.arm.move_joints(ctx.arm.home_joints, speed_fraction=speed, should_abort=ctx.should_abort,
+                                  tolerance=tol, settle_timeout=settle)
     ctx.check()  # aborted by e-stop/stop -> Cancelled
     if not arrived:
         raise RuntimeError("home: arm did not reach the home pose within tolerance")

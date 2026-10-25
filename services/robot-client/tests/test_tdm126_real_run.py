@@ -118,7 +118,7 @@ def test_runs_one_capped_rollout_slowly_and_holds(robot):
     assert time.monotonic() - t0 < 3.0
     assert out["ok"] and out["moved"] and out["first_chunk_verdict"] == "ok"
     assert out["ended"] in ("max_seconds", "time_cap") and out["seconds"] <= 1.5
-    assert seen["first"] <= 0.25 and out["speed_scale"] <= 0.25  # never the payload's 0.9
+    assert seen["first"] <= 0.5 and out["speed_scale"] <= 0.5  # REAL_RUN_MAX_SPEED_SCALE, never the payload's 0.9
     assert robot.arm.speed_scale == scale0  # restored
     assert events(robot, "deployment.real_run_first_chunk")[0]["verdict"] == "ok"
     fin = events(robot, "deployment.real_run_finished")

@@ -51,7 +51,7 @@ REAL_RUN_PURPOSE = "deployment_real_run"
 REAL_RUN_CONFIRM = "HANDS_ON_ESTOP"
 REAL_RUN_DEFAULT_S = 25.0
 REAL_RUN_MAX_S = 30.0
-REAL_RUN_MAX_SPEED_SCALE = 0.25
+REAL_RUN_MAX_SPEED_SCALE = 0.5  # the adapter still caps every joint at <= 0.3 rad/s; 0.25 left policy motion at ~0.2 rad/s
 PASS_VERDICTS = ("ok", "clamp")
 CANCEL_GRACE_S = 2.0  # still held in a pause this long after the cap: cancel the job
 
@@ -168,7 +168,7 @@ def guarded_episode(ctx: JobContext, pc: Any, prompt: str, uri: str, seconds: fl
     prev_scale = getattr(arm, "speed_scale", None)
     want = min(float(speed_scale or REAL_RUN_MAX_SPEED_SCALE), REAL_RUN_MAX_SPEED_SCALE)
     if hasattr(arm, "set_speed_scale") and prev_scale is not None:
-        arm.set_speed_scale(min(float(prev_scale), want))
+        arm.set_speed_scale(want)  # restored to prev_scale (the teleop setting) when the run ends
     info: dict[str, Any] = {"capped": False, "rejected": None, "time_cap_s": seconds,
                             "speed_scale": getattr(arm, "speed_scale", None)}
     done = threading.Event()

@@ -198,12 +198,17 @@ Steps (you):
 2. **File a Real ticket on yam-01**: New ticket, robot mode **Real**, robot **yam-01**, **3 eval trials**, **1 demo**
    (target episodes 1). The form must not show a split note. If it does, yam-01 is not advertising policy: check
    step 6.
-3. **Baseline (3 trials).** Watch the cockpit's eval stage: it shows yam-01's live camera stream.
+3. **Baseline (3 trials).** Watch the cockpit's eval stage: on a real robot it shows Twin / Top / Wrist / All, the
+   arm's own camera feeds.
    - After each trial, score it **Pass / Fail** on the robot page `/robots/<yam-01 id>` (the trial panel). You
      have 2 min (`outcome_timeout_s` 120 for the real arm). No answer is recorded as a failure.
-   - **Between trials** a reset job appears: the job drop or text, and `/reset/<taskId>`. Claim it, put the cube
-     back by hand, and tap **Done, robot may continue**. The dispatcher sends `resume_policy`, and the next trial
-     starts. Real robots never auto-reset: `EVAL_SIM_AUTO_RESET` applies to sim robots only.
+   - **Between trials** the robot waits for a reset. Put the cube back by hand, then use any one of these:
+     - the cockpit's **Done, scene reset** button (operator login; it posts `/resets/{id}/done`);
+     - `/reset/<taskId>` → **Done, robot may continue**;
+     - a DONE reply to the reset text (when `RDF_RESET_TEXT_CONTRIBUTOR` is set).
+
+     The robot then gets `resume_policy` and the next trial starts. Real robots never auto-reset:
+     `EVAL_SIM_AUTO_RESET` applies to sim robots only.
 4. **Demo**: teleop the one clean demo when the collection job appears (as in the TDM-119 runbook).
 5. **Fine-tune**, then the **candidate eval** (3 trials, the same scoring and resets). Before trial 1 the robot
    activates the new checkpoint on the policy server (~44 s the first time).

@@ -59,7 +59,8 @@ H.264 mp4 at the camera fps, yuv420p, keyframe every second, ``+faststart``. The
 probed once per process (encoding a few tiny frames) in this order, first one that works wins:
 ``gst-nvv4l2h264enc`` (Jetson NVENC via GStreamer; Orin AGX/NX, NOT Orin Nano which has no
 encoder), ``ffmpeg-h264_nvmpi`` (jetson-ffmpeg), ``ffmpeg-libx264`` (software, the default on a
-laptop and on a Nano), ``pyav-libx264``, ``cv2-avc1``. Force one with ``RDF_RECORDER_ENCODER``.
+laptop), ``gst-x264enc`` (software via GStreamer: the Orin Nano, whose NVIDIA ffmpeg has no libx264),
+``pyav-libx264``, ``cv2-avc1``. Force one with ``RDF_RECORDER_ENCODER``.
 
 Resilience
 ----------
@@ -256,6 +257,7 @@ ENCODER_CANDIDATES: tuple[EncoderSpec, ...] = (
     EncoderSpec("gst-nvv4l2h264enc", "gst", "nvv4l2h264enc", True),
     EncoderSpec("ffmpeg-h264_nvmpi", "ffmpeg", "h264_nvmpi", True),
     EncoderSpec("ffmpeg-libx264", "ffmpeg", "libx264", False),
+    EncoderSpec("gst-x264enc", "gst", "x264enc", False),  # Orin Nano: NVIDIA's ffmpeg has no libx264, gst does
     EncoderSpec("pyav-libx264", "pyav", "libx264", False),
     EncoderSpec("cv2-avc1", "cv2", "avc1", False),
 )
@@ -289,12 +291,17 @@ class VideoWriter:
             self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self._log)
         elif spec.kind == "gst":
             num, den = fr.split("/")
+            if spec.codec == "x264enc":
+                gst_preset = os.environ.get("RDF_RECORDER_GST_X264_PRESET", "superfast")
+                enc = ["x264enc", f"speed-preset={gst_preset}", "bitrate=4000", f"key-int-max={gop}",
+                       "byte-stream=false", "!", "video/x-h264,profile=high"]
+            else:
+                enc = ["nvvidconv", "!", "video/x-raw(memory:NVMM),format=I420", "!",
+                       spec.codec, "bitrate=4000000", f"iframeinterval={gop}", "insert-sps-pps=true"]
             cmd = ["gst-launch-1.0", "-q", "-e", "fdsrc", "fd=0", "!",
                    "rawvideoparse", f"width={width}", f"height={height}", "format=bgr",
                    f"framerate={num}/{den}", "!", "videoconvert", "!", "video/x-raw,format=I420", "!",
-                   "nvvidconv", "!", "video/x-raw(memory:NVMM),format=I420", "!",
-                   spec.codec, "bitrate=4000000", f"iframeinterval={gop}", "insert-sps-pps=true", "!",
-                   "h264parse", "!", "qtmux", "faststart=true", "!", "filesink", f"location={self.path}"]
+                   *enc, "!", "h264parse", "!", "qtmux", "faststart=true", "!", "filesink", f"location={self.path}"]
             self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self._log)
         elif spec.kind == "pyav":
             import av  # type: ignore[import-not-found]
@@ -364,6 +371,7 @@ def _fps_fraction(fps: float) -> str:
 
 
 _ENCODER_CACHE: dict[str, EncoderSpec] = {}
+_ENCODER_FAILED: dict[str, str] = {}
 _ENCODER_LOCK = threading.Lock()
 
 
@@ -423,6 +431,8 @@ def select_encoder(prefer: str | None = None) -> EncoderSpec:
     with _ENCODER_LOCK:
         if key in _ENCODER_CACHE:
             return _ENCODER_CACHE[key]
+        if key in _ENCODER_FAILED:  # probed once already: don't re-run the probes on every state tick
+            raise RuntimeError(_ENCODER_FAILED[key])
         cands = [c for c in ENCODER_CANDIDATES if c.name == prefer] if prefer else list(ENCODER_CANDIDATES)
         if prefer and not cands:
             raise ValueError(f"unknown encoder {prefer!r}; one of {[c.name for c in ENCODER_CANDIDATES]}")
@@ -435,20 +445,25 @@ def select_encoder(prefer: str | None = None) -> EncoderSpec:
                 _ENCODER_CACHE[key] = c
                 return c
             why[c.name] = err
-        raise RuntimeError(f"no working H.264 encoder: {why}")
+        _ENCODER_FAILED[key] = f"no working H.264 encoder: {why}"
+        raise RuntimeError(_ENCODER_FAILED[key])
 
 
 def count_video_frames(path: Path) -> int | None:
-    """Decoded frame count (ffprobe if present, else OpenCV), None if unknown."""
+    """Frame count (ffprobe if present, else OpenCV), None if unknown. ffprobe counts packets first (one per
+    H.264 frame, no decoding: the Orin Nano's NVIDIA ffprobe picks a CUDA decoder that fails there), then
+    decoded frames."""
     if shutil.which("ffprobe"):
-        try:
-            r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
-                                "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path)],
-                               capture_output=True, text=True, timeout=60)
-            if r.returncode == 0 and r.stdout.strip().split(",")[0].isdigit():
-                return int(r.stdout.strip().split(",")[0])
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        for flag, entry in (("-count_packets", "nb_read_packets"), ("-count_frames", "nb_read_frames")):
+            try:
+                r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", flag,
+                                    "-show_entries", f"stream={entry}", "-of", "csv=p=0", str(path)],
+                                   capture_output=True, text=True, timeout=60)
+                first = r.stdout.strip().splitlines()[-1].split(",")[0] if r.stdout.strip() else ""
+                if r.returncode == 0 and first.isdigit():
+                    return int(first)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
     try:
         import cv2
 

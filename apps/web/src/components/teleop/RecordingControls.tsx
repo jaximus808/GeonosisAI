@@ -197,6 +197,8 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
   const active = !!rec?.active;
   const elapsed = active && rec ? rec.elapsed_ms + (live ? now - recAt : 0) : 0;
   const can = rec?.can;
+  // the robot says why it can't record (e.g. no working video encoder) instead of a silently grey button
+  const recError = (rec as { error?: string } | null)?.error ?? null;
   const busy = (op: RecordingOp) => pending?.op === op;
   const lockOut = !live || !!pending;
   const overLong = elapsed / 1000 > REVIEW_MAX_S - 10;
@@ -233,7 +235,9 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             REC {fmtClock(elapsed)}
           </span>
         ) : (
-          <span className="text-sm text-zinc-500">{compact && !live ? 'Waiting for the robot' : PHASE_TEXT.idle}</span>
+          <span className={`text-sm ${recError ? 'text-red-500' : 'text-zinc-500'}`}>
+            {recError ?? (compact && !live ? 'Waiting for the robot' : PHASE_TEXT.idle)}
+          </span>
         )}
         {active && !compact && (
           <span className="font-mono text-sm tabular-nums text-zinc-600 dark:text-zinc-300" data-testid="tdm58-frames">

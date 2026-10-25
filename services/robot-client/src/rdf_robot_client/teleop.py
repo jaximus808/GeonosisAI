@@ -362,6 +362,7 @@ class ControlSession:
         self.ws, self.loop, self.claims, self.guard = ws, loop, claims, guard
         self.revoked: str | None = None
         self.rc: Any = None  # TDM-58 RecordingControl (lazy; False = not available)
+        self.rc_error: str | None = None  # why recording is not available (e.g. no working H.264 encoder)
         self.peer = str(getattr(ws, "remote_address", ""))
 
     @property
@@ -568,7 +569,12 @@ class TeleopHub:
                 return None
             from .recorder import recorder_for
 
-            rec = recorder_for(self.client) if sess.claims.task_id > 0 else None
+            try:
+                rec = recorder_for(self.client) if sess.claims.task_id > 0 else None
+            except Exception as e:  # noqa: BLE001 - a broken recorder must not take the state feed down with it
+                log.warning("teleop.recorder_unavailable: %s", e)
+                sess.rc, sess.rc_error = False, f"Recording is unavailable on this robot: {e}"[:300]
+                return None
             if rec is None:
                 sess.rc = False
                 return None
@@ -928,6 +934,8 @@ class TeleopHub:
         rec = self.client.services.get("recorder")
         recording: dict[str, Any] = {"active": False}
         rc = self._rc_for(sess) if sess is not None and sess.claims.task_id > 0 else None
+        if rc is None and sess is not None and sess.rc_error:
+            recording["error"] = sess.rc_error
         if rc is not None:
             recording = rc.state()
             source = rc.control_source() or source

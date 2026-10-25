@@ -16,7 +16,9 @@ Format: ``rdf_common.episode_format`` (TDM-25) is the one definition; this modul
     up.wait_idle(60); up.status(ep.key)     # {"state": "done", "episode_id": 12, ...}
 
 In a job handler use ``recorder_for(ctx)``: the shared instance in ``ctx.services["recorder"]``,
-built on first use from ``services["cameras"]`` and ``$ORCHESTRATOR_URL`` (no main.py wiring).
+built on first use from ``services["cameras"]`` and the orchestrator endpoint (no main.py wiring):
+``$ORCHESTRATOR_URL`` when set, else discovered from SpacetimeDB + proven with ``$RDF_EDGE_SECRET``
+(``orch_endpoint.py``, the TDM-110 hybrid deploy), else ``http://localhost:8000``.
 
 ``client`` is anything with ``add_tick_listener(fn)``, ``remove_tick_listener(fn)`` and
 ``control_tick()`` (``RobotClient``, or ``LocalArmDriver`` below for laptops/tests). ``rig`` is a
@@ -716,7 +718,7 @@ class Recorder:
         self.last: LocalEpisode | None = None
 
     @classmethod
-    def from_client(cls, client: Any, rig: Any, orchestrator_url: str | None, **kw: Any) -> Recorder:
+    def from_client(cls, client: Any, rig: Any, orchestrator_url: Any, **kw: Any) -> Recorder:
         """Recorder + background uploader wired to a ``RobotClient`` (main.py)."""
         up = EpisodeUploader.from_client(client, orchestrator_url, root=kw.pop("root", None)).start() \
             if orchestrator_url else None
@@ -940,7 +942,8 @@ _SERVICE_LOCK = threading.Lock()
 def recorder_for(ctx_or_client: Any, *, orchestrator_url: str | None = None,
                  root: str | Path | None = None) -> Recorder | None:
     """The robot client's shared Recorder (``services["recorder"]``), built on first use from
-    ``services["cameras"]`` (TDM-47 rig) and ``$ORCHESTRATOR_URL``. Pass a ``JobContext`` or the
+    ``services["cameras"]`` (TDM-47 rig) and the orchestrator endpoint (``orch_endpoint_for``:
+    ``$ORCHESTRATOR_URL``, else discovery). Pass a ``JobContext`` or the
     ``RobotClient``. Returns None when the client runs without cameras. Job handlers use it as::
 
         rec = recorder_for(ctx)
@@ -958,7 +961,9 @@ def recorder_for(ctx_or_client: Any, *, orchestrator_url: str | None = None,
             rig = services.get("cameras")
             if rig is None:
                 return None
-            url = orchestrator_url or os.environ.get("ORCHESTRATOR_URL") or "http://localhost:8000"
+            from .orch_endpoint import OrchestratorEndpoint, orchestrator_endpoint_for
+
+            url = OrchestratorEndpoint.fixed(orchestrator_url) if orchestrator_url else orchestrator_endpoint_for(client)
             rec = Recorder.from_client(client, rig, url, root=root)
             services["recorder"] = rec
         return rec
@@ -977,12 +982,15 @@ class EpisodeUploader:
     """Disk-backed upload queue: signed PUTs through the orchestrator, then ``create_episode``.
 
     ``stdb`` is a ``rdf_common.spacetime_client.SpacetimeClient`` acting as the robot_client
-    identity (``call_reducer`` + ``sql``). One thread; never touches the control loop."""
+    identity (``call_reducer`` + ``sql``). One thread; never touches the control loop.
 
-    def __init__(self, orchestrator_url: str, stdb: Any, *, root: str | Path | None = None,
+    ``orchestrator_url`` is a base URL, or an ``orch_endpoint.OrchestratorEndpoint`` (discovered per
+    attempt; its edge-secret header goes on the orchestrator call only, never on the signed PUTs)."""
+
+    def __init__(self, orchestrator_url: Any, stdb: Any, *, root: str | Path | None = None,
                  http_timeout: float = 30.0, put_timeout: float = 600.0, max_backoff_s: float = 60.0,
                  on_event: Callable[..., None] | None = None) -> None:
-        self.base = orchestrator_url.rstrip("/")
+        self.base = orchestrator_url
         self.stdb = stdb
         self.root = Path(root or DEFAULT_ROOT)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -995,8 +1003,18 @@ class EpisodeUploader:
         self._thread: threading.Thread | None = None
         self._http: Any = None
 
+    @property
+    def base(self) -> str | None:
+        return self.endpoint.base()
+
+    @base.setter
+    def base(self, url: Any) -> None:
+        from .orch_endpoint import OrchestratorEndpoint
+
+        self.endpoint = url if isinstance(url, OrchestratorEndpoint) else OrchestratorEndpoint.fixed(str(url))
+
     @classmethod
-    def from_client(cls, client: Any, orchestrator_url: str, **kw: Any) -> EpisodeUploader:
+    def from_client(cls, client: Any, orchestrator_url: Any, **kw: Any) -> EpisodeUploader:
         from rdf_common.spacetime_client import SpacetimeClient
 
         return cls(orchestrator_url, SpacetimeClient(config=client.stdb), on_event=getattr(client, "event", None), **kw)
@@ -1136,6 +1154,7 @@ class EpisodeUploader:
             st.update(state="retrying", error=f"{type(e).__name__}: {e}"[:1000], next_retry_in_s=delay)
             self._save(d, st)
             _log("episode upload will retry", dir=str(d), attempt=st["attempts"], in_s=delay, error=str(e)[:200])
+            self.endpoint.nudge()  # a rotated tunnel: look for the new URL now, not in 30 s
             if requeue and not self._stop.is_set():
                 with self._cv:
                     self._pending[str(d)] = time.monotonic() + delay
@@ -1157,8 +1176,14 @@ class EpisodeUploader:
         body = {"ticket_id": str(ep.meta["ticket_id"]), "episode_id": ep.key,
                 "files": [{"filename": f, "content_type": types.get(Path(f).suffix, "application/octet-stream")}
                           for f in todo]}
-        r = self._http.post(f"{self.base}/uploads/sign-batch", json=body, timeout=self.http_timeout)
-        self._raise_for(r, "sign-batch")
+        base = self.endpoint.base()
+        if not base:
+            raise RuntimeError("no orchestrator endpoint yet (waiting for orchestrator.endpoint + edge proof; "
+                               "or set ORCHESTRATOR_URL)")
+        r = self._http.post(f"{base}/uploads/sign-batch", json=body, headers=self.endpoint.headers(),
+                            timeout=self.http_timeout)
+        # a discovered edge answers 401/403/404 when its tunnel was replaced under us: retry, never give up
+        self._raise_for(r, "sign-batch", transient=(401, 403, 404) if self.endpoint.discovering else ())
         signed = r.json()["uploads"]
         for f, s in zip(todo, signed):
             p = ep.dir / f
@@ -1171,11 +1196,11 @@ class EpisodeUploader:
             self._save(ep.dir, st)  # progress survives a crash: finished files are not re-sent
 
     @staticmethod
-    def _raise_for(r: Any, what: str) -> None:
+    def _raise_for(r: Any, what: str, transient: tuple[int, ...] = ()) -> None:
         if r.status_code < 300:
             return
         msg = f"{what}: HTTP {r.status_code} {r.text[:300]}"
-        if 400 <= r.status_code < 500 and r.status_code not in _TRANSIENT_HTTP:
+        if 400 <= r.status_code < 500 and r.status_code not in _TRANSIENT_HTTP and r.status_code not in transient:
             raise PermanentUploadError(msg)
         raise RuntimeError(msg)
 
@@ -1339,8 +1364,8 @@ def _cmd_record(a: argparse.Namespace) -> int:
 
         load_dotenv()
         token = Path(a.token_file).read_text().strip() if a.token_file else None
-        up = EpisodeUploader(a.orchestrator_url, SpacetimeClient(config=SpacetimeConfig.resolve(a.host, a.db, token)),
-                             root=a.root).start()
+        cfg = SpacetimeConfig.resolve(a.host, a.db, token)
+        up = EpisodeUploader(_cli_endpoint(a, cfg), SpacetimeClient(config=cfg), root=a.root).start()
     rec = Recorder(drv, rig, uploader=up, root=a.root, encoder=a.encoder)
     rec.start(a.ticket, a.kind, a.task, a.contributor, note="recorder CLI sim run")
     drv.t0 = t0 = time.monotonic()  # the driver's schedule and the marks share one time base
@@ -1379,6 +1404,15 @@ def _cmd_check(a: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def _cli_endpoint(a: argparse.Namespace, cfg: Any) -> Any:
+    """--orchestrator-url / $ORCHESTRATOR_URL, else TDM-110 discovery with $RDF_EDGE_SECRET (orch_endpoint.py)."""
+    if a.orchestrator_url:
+        return a.orchestrator_url
+    from .orch_endpoint import OrchestratorEndpoint
+
+    return OrchestratorEndpoint.from_env(cfg).start()
+
+
 def _cmd_upload_pending(a: argparse.Namespace) -> int:
     from rdf_common.spacetime_client import (
         SpacetimeClient,
@@ -1388,8 +1422,8 @@ def _cmd_upload_pending(a: argparse.Namespace) -> int:
 
     load_dotenv()
     token = Path(a.token_file).read_text().strip() if a.token_file else None
-    up = EpisodeUploader(a.orchestrator_url, SpacetimeClient(config=SpacetimeConfig.resolve(a.host, a.db, token)),
-                         root=a.root).start()
+    cfg = SpacetimeConfig.resolve(a.host, a.db, token)
+    up = EpisodeUploader(_cli_endpoint(a, cfg), SpacetimeClient(config=cfg), root=a.root).start()
     print(json.dumps({"queued": len(up._pending)}), file=sys.stderr)
     ok = up.wait_idle(a.upload_timeout)
     up.stop()
@@ -1402,7 +1436,9 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     def conn(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("--root", default=None, help=f"episode directory (default {DEFAULT_ROOT})")
-        sp.add_argument("--orchestrator-url", default=os.environ.get("ORCHESTRATOR_URL") or "http://localhost:8000")
+        sp.add_argument("--orchestrator-url", default=None,
+                        help="default $ORCHESTRATOR_URL, else discovery (event_log orchestrator.endpoint + "
+                             "$RDF_EDGE_SECRET), else http://localhost:8000")
         sp.add_argument("--host", default=None)
         sp.add_argument("--db", default=None)
         sp.add_argument("--token-file", default=None, help="robot_client identity token (default $SPACETIME_TOKEN)")

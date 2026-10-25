@@ -5,6 +5,8 @@
 #
 #   scripts/jetson/tdm118_geonosis.sh install     # sync HEAD bundle, push env + local env, venv, cloudflared, user unit
 #   scripts/jetson/tdm118_geonosis.sh env         # re-push ~/.config/geonosis/robot.env (key names printed only)
+#   scripts/jetson/tdm118_geonosis.sh sync        # code only: HEAD bundle -> ~/geonosis/app (no venv/unit changes);
+#                                                 # refuses while geonosis-robot-teleop runs (FORCE=1 overrides)
 #   scripts/jetson/tdm118_geonosis.sh status      # unit state, vrteleop state, CAN links, disk
 #   scripts/jetson/tdm118_geonosis.sh logs        # journalctl --user -u geonosis-robot (FOLLOW=0 to print and exit)
 #   scripts/jetson/tdm118_geonosis.sh check       # offline config check on the Jetson (opens no CAN, no network)
@@ -24,12 +26,12 @@ step() { printf '==> %s\n' "$*"; }
 
 push_env() {
   step "push ~/.config/geonosis/robot.env (names only)"
-  local content="# GeonosisAI robot env (TDM-118), pushed from $(id -un)@$(hostname -s) $(date -u +%FT%TZ)"$'\n' k src v
+  local content="# GeonosisAI robot env (TDM-118), pushed from $(id -un)@$(hostname -s) $(date -u +%FT%TZ)"$'\n' k src v pushed=""
   # KEY:SOURCES (first non-empty wins)
   for spec in "SPACETIME_HOST:SPACETIME_HOST" "SPACETIME_DB_NAME:SPACETIME_DB_NAME" \
               "SPACETIME_TOKEN:JETSON_ROBOT_CLIENT_SPACETIME_TOKEN" "ROBOT_ID:JETSON_ROBOT_ID" \
               "ORCHESTRATOR_URL:JETSON_ORCHESTRATOR_URL" "RDF_STREAM_TOKEN_SECRET:RDF_STREAM_TOKEN_SECRET" \
-              "RDF_MEDIA_STORE_URL:RDF_MEDIA_STORE_URL"; do
+              "RDF_MEDIA_STORE_URL:RDF_MEDIA_STORE_URL" "RDF_EDGE_SECRET:RDF_EDGE_SECRET"; do
     k="${spec%%:*}"; v=""
     IFS='|' read -r -a srcs <<<"${spec#*:}"
     for src in "${srcs[@]}"; do v="$(val "$src")"; [ -n "$v" ] && break; done
@@ -41,18 +43,39 @@ push_env() {
     case "$v" in *$'\n'*) echo "$k has a newline" >&2; exit 3 ;; esac
     echo "    set   $k <- ${spec#*:}"
     content+="$k=$v"$'\n'
+    pushed+=" $k"
   done
+  # recording uploads: RDF_EDGE_SECRET lets the robot discover make demo-hybrid's tunnel URL (orch_endpoint.py);
+  # an explicit ORCHESTRATOR_URL turns discovery off
+  case "$pushed" in
+    *" ORCHESTRATOR_URL"*) echo "    note  ORCHESTRATOR_URL is set: it overrides discovery (unset JETSON_ORCHESTRATOR_URL to discover)" ;;
+    *" RDF_EDGE_SECRET"*) echo "    note  uploads find the orchestrator by discovery (event_log orchestrator.endpoint + edge proof)" ;;
+    *) echo "    WARN  neither ORCHESTRATOR_URL nor RDF_EDGE_SECRET: recordings will not upload" >&2 ;;
+  esac
   printf '%s' "$content" | "${SSH[@]}" 'set -e; d=$HOME/.config/geonosis; mkdir -p "$d"; chmod 700 "$d"
     t=$(mktemp "$d/.robot.env.XXXXXX"); cat >"$t"; chmod 600 "$t"; mv -f "$t" "$d/robot.env"'
 }
 
-cmd_install() {
+sync_bundle() {
   step "bundle committed HEAD ($(git -C "$REPO" rev-parse --short=12 HEAD)) -> $TARGET:~/geonosis/app"
   local b; b="$(mktemp -d "${TMPDIR:-/tmp}/tdm118-bundle.XXXXXX")"; trap 'rm -rf "$b"' RETURN
   git -C "$REPO" archive --format=tar HEAD -- "${BUNDLE_PATHS[@]}" | tar -x -C "$b"
   printf 'rev=%s\nsrc=head\nbuilt_at=%s\nticket=TDM-118\n' "$(git -C "$REPO" rev-parse --short=12 HEAD)" "$(date -u +%FT%TZ)" >"$b/DEPLOYED_REV"
   "${SSH[@]}" 'mkdir -p $HOME/geonosis/app'
   rsync -az --delete --exclude .venv/ --exclude __pycache__/ -e "ssh -o BatchMode=yes" "$b/" "$TARGET:geonosis/app/"
+}
+
+cmd_sync() {
+  # never swap code under a running motion client (it imports modules lazily); stop it first (runbook step 6)
+  local active; active="$("${SSH[@]}" 'systemctl --user is-active geonosis-robot-teleop 2>/dev/null || true')"
+  if [ "$active" = active ] && [ "${FORCE:-0}" != 1 ]; then
+    echo "geonosis-robot-teleop is running: stop it first (docs/tdm119-teleop-runbook.md step 6), then sync" >&2; exit 4
+  fi
+  sync_bundle
+}
+
+cmd_install() {
+  sync_bundle
   push_env
   step "push ~/.config/geonosis/robot.local.env (non-secret, from services/robot-client/config/tdm118_northstar.env)"
   "${SSH[@]}" 'set -e; d=$HOME/.config/geonosis; mkdir -p "$d"; chmod 700 "$d"; cat >"$d/robot.local.env"; chmod 600 "$d/robot.local.env"' \
@@ -74,10 +97,11 @@ cmd_status() {
 
 case "${1:-}" in
   install) cmd_install ;;
+  sync) cmd_sync ;;
   env) push_env ;;
   status) cmd_status ;;
   logs) if [ "${FOLLOW:-1}" = 0 ]; then "${SSH[@]}" "journalctl --user -u geonosis-robot -n ${LINES:-200} --no-pager -o short-iso"
         else ssh -t -o ConnectTimeout=15 "$TARGET" "journalctl --user -u geonosis-robot -n ${LINES:-100} -f -o short-iso"; fi ;;
   check) "${SSH[@]}" 'set -a; . $HOME/.config/geonosis/robot.local.env; set +a; cd $HOME/geonosis/app/services/robot-client && .venv/bin/python -m rdf_robot_client.tdm118_readonly --check' ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -148,7 +148,8 @@ Env (no secrets):
   `RDF_SAFETY_SPEED_SCALE=0.25`, `RDF_TELEOP_MAX_LIN_SPEED=0.10`, `RDF_TELEOP_MAX_ANG_SPEED=0.5`,
   `YAM_MAX_JOINT_SPEED=0.3`, `YAM_ALLOW_GRIPPER_CALIBRATION=1`, `TDM119_ALLOW_POLICY=0`.
 - `~/.config/geonosis/robot.env` (0600, pushed from the laptop): SpacetimeDB host and db, the `robot_client@northstar`
-  token, `ROBOT_ID=yam-01`, the stream token secret, the media URL. `ORCHESTRATOR_URL` is unset: see step 5.
+  token, `ROBOT_ID=yam-01`, the stream token secret, the media URL and `RDF_EDGE_SECRET`. `ORCHESTRATOR_URL` is
+  unset on purpose: the client discovers the orchestrator (see step 5).
 
 **See in the log:**
 1. `guard ok`, then `[PASS] yam profile verified`.
@@ -165,10 +166,14 @@ blindly. Also abort on any arm motion at start other than the gripper calibratio
 `fail to communicate with motor`.
 
 ## Step 5: phone teleop at 25 %
-**Prerequisites:** a clean-teleop task on `yam-01` (the coordinator's routing posts it). For recording uploads,
-`ORCHESTRATOR_URL` must reach the laptop orchestrator: set `JETSON_ORCHESTRATOR_URL` in the laptop `.env` to the
-hybrid / `demo-public --api` URL, run `scripts/jetson/tdm118_geonosis.sh env`, then restart the unit (step 6, then 4c).
-Teleop itself works without it.
+**Prerequisites:** a clean-teleop task on `yam-01` (the coordinator's routing posts it). Recording uploads find the
+laptop orchestrator by themselves, the same way Vercel does. The client reads the newest event_log
+`orchestrator.endpoint` row that `make demo-hybrid` publishes, at start and every 30 s. It checks the URL with the
+`/_rdf/proof` HMAC over `RDF_EDGE_SECRET`, then calls `POST /uploads/sign-batch` through the edge with
+`x-rdf-edge-secret`. A tunnel restart needs no action: the robot logs `orchestrator endpoint discovered` with the new
+URL within about 30 s. `make demo-hybrid` needs no `--api` for this. One-time: `scripts/jetson/tdm118_geonosis.sh env`
+pushes `RDF_EDGE_SECRET` (names only, file 0600), then restart the unit (step 6, then 4c). Setting
+`JETSON_ORCHESTRATOR_URL` in the laptop `.env` overrides discovery. Teleop itself works without either.
 
 **Physical:** e-stop in hand. Someone watches the arm, not the phone.
 
@@ -184,7 +189,9 @@ Teleop itself works without it.
 4. **Dashboard STOP** (soft_estop through SpacetimeDB): the same latch, and the log line carries
    `issue_to_stop_ms` (should be under 300). Clear it the same way.
 5. Network drop or stale feed (turn the phone's Wi-Fi off mid-clutch): the arm holds within about 200 ms (watchdog).
-6. Recording: start, then stop with success. An episode appears for the task (needs ORCHESTRATOR_URL).
+6. Recording: start, then stop with success. The log says `episode uploaded` and an episode appears for the task.
+   If it says `episode upload will retry ... no orchestrator endpoint yet`, check that `make demo-hybrid` is up and
+   run `journalctl --user -u geonosis-robot-teleop -o cat | grep orch-endpoint`.
 7. Log hygiene:
    `ssh northstar@northstar 'journalctl --user -u geonosis-robot-teleop -n 300 --no-pager -o cat | grep -E "limit_hit|clamp|reject|SOFT E-STOP|fail to communicate|fault|watchdog"'`
    Expect a few clamps at the workspace or joint edges, no `reject` storms, and no `fail to communicate`.

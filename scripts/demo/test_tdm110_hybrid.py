@@ -122,3 +122,24 @@ def test_rebase_stream_moves_every_url_to_the_robot_tunnel():
     assert h.stream_on(new, "https://robot-abc.trycloudflare.com") and not h.stream_on(old, "https://robot-abc.trycloudflare.com")
     pub = {"url": "wss://app.example.com/_cam/ws/cameras", "http": "https://app.example.com/_cam"}
     assert h.rebase_stream(pub, "https://r.example.com")["url"] == "wss://r.example.com/ws/cameras"
+
+
+def test_robot_upload_route_passes_with_the_edge_secret(tdm110_run):
+    """The robot client's discovered-endpoint uploader (services/robot-client orch_endpoint.py) only calls
+    POST /uploads/sign-batch on the orchestrator; the signed PUTs go to the media store, not this edge."""
+    async def t(c: TestClient):
+        body = {"ticket_id": "4", "episode_id": "ep1", "files": [{"filename": "actions.parquet"}]}
+        r = await c.post("/uploads/sign-batch", json=body, headers=CF)
+        assert r.status == 401, "no secret: refused"
+        r = await c.post("/uploads/sign-batch", json=body, headers={**CF, g.EDGE_SECRET_HEADER: EDGE})
+        b = await r.json()
+        assert r.status == 200 and b["tag"] == "orch" and b["path"] == "/uploads/sign-batch" and b["secret"] is None
+        assert (await c.post("/_api/" + "a" * 20 + "/uploads/sign-batch", json=body, headers=CF)).status == 404, \
+            "no --api: the secret path is off"
+    tdm110_run(t)
+
+
+def test_edge_proof_vector_shared_with_the_robot_client():
+    # services/robot-client/tests/test_orch_endpoint.py pins the same hex for its own edge_proof
+    assert g.edge_proof("k" * 32, "n" * 20, "https://api-xyz.trycloudflare.com") == \
+        "2dbf5c54a1d3763d6cc15030d313eae86cd600da09865682b3d9e32f2a584deb"

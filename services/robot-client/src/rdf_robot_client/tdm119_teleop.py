@@ -156,6 +156,10 @@ def run(argv: list[str] | None = None) -> int:
         return 3
     _log("TDM-119 teleop client running on the real arm", robot_id=client.robot_id, name=name,
          speed_scale=arm.speed_scale, teleop_max_lin_speed=tcfg.max_lin_speed)
+    if rig is not None:  # teleop recordings upload: ORCHESTRATOR_URL, else TDM-110 discovery (RDF_EDGE_SECRET)
+        from .orch_endpoint import start_orchestrator_discovery
+
+        start_orchestrator_discovery(client)
     done.wait()
     client.stop()   # cancels the job and holds; it does not release the arm
     arm.disconnect()  # the LARP release: damp until settled, then disable (the arm goes limp after)

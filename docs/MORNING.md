@@ -102,6 +102,12 @@ Judges' phones open the local demo over HTTPS through Cloudflare. Nothing listen
 ## Hybrid deploy (TDM-110): web app on Vercel, backend on this laptop
 The public site is the Vercel project **`geonosisai`** (scope `jaximus808s-projects`) at `https://geonosis.jaxonp.com`. The orchestrator and the robot stay here, behind two cloudflared **quick tunnels** whose random URLs change on every start. Nothing user-facing holds those URLs, so restarting the backend never needs a redeploy or an env change. `make demo-public` (everything on the laptop) is unchanged and still the fallback.
 - **How Vercel finds the orchestrator:** `make demo-hybrid` publishes an event_log row `orchestrator.endpoint` {url, robot_url} to SpacetimeDB. Vercel's server routes read the newest row (10 s cache), then check `GET <url>/_rdf/proof?nonce=…` against `HMAC(RDF_EDGE_SECRET, nonce + url)` before they send that URL anything. After that, each call carries `x-rdf-edge-secret`, and the edge refuses the orchestrator without it. Two things stop a forged URL. First, `append_event` refuses anonymous callers, and a non-orchestrator service can't log as actor `orchestrator`. Second, a URL that fails the proof never sees the secret. A real `RDF_ORCHESTRATOR_URL` on Vercel overrides discovery.
+- **How the robot finds the orchestrator (recording uploads):** the same way Vercel does
+  (`services/robot-client/src/rdf_robot_client/orch_endpoint.py`). It reads the newest `orchestrator.endpoint` row at
+  start and every 30 s, checks `/_rdf/proof`, then sends `POST /uploads/sign-batch` with `x-rdf-edge-secret`. The
+  signed PUTs go straight to the media store. The Jetson gets `RDF_EDGE_SECRET` from
+  `scripts/jetson/tdm118_geonosis.sh env`. An explicit `ORCHESTRATOR_URL` (`JETSON_ORCHESTRATOR_URL`) overrides
+  discovery. No `--api` needed. Proof: `spikes/orch-discovery/e2e.py`.
 - **How the browser finds the robot:** the robot's stream URL is announced in `robot.camera_config_json.stream`, as before. Its cameras, `/ws/state` and `/ws/control` all derive from that one base. `make demo-hybrid` points it at the robot tunnel, and re-announces it every 20 s if something overwrites it.
 - **One-time setup** (in order):
   1. `npx vercel@65.2.0 login` (done: `jaximus808`).

@@ -66,6 +66,7 @@ import MarkPaymentAwaitingOnboardingReducer from "./mark_payment_awaiting_onboar
 import MarkPaymentFailedReducer from "./mark_payment_failed_reducer";
 import MarkPaymentPaidReducer from "./mark_payment_paid_reducer";
 import MarkPaymentReversedReducer from "./mark_payment_reversed_reducer";
+import MergeContributorReducer from "./merge_contributor_reducer";
 import QueueTrainingRunReducer from "./queue_training_run_reducer";
 import RecordDataPlanReducer from "./record_data_plan_reducer";
 import RecordEvalTrialReducer from "./record_eval_trial_reducer";
@@ -483,6 +484,7 @@ const reducersSchema = __reducers(
   __reducerSchema("mark_payment_failed", MarkPaymentFailedReducer),
   __reducerSchema("mark_payment_paid", MarkPaymentPaidReducer),
   __reducerSchema("mark_payment_reversed", MarkPaymentReversedReducer),
+  __reducerSchema("merge_contributor", MergeContributorReducer),
   __reducerSchema("queue_training_run", QueueTrainingRunReducer),
   __reducerSchema("record_data_plan", RecordDataPlanReducer),
   __reducerSchema("record_eval_trial", RecordEvalTrialReducer),

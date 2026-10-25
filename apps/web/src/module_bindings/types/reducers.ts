@@ -38,6 +38,7 @@ import MarkPaymentAwaitingOnboardingReducer from "../mark_payment_awaiting_onboa
 import MarkPaymentFailedReducer from "../mark_payment_failed_reducer";
 import MarkPaymentPaidReducer from "../mark_payment_paid_reducer";
 import MarkPaymentReversedReducer from "../mark_payment_reversed_reducer";
+import MergeContributorReducer from "../merge_contributor_reducer";
 import QueueTrainingRunReducer from "../queue_training_run_reducer";
 import RecordDataPlanReducer from "../record_data_plan_reducer";
 import RecordEvalTrialReducer from "../record_eval_trial_reducer";
@@ -94,6 +95,7 @@ export type MarkPaymentAwaitingOnboardingParams = __Infer<typeof MarkPaymentAwai
 export type MarkPaymentFailedParams = __Infer<typeof MarkPaymentFailedReducer>;
 export type MarkPaymentPaidParams = __Infer<typeof MarkPaymentPaidReducer>;
 export type MarkPaymentReversedParams = __Infer<typeof MarkPaymentReversedReducer>;
+export type MergeContributorParams = __Infer<typeof MergeContributorReducer>;
 export type QueueTrainingRunParams = __Infer<typeof QueueTrainingRunReducer>;
 export type RecordDataPlanParams = __Infer<typeof RecordDataPlanReducer>;
 export type RecordEvalTrialParams = __Infer<typeof RecordEvalTrialReducer>;

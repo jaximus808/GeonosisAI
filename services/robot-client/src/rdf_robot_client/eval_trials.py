@@ -484,6 +484,24 @@ class EvalTrialRunner:
                                                cancel_if_held=cancel_if_held, event_prefix="eval.real_arm")
         return res
 
+    def _reset_arm_after_verdict(self, ctx: JobContext, index: int) -> None:
+        """Real arm, after the verdict: open the gripper where it is, then ramp back to the start pose (the
+        same guarded ``home`` the next trial starts with). A failure here is logged, never the trial's outcome;
+        an e-stop / stop still propagates (Cancelled)."""
+        try:
+            arm = ctx.arm
+            q = list(arm.read_state().joints)
+            arm.move_joints(q, gripper=1.0, speed_fraction=1.0, should_abort=ctx.should_abort,
+                            tolerance=0.05, settle_timeout=2.0)  # gripper 1 = open (TDM-122 mapping)
+            _go_home(ctx)
+            ctx.event("eval.arm_reset", eval_run_id=self.eval_run_id, index=index,
+                      note="real arm: gripper opened and back at the start pose; place the cube for the next trial")
+        except Cancelled:
+            raise
+        except Exception as e:  # noqa: BLE001 - the next trial homes again anyway
+            _log("arm reset after verdict failed", index=index, error=str(e)[:200])
+            ctx.event("eval.arm_reset_failed", eval_run_id=self.eval_run_id, index=index, error=str(e)[:300])
+
     def run_trial(self, index: int, prompt: str) -> TrialOutcome:
         ctx = self.ctx
         label = f"eval {self.eval_run_id} trial {index + 1}/{self.trials}"
@@ -564,6 +582,8 @@ class EvalTrialRunner:
                     success, confirmed, source = verdict.success, True, verdict.source
                     note = verdict.note or ("" if success else (timeout_note or "operator: failed"))
             self.inbox.close()
+            if not self.sim:  # real arm: let go and pull back like a teleoperator, so the person only places the cube
+                self._reset_arm_after_verdict(ctx, index)
 
             # 5. the episode (uploaded only now, with the confirmed outcome on it)
             episode_id, ep_note = 0, ("no recorder (cameras off): no episode" if rec is None else "")

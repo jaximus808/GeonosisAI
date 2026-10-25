@@ -184,11 +184,18 @@ def test_env_backend_and_active_checkpoint_gates(robot, monkeypatch):
     assert robot.ticks == []
 
 
-def test_time_cap_is_never_more_than_30s(robot):
+import rdf_robot_client.tdm126_real_run as _rr  # noqa: E402
+
+
+def REAL_RUN_MAX_S_NOW() -> float:  # noqa: N802
+    return _rr.REAL_RUN_MAX_S
+
+
+def test_time_cap_is_never_more_than_the_max(robot):
     ctx = robot.context(payload(timeout_s=600, confirm="no"))
     with pytest.raises(RealRunRefused):
         real_arm_run(ctx, checker=ok_checker, policy=FakePolicy())
-    assert ctx.result["time_cap_s"] == 30.0
+    assert ctx.result["time_cap_s"] == REAL_RUN_MAX_S_NOW() == 90.0
 
 
 def test_soft_estop_stops_it_at_once_and_nothing_moves_after(robot):
@@ -270,6 +277,7 @@ def _real_eval(monkeypatch, robot_arm, plan, checker, trials=2, **payload_kw):
 
 
 def test_real_arm_eval_trials_are_capped_gated_and_operator_scored(monkeypatch, robot):
+    monkeypatch.setattr(_rr, "REAL_RUN_MAX_S", 30.0)  # keep the capped trial short in the test
     t0 = time.monotonic()
     r, pol, out = _real_eval(monkeypatch, robot.arm, [("during", True, ""), ("after", False, "missed")], ok_checker)
     rows = r.http.rows

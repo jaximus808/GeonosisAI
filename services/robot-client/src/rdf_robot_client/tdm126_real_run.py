@@ -49,8 +49,8 @@ from .state import RobotState
 
 REAL_RUN_PURPOSE = "deployment_real_run"
 REAL_RUN_CONFIRM = "HANDS_ON_ESTOP"
-REAL_RUN_DEFAULT_S = 25.0
-REAL_RUN_MAX_S = 30.0
+REAL_RUN_DEFAULT_S = 90.0
+REAL_RUN_MAX_S = 90.0  # wall-clock cap per real-arm rollout (30 s was too short for a pick-and-place at <= 0.3 rad/s)
 REAL_RUN_MAX_SPEED_SCALE = 0.5  # the adapter still caps every joint at <= 0.3 rad/s; 0.25 left policy motion at ~0.2 rad/s
 PASS_VERDICTS = ("ok", "clamp")
 CANCEL_GRACE_S = 2.0  # still held in a pause this long after the cap: cancel the job
@@ -75,7 +75,28 @@ def default_checker() -> Checker:
     from .tdm122_dryrun import ChunkChecker
 
     c = ChunkChecker(safety_config=os.environ.get("RDF_SAFETY_CONFIG") or None)
-    return lambda actions, space, state: c.check(actions, space, state)
+    return lambda actions, space, state: executor_verdict(c.check(actions, space, state))
+
+
+def executor_verdict(chk: dict[str, Any]) -> dict[str, Any]:
+    """The dry-run check replays the chunk RAW through the safety layer, so a chunk whose later targets travel
+    more than ``max_jump_rad`` from the current pose reads as ``reject`` (rejected_jump). Our ChunkExecutor never
+    streams it raw: it ramps from the measured pose at <= 0.3 rad/s. So a reject whose ONLY causes are jumps is a
+    ``clamp`` here. Everything else still rejects: NaN / shape, LARP joint limits, workspace, table floor,
+    gripper range, any other safety violation, and an unmapped (non-YAM) action space."""
+    if str(chk.get("verdict")) != "reject":
+        return chk
+    rep = chk.get("replay") or {}
+    rej = {k for k, v in rep.items() if k.startswith("rejected") and v}
+    viol = str(rep.get("violation") or "")
+    st = chk.get("static") or {}
+    unsafe = any(st.get(k) for k in ("targets_outside_larp_limits", "targets_outside_workspace",
+                                     "targets_below_floor", "gripper_outside_range"))
+    if rej <= {"rejected_jump"} and (not viol or "jump" in viol.lower()) and not unsafe:
+        return {**chk, "verdict": "clamp", "raw_verdict": "reject",
+                "problems": [*(chk.get("problems") or []), "jump-only reject: the executor ramps toward these "
+                             "targets from the measured pose (<= 0.3 rad/s), so it runs as a clamp"]}
+    return chk
 
 
 class CheckedPolicy:

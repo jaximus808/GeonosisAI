@@ -558,23 +558,17 @@ function DevProbe({ graspRef, smooth }: { graspRef: MutableRefObject<THREE.Objec
 }
 
 // ---------------------------------------------------------------------------------------- frame budget
-/** frameloop="demand" at most `fps` frames a second (a small view does not need the display's 60). */
+/** Draw at most `fps` frames a second (a small view does not need 60, a 120 Hz display does not need 120).
+ *  A priority-1 useFrame takes the render over: the scene still updates every frame (cheap), the GPU draw
+ *  (shadow pass + main pass) only runs when due. */
 function Pacer({ fps }: { fps: number }) {
-  const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => {
-    let raf = 0;
-    let last = 0;
-    const step = 1000 / fps;
-    const tick = (t: number) => {
-      raf = requestAnimationFrame(tick);
-      if (t - last >= step - 4) {
-        last = t;
-        invalidate();
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [fps, invalidate]);
+  const last = useRef(0);
+  useFrame((state) => {
+    const t = performance.now();
+    if (t - last.current < 1000 / fps - 4) return;
+    last.current = t;
+    state.gl.render(state.scene, state.camera);
+  }, 1);
   return null;
 }
 
@@ -621,7 +615,7 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
     };
   }, []);
   useEffect(() => setDpr(Math.min(maxDpr, window.devicePixelRatio || 1)), [maxDpr]);
-  const frameloop: 'always' | 'demand' | 'never' = !onScreen || !pageVisible ? 'never' : perf?.maxFps ? 'demand' : 'always';
+  const frameloop: 'always' | 'never' = !onScreen || !pageVisible ? 'never' : 'always';
   const shadowsOn = perf ? perf.shadows : true;
   const shadowMap = perf?.shadowMapSize ?? (narrow ? 1024 : 2048);
   const blurSamples = perf?.blurSamples || (narrow ? 8 : 16);
@@ -753,7 +747,7 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
       >
         <PerformanceMonitor onDecline={() => setDpr(Math.min(1, maxDpr))} onIncline={() => setDpr(Math.min(maxDpr, window.devicePixelRatio || 1))} />
         <Kick loop={frameloop} />
-        {frameloop === 'demand' && perf?.maxFps ? <Pacer fps={perf.maxFps} /> : null}
+        {perf?.maxFps ? <Pacer fps={perf.maxFps} /> : null}
         {sceneGraph}
       </Canvas>
 

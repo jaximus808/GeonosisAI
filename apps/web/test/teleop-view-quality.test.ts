@@ -19,7 +19,7 @@ describe('view quality', () => {
     assert.equal(main.maxDpr, 1.25);
     assert.equal(main.shadows, true);
     assert.ok(main.shadowMapSize <= 1024);
-    assert.equal(main.maxFps, null);
+    assert.equal(main.maxFps, 60); // never the display's 120 Hz
     assert.equal(inset.maxDpr, 1);
     assert.equal(inset.shadows, false);
     assert.equal(inset.maxFps, 30);

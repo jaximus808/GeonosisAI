@@ -30,7 +30,10 @@ export interface TwinPerf {
   maxFps: number | null;
 }
 
-const MAIN: TwinPerf = { maxDpr: SMOOTH_MAIN_DPR, shadows: true, shadowMapSize: 1024, blurSamples: 8, maxFps: null };
+// 60 fps cap on the big view: the state feed is 30 Hz, and a 120 Hz (ProMotion) laptop display would otherwise
+// draw every view twice as often for nothing
+export const SMOOTH_MAIN_FPS = 60;
+const MAIN: TwinPerf = { maxDpr: SMOOTH_MAIN_DPR, shadows: true, shadowMapSize: 1024, blurSamples: 8, maxFps: SMOOTH_MAIN_FPS };
 const INSET: TwinPerf = { maxDpr: SMOOTH_INSET_DPR, shadows: false, shadowMapSize: 512, blurSamples: 0, maxFps: SMOOTH_INSET_FPS };
 
 /** The twin's render settings for a view of this role. Constant objects, so they are safe as memo deps. */

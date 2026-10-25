@@ -4,15 +4,21 @@
 //   /dev/simcams             top / side / wrist, fixture playback at ~30 Hz
 //   /dev/simcams?robot=<id>  a real sim robot's state feed instead (operator login or #stream_token)
 //   /dev/simcams?narrow=1    also the narrow layout (RobotView's side column)
+//   /dev/simcams?driving=1   as the teleop pane while the user holds control: Quality Smooth / Sharp applies
 
 import { useEffect, useState } from 'react';
 import { SimCameras } from '@/components/robotview/SimCameras';
 import { useRobotLive } from '@/lib/robotview/useRobotLive';
+import { ViewQualityToggle } from '@/components/teleop/TeleopOverlay';
+import { useViewQuality } from '@/lib/teleop/useViewQuality';
 
 export default function SimCamerasDevPage() {
   const [robot, setRobot] = useState<number | null | undefined>(undefined);
   const [narrow, setNarrow] = useState(false);
+  const [driving, setDriving] = useState(false);
+  const [quality, setQuality] = useViewQuality();
   useEffect(() => {
+    setDriving(new URLSearchParams(window.location.search).get('driving') === '1');
     const r = Number(new URLSearchParams(window.location.search).get('robot'));
     setRobot(Number.isFinite(r) && r > 0 ? r : null);
     setNarrow(new URLSearchParams(window.location.search).get('narrow') === '1');
@@ -25,7 +31,16 @@ export default function SimCamerasDevPage() {
         {robot ? `Robot #${robot}'s state feed.` : 'Recorded sim fixture, played back at about 30 Hz.'} Each view is drawn in the browser from the joint state.
       </p>
       <div className="max-w-5xl" data-testid="simcams-frame">
-        <SimCameras state={live.state} stale={live.stale} hz={live.hz} waitingDetail={live.error} robotName={robot ? `#${robot}` : 'fixture'} />
+        <SimCameras
+          state={live.state}
+          stale={live.stale}
+          hz={live.hz}
+          waitingDetail={live.error}
+          robotName={robot ? `#${robot}` : 'fixture'}
+          quality={driving ? quality : undefined}
+          driving={driving}
+          toolbar={driving ? <ViewQualityToggle value={quality} onChange={setQuality} testPrefix="simcams" /> : undefined}
+        />
       </div>
       {narrow && (
       <div className="mt-6 max-w-md">

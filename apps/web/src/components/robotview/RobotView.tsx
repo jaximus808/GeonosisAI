@@ -46,6 +46,8 @@ import type { TwinCamera } from './RobotTwin3D';
 import { useRobotLive, type RobotLiveResult, type UseRobotLiveOptions } from '@/lib/robotview/useRobotLive';
 import { useRobotScene } from '@/lib/robotview/useRobotScene';
 import { tdm114SceneMismatch } from '@/lib/robotview/tdm114LoadedScene';
+import { twinPerf } from '@/lib/teleop/viewQuality';
+import { useViewQuality } from '@/lib/teleop/useViewQuality';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
@@ -464,6 +466,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
   const live = useRobotLive(source?.id ?? null, liveOpts);
   // TDM-97: 'top' matches the sim's top camera and is the twin's default; 'front' is a true front view.
   const [preset, setPreset] = useState<Preset>('top');
+  const [viewQuality] = useViewQuality(); // Smooth / Sharp (the sim slot's toggle): the twin is the main view
   const [feed, setFeed] = useState<FeedHealth | null>(null);
   const onHealth = useCallback((h: FeedHealth | null) => setFeed(h), []);
 
@@ -538,7 +541,7 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
         <>
           <Tdm78Boundary label="3D view">
             <div className={`h-full w-full transition-opacity ${live.stale ? 'opacity-60' : ''}`}>
-              <RobotTwin3D state={twinState} camera={preset} sim={sim} spec={sim ? scene.spec : null} ghost={twinState?.chunk_preview} className="h-full w-full" />
+              <RobotTwin3D state={twinState} camera={preset} sim={sim} spec={sim ? scene.spec : null} ghost={twinState?.chunk_preview} className="h-full w-full" perf={twinPerf(viewQuality, 'main')} />
             </div>
           </Tdm78Boundary>
           {!live.state && (

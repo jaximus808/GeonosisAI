@@ -28,6 +28,8 @@ import { useRobotLive, type RobotLiveResult } from '@/lib/robotview/useRobotLive
 import { useRobotScene } from '@/lib/robotview/useRobotScene';
 import { useRows } from '@/lib/spacetime/hooks';
 import { paneLayout, twinPerf, type TwinPerf, type ViewQuality } from '@/lib/teleop/viewQuality';
+import { useViewQuality } from '@/lib/teleop/useViewQuality';
+import { ViewQualityToggle } from '@/components/teleop/TeleopOverlay';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
@@ -409,9 +411,16 @@ export function simCamerasSlot({ live, robotId, compact }: { live: RobotLiveResu
   return <SlotSimCameras live={live} robotId={robotId} compact={compact} />;
 }
 
-/** TDM-114: the slot's panes draw the scene the robot has loaded, like RobotView's twin next to them. */
+/**
+ * TDM-114: the slot's panes draw the scene the robot has loaded, like RobotView's twin next to them.
+ * Quality (lib/teleop/viewQuality.ts): RobotView's twin is the main view, so in Smooth the slot draws ONE small
+ * camera (1x, no shadows, 30 fps) with a switcher; Sharp draws all of them as before.
+ */
 function SlotSimCameras({ live, robotId, compact }: { live: RobotLiveResult; robotId: number; compact: boolean }) {
   const robotScene = useRobotScene(robotId);
+  const [quality, setQuality] = useViewQuality();
+  const toolbar = <ViewQualityToggle value={quality} onChange={setQuality} testPrefix="simslot" />;
+  if (quality === 'smooth') return <SimInset state={live.state} stale={live.stale} hz={live.hz} spec={robotScene.spec} toolbar={toolbar} />;
   return (
     <SimCameras
       state={live.state}
@@ -421,6 +430,52 @@ function SlotSimCameras({ live, robotId, compact }: { live: RobotLiveResult; rob
       framed={false}
       spec={robotScene.spec}
       cameras={compact ? ['top', 'wrist'] : undefined}
+      quality="sharp"
+      toolbar={toolbar}
     />
+  );
+}
+
+/** One small sim camera with a Top / Side / Wrist switcher (Smooth mode next to a main twin). */
+export function SimInset({ state, stale = false, hz, spec, toolbar, cameras = SIM_CAMERA_IDS, initial = 'side' }: {
+  state: RobotLiveState | null;
+  stale?: boolean;
+  hz?: number;
+  spec?: SceneSpecV1 | null;
+  toolbar?: ReactNode;
+  cameras?: readonly string[];
+  initial?: string;
+}) {
+  const [cam, setCam] = useState(initial);
+  const fps = useRenderFps();
+  return (
+    <section aria-label="Simulated camera view" className="gx-foundry relative rounded-md bg-surface-sunken" data-sim-cameras={cam} data-fps={fps} data-state={!state ? 'waiting' : stale ? 'stale' : 'live'}>
+      <div className="relative aspect-[4/3]">
+        <Pane id={cam} state={state} spec={spec ?? SIM_DEFAULT_SCENE} primary={false} stale={stale} perf={twinPerf('smooth', 'inset')} />
+        <div className="absolute right-1.5 top-1.5 z-10 flex gap-1" role="group" aria-label="Sim camera">
+          {cameras.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setCam(id)}
+              aria-pressed={cam === id}
+              className={`rounded-sm px-1.5 py-0.5 text-[11px] font-semibold backdrop-blur-sm ${cam === id ? 'bg-ink text-ground' : 'bg-black/55 text-white'}`}
+              data-testid={`siminset-${id}`}
+            >
+              {cameraName(id)}
+            </button>
+          ))}
+        </div>
+        {!state && <div className="absolute inset-0 grid place-items-center bg-black/55 text-sm text-ink">Waiting for the sim robot&apos;s joint state</div>}
+      </div>
+      <p className="mt-1.5 flex h-5 flex-nowrap items-center gap-x-3 overflow-hidden whitespace-nowrap px-0.5 font-mono text-[11px] tabular-nums text-ink-muted">
+        <span className="min-w-0 truncate">One view drawn (Smooth). Sharp shows every camera.</span>
+        <span className="ml-auto shrink-0">
+          {hz != null && `${hz.toFixed(0)} Hz state, `}
+          {fps} fps
+        </span>
+        {toolbar}
+      </p>
+    </section>
   );
 }

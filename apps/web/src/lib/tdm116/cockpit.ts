@@ -237,9 +237,11 @@ export function tdm116ParseOverviewView(v: string | null | undefined): Tdm116Ove
   return v === 'factory' ? 'factory' : 'stage';
 }
 
-/** Clutter in the ticket list: cancelled tickets and test tickets (task text starting `test.`). */
+/** Clutter in the ticket list: cancelled tickets, failed tickets (except the labelled [Sample] example), and
+ * test tickets (task text starting `test.`). */
 export function tdm116IsClutter(t: { status: string; taskDescription: string }): boolean {
-  return t.status === 'cancelled' || /^\s*test\./i.test(t.taskDescription);
+  if (/^\s*\[Sample\]/i.test(t.taskDescription)) return false;
+  return t.status === 'cancelled' || t.status === 'failed' || /^\s*test\./i.test(t.taskDescription);
 }
 
 /**

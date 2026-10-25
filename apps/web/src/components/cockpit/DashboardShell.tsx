@@ -129,7 +129,7 @@ export function Tdm116DashboardShell({ ticketParam }: { ticketParam?: string | n
         </div>
         <label className="tdm116-tickets-filter" data-testid="dashboard-hide-cancelled">
           <input type="checkbox" checked={hide} onChange={(e) => setHideRaw(e.target.checked ? '1' : '0')} />
-          Hide cancelled and test
+          Hide cancelled, failed and test
           {hide && list.hidden > 0 && <span className="gx-id ml-auto">{list.hidden} hidden</span>}
         </label>
         {!ready ? (

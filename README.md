@@ -62,6 +62,69 @@ Every rate shows its Wilson 95% interval (at 10/10 the lower bound is only 0.72)
 - **Claude everywhere a human used to make a judgment call:** per-ticket 3D scenes, failure clustering, the data plan, episode review and real-arm trial verdicts from the live cameras.
 - **Honest labels.** Anything simulated or stubbed says `[SIM]`, `[STUB]` or `[SEEDED]` wherever it shows up.
 
+## Factory × SpacetimeDB: agents that live inside the database
+
+The core idea: **SpacetimeDB is the factory's shared memory and nervous system, and Factory Droids are the workers on the line.** Droids never poll and never hold a process open while they wait. They write to the database, say what row change they're waiting for, and go to sleep. The database wakes them.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant D as Data Droid (Factory session)
+  participant FC as FactoryClient
+  participant DB as SpacetimeDB (maincloud)
+  participant RB as Resume bridge
+  participant P as Contributor phone
+  participant R as Reviewer (Claude)
+
+  D->>FC: turn ends with "WAITING_FOR dataset:accepted_count>=5"
+  FC->>DB: agent_wait_for(session, predicate, resume_payload)
+  Note over D: idle, zero cost, no process running
+  P->>DB: claim_task (atomic 60 s arm lease)
+  P->>DB: create_episode (teleop takeover recorded)
+  R->>DB: submit_review(accepted) → reserve_payment
+  DB-->>RB: row change on dataset
+  RB->>RB: re-evaluate predicate → true
+  RB->>DB: agent_resume(session)  (atomic claim, one bridge wins)
+  RB->>FC: resume(session, what changed + matched rows + ticket snapshot)
+  FC->>D: same Factory session, full context
+  D->>DB: set_dataset_lerobot_uri(...) (refuses non-accepted episodes)
+  D->>FC: "WAITING_FOR data_plan:iteration>=2"
+```
+
+### SpacetimeDB: the bus and the rulebook
+
+Everything (the orchestrator, three kinds of Factory Droids, the Jetson robot client, the MuJoCo sim, the web app, every contributor's phone and the Claude MCP connector) reads and writes **one SpacetimeDB database on maincloud** (`robo-factory-a706j`).
+
+- **23 tables** make up the factory's whole state: `ticket`, `eval_run`, `eval_trial`, `failure_cluster`, `data_plan`, `task`, `episode`, `review`, `payment`, `dataset`, `training_run`, `robot`, `robot_command`, `agent_session`, `event_log`, and more.
+- **~55 reducers** are the only way to change that state, and the safety rules live inside them, not in prompts or app code:
+  - `claim_task`: one arm-control lease per robot, atomic, 60 s, renewed by `heartbeat_claim`. Two phones can never drive the same arm.
+  - `approve_spend` and `reserve_payment`: no payout can exceed the human-approved budget.
+  - `set_dataset_lerobot_uri`: a droid can point training at a dataset only if every episode in it was accepted by review.
+  - `agent_wait_for` and `agent_resume`: park a droid, then claim its wake-up atomically, so exactly one bridge resumes it.
+  - `append_event`: callable only by registered service identities. The log has no update or delete path, and it carries a chain hash so you can prove it wasn't edited.
+- **Service identities.** Each actor (orchestrator, factory, robot, mcp) has its own SpacetimeDB identity and role. Reducers check the role (`requireRole`), so a droid can't, say, accept its own episodes.
+- **Subscriptions drive everything live.** The factory floor, ticket pages, agents panel and `/live` view all render live from SpacetimeDB subscriptions. The orchestrator subscribes over a raw WebSocket client we wrote (there's no maintained Python SDK for 2.x). The robot receives `robot_command` rows, acks them and writes `eval_trial` and heartbeats back.
+- **Logic inside the module.** A scheduled reducer sweeps stale contributor presence every 30 s, and `expire_task_leases` frees arm leases whose holder stopped heartbeating.
+- **It even does service discovery.** The laptop backend publishes its tunnel URL as an `event_log` row, and Vercel and the Jetson find it there (with an HMAC proof).
+
+### Factory Droids: the engineers on the line
+
+Three Factory Droid roles do the work a robotics engineer would otherwise do between steps. Each one is a real Factory session driven through `droid-sdk` (`services/factory/`), with its status and every step mirrored into SpacetimeDB:
+
+| Droid | Wakes on | Does |
+|---|---|---|
+| **Onboarding** | a new ticket whose robot isn't set up yet | Writes or validates the robot's adapter config, runs the adapter/camera/safety/IK checks, fixes what fails, writes the success check and reset routine. On real hardware it parks until a human confirms the motion checks (`WAITING_FOR event_log:onboarding.hil_confirmed`). |
+| **Data** | `dataset:accepted_count>=N` | Validates the accepted episodes, cuts the failure frames before each takeover, assembles the LeRobot v2.1 dataset, verifies it, writes a dataset card and publishes it. Then it sleeps until the next iteration's data plan. |
+| **Training** | the dataset is ready, then `training_run.status` changes | Sanity-checks the data before any GPU is spent, picks hyperparameters and writes down why, queues the H100 run and sleeps. On an OOM it wakes, halves the batch and retries once. On success it reads the loss curve and writes a training note. |
+
+**How they're wired:**
+- **The droid contract.** Every turn ends with exactly one line: `DONE` or `WAITING_FOR <table>:<field><op><value>`. The predicate can also be JSON with `all`/`any`, aggregates (`count`, `sum`, …) and a timeout. `FactoryClient` parses that line and calls `agent_wait_for`.
+- **The resume bridge** (`services/orchestrator`) re-evaluates every parked predicate on each SpacetimeDB row change. When one turns true, it claims the wake-up with `agent_resume` and sends the droid what changed, the matching rows, its saved `resume_payload` and a ticket snapshot. The resume goes to the **same Factory session** (protocol A). If that session is gone, a fresh one is seeded from the saved payload (protocol B). A wait that times out wakes the droid with `TIMED OUT` so it can decide what to do.
+- **Bounded by design.** Droids run with `autonomy=off`, a turn cap, write access only to their own work directory, and one allow-listed tool. The tool only talks to the database named in the droid's context, so a droid can't wander into prod. We found that droid-sdk's default autonomy skips the permission handler, which is why `off` is enforced.
+- **Visible on the floor.** Every droid step is an `agent_session` update plus a `droid.*` row in `event_log`. The `/factory` page shows droids riding to their station, sleeping with their `WAITING_FOR` predicate on screen, and "woke on `dataset:accepted_count`" when the database wakes them.
+
+**Measured:** in the end-to-end proof, an accepted review woke a parked Data Droid in **597 ms**, on the same Factory session. The Training Droid chained two waits on one session (queued, forced OOM, woke, halved the batch, re-queued, finished, wrote the loss note) in 3 turns.
+
 ## Architecture
 
 ```mermaid

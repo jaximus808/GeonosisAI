@@ -13,6 +13,7 @@
 // Dev links (?dev_url=...) bypass the lease: no claimed task, the console says so.
 
 import { useEffect, useState } from 'react';
+import { ArmSessionButtons } from '@/components/teleop/ArmSessionButtons';
 import { ControlLeaseBanner } from '@/components/teleop/ControlLease';
 import { RecordingControls } from '@/components/teleop/RecordingControls';
 import { Tdm56TeleopConsole, useTdm56Teleop } from '@/components/teleop/Tdm56TeleopConsole';
@@ -63,9 +64,15 @@ function leaseReason(l: TeleopLease): string {
 }
 
 /** Inside the console's provider: hands TDM-58 the console's /control socket. */
-function RecordingSlot({ taskId, kind, compact }: { taskId: string; kind: string; compact?: boolean }) {
+function RecordingSlot({ taskId, kind, compact, release }: { taskId: string; kind: string; compact?: boolean; release?: () => Promise<void> }) {
   const { controlSocket } = useTdm56Teleop();
-  return <RecordingControls taskId={taskId} kind={kind} controlSocket={controlSocket} compact={compact} />;
+  return (
+    <>
+      <RecordingControls taskId={taskId} kind={kind} controlSocket={controlSocket} compact={compact} />
+      {/* Reset arm + Exit (reset, give back control, task list) */}
+      <ArmSessionButtons release={release} compact={compact} />
+    </>
+  );
 }
 
 export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamUrl: string; token: string; controlUrl?: string; fixture?: boolean } }) {
@@ -95,7 +102,7 @@ export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamU
         controlSlot={dev ? undefined : <ControlLeaseBanner lease={lease} variant="bar" />}
         holdsControl={dev ? true : lease.state === 'held'}
         simRobot={simRobot}
-        recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} compact={phone} /> : undefined}
+        recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} compact={phone} release={dev ? undefined : lease.release} /> : undefined}
         taskKind={lease.task?.type}
         taskCompleted={lease.task?.status === 'completed'}
       />

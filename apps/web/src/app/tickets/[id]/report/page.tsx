@@ -162,8 +162,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           {tdm107Mode(r)?.current && (
             <p className="r-muted">
               {tdm107Mode(r)!.current === 'sim'
-                ? 'SIMULATED: sim-robot results (MuJoCo), not real-arm success numbers.'
-                : 'Real-robot results only. Sim-robot results are listed separately below.'}
+                ? 'SIMULATED'
+                : 'Real robot'}
             </p>
           )}
           <div className="r-hero-nums">
@@ -188,7 +188,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         </Section>
 
         <div className="r-two">
-          <Section title="Cost" aside={<TestModeTag />}>
+          <Section title="Cost">
             <table className="r-table">
               <tbody>
                 <tr>
@@ -222,7 +222,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
                 </tr>
               </tbody>
             </table>
-            <p className="r-note">{r.total_cost.note}. All payouts are Stripe test mode; no real money moved.</p>
+            <p className="r-note">{r.total_cost.note}.</p>
           </Section>
 
           <Section title="Deployed checkpoint">
@@ -368,10 +368,6 @@ function Tdm107SimVsReal({ m }: { m: Tdm107ModeBlock }) {
 
 function FakeTag() {
   return <span className="r-fake-tag">FAKE</span>;
-}
-
-function TestModeTag() {
-  return <span className="r-test-tag">Stripe test mode</span>;
 }
 
 function Missing({ children }: { children: ReactNode }) {

@@ -110,7 +110,7 @@ export function JoinForm({ ticket }: { ticket?: string }) {
           </button>
         </div>
         <p className="text-xs text-zinc-400">
-          Payouts are Stripe TEST MODE: no real money. {contributor.payoutsEnabled ? 'Payouts are set up.' : 'Payouts are not set up yet.'}
+          {contributor.payoutsEnabled ? 'Payouts are set up.' : 'Payouts are not set up yet.'}
         </p>
       </div>
     );

@@ -5,7 +5,7 @@ import { fmtCents } from '@/lib/format';
 import { EpisodeVerdicts, OfferCounts, PayoutStatus, QaFlags, SlotRail } from '@/components/offers/OfferParts';
 import { neededArithmetic, OFFER_STATUS_TEXT, type OfferView } from '@/lib/tdm94/offers';
 import { useTicketOfferViews } from '@/lib/tdm94/useOfferLive';
-import { StatusPill, TestModeBadge } from './Badges';
+import { StatusPill } from './Badges';
 import type { Contributor, DatasetOffer } from './util';
 
 /**
@@ -48,7 +48,7 @@ function OfferItem({ view: v, sellerName }: { view: OfferView; sellerName?: stri
         </span>
         <span className="text-zinc-500">Price</span>
         <span className="flex flex-wrap items-center gap-2 tabular-nums">
-          {fmtCents(o.pricePerEpisodeCents)} per accepted episode, at most {fmtCents(v.maxSpendCents)} <TestModeBadge />
+          {fmtCents(o.pricePerEpisodeCents)} per accepted episode, at most {fmtCents(v.maxSpendCents)}
         </span>
         <span className="text-zinc-500">Slots</span>
         <span className="tabular-nums">

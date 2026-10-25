@@ -471,7 +471,7 @@ function ConsoleInner({
     const barTone = taskCompleted ? 'idle' : status.tone;
     let coach: { tag?: string; title: string; detail?: string; tone?: 'plain' | 'done' | 'warn'; step?: string };
     if (taskCompleted)
-      coach = { title: 'Accepted: this task is done', detail: 'Your payout is below (test mode). Earnings shows it too.', tone: 'done', step: 'completed' };
+      coach = { title: 'Accepted: this task is done', detail: 'Your payout is below. Earnings shows it too.', tone: 'done', step: 'completed' };
     else if (!dev && !canDrive) coach = { title: 'Waiting for control', detail: canDriveReason, tone: 'warn', step: 'lease' };
     else if (rec && !rec.active && rec.last?.status === 'recorded')
       coach = { title: 'Submitted. The reviewer is checking it', detail: 'The verdict and your payout show up right here.', tone: 'done', step: 'submitted' };
@@ -620,7 +620,7 @@ function ConsoleInner({
             {(dev || canDrive) && controlSlot}
             {dev && (
               <p className="rounded-md bg-amber-100 px-3 py-1.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200" data-testid="tdm56-dev">
-                Dev link: connected to <code className="text-xs">{dev.streamUrl}</code> with a fixed token, not a claimed task.
+                Direct link: <code className="text-xs">{dev.streamUrl}</code>
               </p>
             )}
             {asidePanels}
@@ -688,8 +688,7 @@ function ConsoleInner({
 
         {dev && (
           <p className="mb-3 rounded-md bg-amber-100 px-3 py-1.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200" data-testid="tdm56-dev">
-            Dev link: connected to <code className="text-xs">{dev.streamUrl}</code> with a fixed token, not a claimed task. If this is the
-            spikes/tdm-56 mock, the robot is simulated.
+            Direct link: <code className="text-xs">{dev.streamUrl}</code>
           </p>
         )}
 

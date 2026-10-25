@@ -225,9 +225,9 @@ export function FloorView({ floor, variant = 'full', className, onOpen }: { floo
 }
 
 const COMPUTE_TITLE: Record<string, string> = {
-  STUB: 'RDF_MODAL_STUB: no GPU and no Modal credit; the checkpoint is a placeholder.',
+  STUB: 'Stub training run, no GPU.',
   REAL: 'Real Modal training run.',
-  SEEDED: 'RDF_SEED_EVALS: outcomes drawn at the sim policy rate, no robot trials were run.',
+  SEEDED: 'Seeded outcomes, not run on a robot.',
 };
 
 function Elapsed({ st, nowUs }: { st: Tdm112StationView; nowUs: number }) {

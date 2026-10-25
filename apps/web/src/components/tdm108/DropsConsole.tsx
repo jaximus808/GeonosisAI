@@ -209,7 +209,7 @@ export function DropsConsole() {
           </ul>
           <p className="mt-2 break-all text-zinc-500">
             Links point at <span className="font-mono">{data.public_url}</span>
-            {data.show_access_code ? ' (access code shown on posts)' : ''}. {data.test_mode ? 'Test mode.' : ''}
+            {data.show_access_code ? ' (access code shown on posts)' : ''}.
           </p>
         </div>
         <div className="sm:col-span-2">

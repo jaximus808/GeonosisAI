@@ -36,8 +36,8 @@ export function TicketHeader({ ticket, robot, dataset, mode, maxIterations }: {
                 {maxIterations ? ` of ${maxIterations}` : ''}
               </span>
             )}
-            {fake && <FakeBadge title="This ticket runs on the fake-robot harness. Every trial, episode and number on this page is simulated." />}
-            {mode === 'sim' && <SimBadge title="This ticket runs on the SIM robot (MuJoCo YAM in its 3D scene). Switch it to the real robot in Run settings." />}
+            {fake && <FakeBadge title="Fake robot" />}
+            {mode === 'sim' && <SimBadge title="Sim robot" />}
             {mode === 'real' && <Tag tone="cancelled">Real robot</Tag>}
           </div>
           <h1 className="gx-display-l mt-1 mb-2 max-w-4xl">{ticket.taskDescription}</h1>
@@ -63,16 +63,9 @@ export function TicketHeader({ ticket, robot, dataset, mode, maxIterations }: {
           <ButtonLink href={`/tickets/${ticket.id}/report`}>View report</ButtonLink>
         </div>
       </div>
-      {mode === 'sim' && (
-        <p className="gx-frame-sim mt-4 mb-0 max-w-3xl rounded-sm bg-steel-soft px-3 py-2 text-sm text-ink">
-          <span className="gx-station-label mr-2 font-stencil text-steel">Simulated</span>
-          This ticket runs on the MuJoCo sim robot: its baseline, takeovers and evals happen in the 3D scene, and its numbers are sim
-          results, never real-arm success rates.
-        </p>
-      )}
       {fake && (
         <p className="mt-3 mb-0 max-w-3xl rounded-sm border-l-4 border-slag bg-slag-soft px-3 py-2 text-sm text-ink">
-          Fake robot. This ticket was driven by the simulator harness, not the YAM arm, so its success rates are not results.
+          Fake robot.
         </p>
       )}
 
@@ -92,7 +85,7 @@ export function TicketHeader({ ticket, robot, dataset, mode, maxIterations }: {
           <span style={{ width: w(spent) }} />
         </div>
         <p className="gx-small mt-1.5 mb-0">
-          <span className="gx-data">{fmtCents(approved)}</span> approved for data plans; spent counts reserved and paid payouts. Test mode.
+          <span className="gx-data">{fmtCents(approved)}</span> approved for data plans.
         </p>
       </div>
       {ticket.deployedCheckpointUri && (

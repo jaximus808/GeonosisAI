@@ -33,7 +33,7 @@ export function ApprovePlanButton({ ticketId, planId, estCostCents, status }: {
     <div className="mt-1 flex flex-wrap items-center gap-3">
       <button type="button" onClick={approve} disabled={state === 'busy' || state === 'done'}
         className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900">
-        {state === 'done' ? 'Approved' : state === 'busy' ? 'Approving…' : `Approve plan (${(estCostCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}, test mode)`}
+        {state === 'done' ? 'Approved' : state === 'busy' ? 'Approving…' : `Approve plan (${(estCostCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })})`}
       </button>
       {state === 'error' && <span className="text-xs text-red-700 dark:text-red-400">Not approved: {msg}</span>}
     </div>

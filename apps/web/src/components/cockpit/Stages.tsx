@@ -148,7 +148,7 @@ function DiagnoseStage({ d }: { d: Tdm116Data }) {
                   <div className="tdm116-row-top">
                     <span className="gx-id text-slag">trial {t.trialIndex + 1}</span>
                     <span className="tdm116-row-main text-sm" title={t.failureNote ?? undefined}>
-                      {t.failureNote || 'No note recorded'}
+                      {(t.failureNote ?? '').replace(/^\[SIM\]\s*/, '') || 'No note recorded'}
                     </span>
                   </div>
                 </li>
@@ -270,7 +270,7 @@ function PlanStage({ d }: { d: Tdm116Data }) {
           {plan.amount} {unit.toLowerCase()}
         </p>
         <p className="m-0 text-sm">
-          <span className="tdm116-money">{fmtCents(plan.unitPriceCents)}</span> each, <span className="tdm116-money">{fmtCents(plan.estCostCents)}</span> estimated. Test mode.
+          <span className="tdm116-money">{fmtCents(plan.unitPriceCents)}</span> each, <span className="tdm116-money">{fmtCents(plan.estCostCents)}</span> estimated.
         </p>
         <div className="tdm116-approve">
           {proposed ? (
@@ -326,7 +326,6 @@ function PlanStage({ d }: { d: Tdm116Data }) {
           <span style={{ width: budget > 0 ? `${Math.min(100, ((Math.max(spent, approved) + (proposed ? est : 0)) / budget) * 100)}%` : '0%', opacity: 0.35 }} />
           <span style={{ width: budget > 0 ? `${Math.min(100, (spent / budget) * 100)}%` : '0%' }} />
         </div>
-        <p className="gx-small mt-2 mb-0">Stripe test mode. No real money moves.</p>
       </section>
     </div>
   );
@@ -704,7 +703,7 @@ function ShipStage({ d }: { d: Tdm116Data }) {
         </ButtonLink>
         <p className="gx-small m-0 basis-full">
           {shipEv ? `${tdm112Words({ type: shipEv.row.type, payload: shipEv.payload })} · ${fmtTs(shipEv.row.ts)}. ` : ''}
-          The flywheel ships on its own once a fine-tuned eval meets the target; otherwise it loops back to plan more data.
+          Ships when an eval meets the target.
         </p>
       </section>
       <section className="tdm116-plate tdm116-scroll tdm116-grow" aria-label="Before and after">

@@ -7,7 +7,7 @@ the robot's scene, and carries a QR code + short link to the task.
 Sizes: ``wide`` 1200x675 (X, Bluesky, link previews), ``square`` 1080x1080 (Discord, Telegram, Instagram).
 Style: GeonosisAI Foundry (``job_drop_theme``): ``ground`` page, ``surface`` plates with a 1px ``line``
 border, wordmark in Big Shoulders Stencil with a ``melt`` "AI", task title in Big Shoulders, price in
-``ochre`` IBM Plex Mono, "Test mode" in the footer while Stripe runs on a test key.
+``ochre`` IBM Plex Mono, "Paid on acceptance" in the footer.
 
 The frame is, in order of preference (``frame_for`` in ``job_drops.py``): the robot's reset start photo
 (a real camera frame), else a top-down sketch of the ticket's scene spec drawn here (``scene_sketch``),
@@ -407,10 +407,8 @@ def render_card(info: CardInfo, *, size: str = "wide", link: str, short: str, fr
     # footer
     d.line([M, rule_y, W - M, rule_y], fill=line, width=1)
     sf = theme.font("display-bold", 20)
-    left = "TEST MODE  PAYOUTS ARE STRIPE TEST MONEY" if info.test_mode else "PAID ON ACCEPTANCE"
-    if info.sample:
-        left = "SAMPLE POST  NO TASK BEHIND IT" + ("  TEST MODE" if info.test_mode else "")
-    _tracked(d, theme, M, foot_mid, left, sf, "steel" if not info.test_mode else "ochre")
+    left = "SAMPLE POST" if info.sample else "PAID ON ACCEPTANCE"
+    _tracked(d, theme, M, foot_mid, left, sf, "steel")
     right = f"TASK #{info.task_id}" if info.task_id else ""
     if right:
         idf = theme.font("mono", 22)

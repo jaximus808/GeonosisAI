@@ -18,7 +18,7 @@ import { EvalCards } from '@/components/ticket/EvalCards';
 import { OfferCard } from '@/components/ticket/OfferCard';
 import { RunSettingsButton } from '@/components/ticket/RunSettingsDrawer';
 import { PaymentsTable } from '@/components/ticket/TasksTable';
-import { TestModeBadge } from '@/components/ticket/Badges';
+import { TestModeTag } from '@/components/payments/TestModeBand';
 import { DATA_TYPE_LABEL, parseObj, shortUri } from '@/components/ticket/util';
 import { fmtCents, fmtTs } from '@/lib/format';
 import { tdm112Words } from '@/lib/tdm112/floor';
@@ -102,7 +102,7 @@ function RobotPanel({ d }: { d: Tdm116Data }) {
                 <dt>Status</dt>
                 <dd>{r.status}</dd>
                 <dt>Mode</dt>
-                <dd>{d.mode === 'sim' ? 'sim (MuJoCo)' : d.mode === 'real' ? 'real arm' : '—'}</dd>
+                <dd>{d.mode === 'sim' ? 'sim' : d.mode === 'real' ? 'real arm' : '—'}</dd>
                 <dt>Heartbeat</dt>
                 <dd>{r.lastHeartbeat ? fmtTs(r.lastHeartbeat) : 'never'}</dd>
               </dl>
@@ -197,7 +197,7 @@ function DataPanel({ d }: { d: Tdm116Data }) {
 
 function MoneyPanel({ d }: { d: Tdm116Data }) {
   return (
-    <Tdm116PanelFrame title="Money" testId="panel-money" aside={<TestModeBadge />}>
+    <Tdm116PanelFrame title="Money" testId="panel-money" aside={<TestModeTag />}>
       <div className="tdm116-cols" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
         <div className="tdm116-scroll">
           <TicketSpendPanel ticketId={d.tid} />
@@ -394,11 +394,10 @@ function ReportPanel({ d }: { d: Tdm116Data }) {
         {d.split.line && (
           <p className="mt-3 mb-0 text-sm font-semibold" data-testid="tdm125-report-split">
             {d.split.line}
-            {d.split.collectMode === 'real' && d.split.evalMode === 'sim' ? ' (trained on real-arm data; eval numbers are sim, not real-arm success rates)' : ''}
           </p>
         )}
         <p className="gx-small mt-4 mb-0">
-          The full report (timeline per iteration, data bought, spend, the decision trail) prints and shares without a login.
+          The full report prints and shares without a login.
         </p>
       </section>
     </Tdm116PanelFrame>

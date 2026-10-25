@@ -220,7 +220,7 @@ def test_discord_bot_live_posts_card_once(tmp_path):
     emb = body["embeds"][0]
     assert emb["image"]["url"] == "attachment://card.png" and emb["url"] == f"{BASE}/j/12/discord"
     assert emb["title"] == "Pick up the cube and place it in the empty plate"
-    assert {"name": "Pay", "value": "$3.50 (test mode)", "inline": True} in emb["fields"]
+    assert {"name": "Pay", "value": "$3.50", "inline": True} in emb["fields"]
     assert body["components"][0]["components"][0]["url"] == f"{BASE}/j/12/discord"
     assert body["allowed_mentions"] == {"parse": []}
     assert emb["footer"]["text"].startswith("GeonosisAI · task #12")  # the real task number, not #0

@@ -177,7 +177,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
         <Pane id={single} state={state} spec={scene} primary stale={stale} ghost={ghost} caption={false} />
         <span
           className="gx-tag gx-tag-sim absolute left-2 top-12 z-10 shadow-[inset_0_0_0_1px_var(--steel)]"
-          title="This view is drawn in your browser from the simulated robot's joint state. No real camera is involved."
+          title="Sim camera"
         >
           SIMULATED
         </span>
@@ -214,7 +214,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
           {framed && (
           <span
             className="gx-tag gx-tag-sim absolute left-2 top-2 shadow-[inset_0_0_0_1px_var(--steel)]"
-            title="These views are drawn in your browser from the simulated robot's joint state. No real camera is involved."
+            title="Sim cameras"
           >
             SIMULATED
             {robotName && <span className="font-medium normal-case tracking-normal opacity-90">{robotName}</span>}
@@ -245,7 +245,6 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
       </div>
       {/* one line, always: it sits between the views and the control dock */}
       <p className="mt-1.5 flex h-5 flex-nowrap items-center gap-x-3 overflow-hidden whitespace-nowrap px-0.5 text-[11px] text-ink-muted font-mono tabular-nums">
-        <span className="min-w-0 truncate">Drawn from the sim robot&apos;s joint state, not a video feed.</span>
         <span className="ml-auto shrink-0">
           {hz != null && `${hz.toFixed(0)} Hz state, `}
           {fps} fps

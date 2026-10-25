@@ -25,7 +25,7 @@ import {
   type PayStatus,
   type Review,
 } from '@/lib/payments/tdm64';
-import { TestModeBand, TestModeTag } from './TestModeBand';
+import { TestModeTag } from './TestModeBand';
 
 const WORK_KINDS = ['clean_teleop', 'recovery_takeover', 'purchased'];
 
@@ -67,8 +67,7 @@ export function EarningsView({ contributorParam }: { contributorParam?: string }
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-4xl">
-      <TestModeBand />
-      <div className="mt-6">{children}</div>
+      {children}
     </div>
   );
 }
@@ -193,7 +192,7 @@ function Earnings({ contributor, isSelf }: { contributor: Contributor; isSelf: b
           Work and payouts
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Payouts are sent only after the reviewer accepts an episode. Rejected work shows the reviewer&apos;s reason.
+          Paid when the reviewer accepts an episode.
         </p>
         {rows.length === 0 ? (
           <p className="mt-4 rounded-md border border-dashed border-zinc-300 p-5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
@@ -221,11 +220,13 @@ function Summary({ paid, earned, totals }: { paid: number; earned: number; total
       <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
         <div>
           <p className="text-sm text-zinc-500">Paid out</p>
-          <p className="text-5xl font-light tabular-nums tracking-tight">{fmtCents(paid)}</p>
+          <p className="flex items-center gap-3 text-5xl font-light tabular-nums tracking-tight">
+            {fmtCents(paid)} <TestModeTag />
+          </p>
         </div>
         <div className="pb-1.5 text-sm text-zinc-600 dark:text-zinc-400">
           of <span className="font-medium tabular-nums text-zinc-900 dark:text-zinc-100">{fmtCents(earned)}</span> earned
-          from accepted work <TestModeTag />
+          from accepted work
         </div>
       </div>
 
@@ -293,7 +294,7 @@ function OnboardingCallout({ contributor, heldCents, isSelf }: { contributor: Co
         setState({
           kind: 'blocked',
           message:
-            'Payout setup is not open yet: the factory still has to finish its Stripe Connect platform setup. Your accepted work stays held for you and is sent once you set up payouts.',
+            'Payout setup is not open yet. Your accepted work is held for you.',
         });
       } else {
         setState({ kind: 'error', message: `Could not start payout setup: ${(e as Error).message}` });
@@ -328,8 +329,8 @@ function OnboardingCallout({ contributor, heldCents, isSelf }: { contributor: Co
       </h2>
       <p className="mt-1 max-w-prose text-sm text-zinc-700 dark:text-zinc-300">
         {hasAccount
-          ? 'Your Stripe test account exists but cannot receive transfers yet. Finish the Stripe form, then check again.'
-          : 'Stripe collects your details on its own page. This is a test account: use Stripe test data, never real ID or bank details.'}
+          ? 'Finish the Stripe form, then check again.'
+          : 'Stripe collects your details on its own page.'}
         {!isSelf && ' You are viewing someone else’s earnings, so only they should complete this.'}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -351,7 +352,6 @@ function OnboardingCallout({ contributor, heldCents, isSelf }: { contributor: Co
             Check setup again
           </button>
         )}
-        <TestModeTag />
       </div>
       {state.kind === 'busy' && <p className="mt-2 text-sm text-zinc-500">{state.what}</p>}
       {state.kind === 'blocked' && (

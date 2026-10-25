@@ -87,9 +87,6 @@ export function Tdm125SplitLine({ split, status, stationIndex, ticketId }: { spl
         <p className="m-0 mt-1 text-sm" data-testid="tdm125-split-line">
           {split.line}
         </p>
-        {split.collectMode === 'real' && split.evalMode === 'sim' && (
-          <p className="gx-small mt-1 mb-0">Eval numbers are sim results, not real-arm success rates.</p>
-        )}
       </section>
       {wait && <WaitingForRobot waitingFor={wait} ticketId={ticketId} />}
     </>

@@ -169,7 +169,7 @@ function EpisodeThumb({ ep }: { ep: EpisodeView }) {
       <figcaption className="mt-1 text-[11px] leading-snug text-zinc-500">
         <a href={`#episode-${ep.episode_id}`} className="text-blue-600 hover:underline">episode #{ep.episode_id}</a>
         {ep.trial ? <> · trial {ep.trial.trial_index} of eval #{ep.trial.eval_run_id}</> : ep.missing ? ' · row missing' : ' · not an eval trial'}
-        {ep.trial?.failure_note && <span className="block text-zinc-600 dark:text-zinc-400" title="eval_trial.failure_note">“{ep.trial.failure_note}”</span>}
+        {ep.trial?.failure_note && <span className="block text-zinc-600 dark:text-zinc-400" >“{ep.trial.failure_note.replace(/^\[SIM\]\s*/, '')}”</span>}
       </figcaption>
     </figure>
   );

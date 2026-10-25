@@ -19,7 +19,7 @@ export type Review = RowOf<'review'>;
 export type Task = RowOf<'task'>;
 export type Contributor = RowOf<'contributor'>;
 
-export const TDM64_TEST_BADGE_FALLBACK = 'Stripe TEST MODE: no real money';
+export const TDM64_TEST_BADGE_FALLBACK = 'Stripe test mode';
 
 // ---------------------------------------------------------------- payment statuses
 
@@ -38,7 +38,7 @@ export interface StatusMeta {
 export const PAY_STATUS: Record<PayStatus, StatusMeta> = {
   paid: {
     label: 'Paid',
-    help: 'A Stripe test transfer was sent to your connected account.',
+    help: 'Sent to your connected account.',
     swatch: 'bg-teal-600 dark:bg-teal-400',
     pill: 'text-teal-800 bg-teal-50 ring-teal-600/30 dark:text-teal-200 dark:bg-teal-950/50',
   },

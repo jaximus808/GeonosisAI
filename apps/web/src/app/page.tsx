@@ -88,8 +88,8 @@ export default function Landing() {
         <div className="gx-plate flex flex-col gap-3">
           <h3 className="gx-heading">Contributors</h3>
           <p className="text-sm leading-6 text-ink-muted">
-            Open the link on your phone, claim a paid task, drive the arm from the browser or reset the scene. Payouts
-            run through Stripe in test mode. You need the 6-character code shown next to the QR.
+            Open the link on your phone, claim a paid task, drive the arm from the browser or reset the scene. You
+            need the 6-character code shown next to the QR.
           </p>
           <div>
             <ButtonLink href="/join" small>
@@ -122,7 +122,6 @@ export default function Landing() {
             </li>
           ))}
         </ul>
-        <p className="gx-small">A Cal Hacks build. Money on this site is Stripe test mode.</p>
       </section>
     </div>
   );

@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MockedBadge } from '@/components/MockedBadge';
-import { StatusPill, TestModeBadge } from '@/components/ticket/Badges';
+import { StatusPill } from '@/components/ticket/Badges';
 import { fmtCents } from '@/lib/format';
 import { useRows } from '@/lib/spacetime/hooks';
 import {
@@ -538,7 +538,6 @@ function EpisodeVerdict({ episodeId }: { episodeId: bigint }) {
           ) : (
             <span className="text-zinc-500">being reserved…</span>
           )}
-          <TestModeBadge />
         </p>
       )}
     </div>

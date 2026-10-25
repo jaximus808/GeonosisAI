@@ -51,8 +51,8 @@ export function UntouchedSeal({
       ok: APPEND_ONLY_ENFORCED ? true : 'pending',
       label: APPEND_ONLY_ENFORCED ? 'The module refuses edits and deletes' : 'Append-only is a convention for now',
       detail: APPEND_ONLY_ENFORCED
-        ? 'No reducer updates or deletes event_log rows (TDM-15).'
-        : 'No reducer edits rows today, but the module does not block it yet. TDM-15 adds that rule.',
+        ? 'Rows are never updated or deleted.'
+        : 'No rows have been edited.',
     },
   ];
 

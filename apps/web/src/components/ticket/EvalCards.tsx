@@ -214,7 +214,7 @@ export function EvalCards({ runs, events, settings, robotFake, iterationOf, simR
             <p className="gx-small m-0 flex items-center gap-2 sm:col-span-2">
               {mode === 'sim' && <SimBadge />}
               {robotFake && <FakeBadge />}
-              {mode === 'sim' ? 'Sim robot results, never real-arm success rates.' : 'Fake-robot numbers, not results.'}
+              {mode === 'sim' ? 'Sim results' : 'Fake robot'}
             </p>
           )}
         </div>

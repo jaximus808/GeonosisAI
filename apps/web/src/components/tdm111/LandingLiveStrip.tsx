@@ -55,7 +55,7 @@ export function LandingLiveStrip() {
               <dt className="gx-label">Open paid tasks</dt>
               <dd className="gx-readout-num">{s.openTasks.count}</dd>
               <dd className="gx-id mt-1">
-                <span className="text-ochre">{fmtCents(s.openTasks.payCents)}</span> total · test mode
+                <span className="text-ochre">{fmtCents(s.openTasks.payCents)}</span> total
               </dd>
             </div>
           )}

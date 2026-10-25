@@ -101,7 +101,7 @@ export function EpisodeCard({ e, review, payment, who, sim }: { e: Episode; revi
       <QaChecks episodeId={e.id} />
       {payment && (
         <p className="mt-2 text-xs text-zinc-500">
-          Payout {fmtCents(payment.amountCents)}: <StatusPill status={payment.status} /> <span className="text-orange-600 dark:text-orange-400">test mode</span>
+          Payout {fmtCents(payment.amountCents)}: <StatusPill status={payment.status} />
         </p>
       )}
     </article>

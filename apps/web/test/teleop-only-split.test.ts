@@ -1,4 +1,4 @@
-// Real tickets on a teleop-only arm become a TDM-125 split (form note), and /dashboard ticket links open
+// Real tickets on a teleop-only arm become a TDM-125 split (one-line form field), and /dashboard ticket links open
 // /tickets/<id>. `pnpm --filter @rdf/web test`.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -21,18 +21,16 @@ describe('teleop-only real arm', () => {
     assert.equal(rm.tdm107IsTeleopOnly(teleopOnly), true);
     assert.equal(rm.tdm107IsTeleopOnly(null), false);
   });
-  it('the split note matches the server note', () => {
-    assert.equal(
-      rm.tdm125SplitNote('yam-01'),
-      "yam-01 can collect data but can't run evals tonight, so this ticket evaluates on the sim robot and collects on yam-01.",
-    );
+  it('the split line is one quiet field', () => {
+    assert.equal(rm.tdm125SplitLine('sim-yam-mujoco', 'yam-01'), 'Evals: sim-yam-mujoco · Data: yam-01');
   });
-  it('the form shows the note for Real + teleop-only and still sends the request', () => {
+  it('the form shows the line for Real + teleop-only, still sends the request, and opens the ticket straight away', () => {
     const f = src('components/tdm74/NewTicketForm.tsx');
     assert.match(f, /robotMode === 'real' && selectedRobot && tdm107IsTeleopOnly\(selectedRobot\)/);
     assert.match(f, /data-testid="tdm125-split-note"/);
-    assert.match(f, /data-testid="tdm125-created-note"/);
-    assert.match(f, /r\.data\.note/);
+    assert.doesNotMatch(f, /tdm125-created-note/);
+    assert.doesNotMatch(f, /run evals tonight/);
+    assert.match(f, /router\.push\(`\/tickets\/\$\{r\.data\.ticket_id\}`\)/);
   });
 });
 

@@ -25,7 +25,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { JoinQr } from '@/components/JoinQr';
 import { FactoryFloor } from '@/components/factory/FactoryFloor';
-import { TestModeTag } from '@/components/payments/TestModeBand';
 import { Tdm100RobotPanel } from '@/components/robotview/Tdm100RobotPanel';
 import { byNewest, isFakeRobot, ticketEvents, type TicketEvent } from '@/components/ticket/util';
 import { useAgentFeed } from '@/lib/agentfeed/useAgentFeed';
@@ -218,7 +217,7 @@ function TrialChips({ runId, trials }: { runId: bigint; trials: number }) {
   return (
     <>
     {seeded && (
-      <p className={`${F_MONO} mb-1 text-[12px] text-[var(--color-slag)]`} title="RDF_SEED_EVALS demo run-through: outcomes drawn at the sim policy's calibrated rate, no robot trials">
+      <p className={`${F_MONO} mb-1 text-[12px] text-[var(--color-slag)]`} title="Seeded outcomes, not run on a robot">
         SEEDED · not run
       </p>
     )}
@@ -609,7 +608,7 @@ function LiveKioskBody({ ticketParam }: { ticketParam: string | null }) {
             )}
           </Plate>
 
-          <Plate title="Planner decision" aside={<TestModeTag />}>
+          <Plate title="Planner decision">
             {plan ? (
               <div className="grid gap-2.5">
                 {/* 1. what failed */}

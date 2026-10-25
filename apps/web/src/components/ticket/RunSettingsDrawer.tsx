@@ -285,12 +285,6 @@ function RunSettingsDrawer({
                     <option value="recovery_takeover">Always recovery takeovers</option>
                   </select>
                   <FieldError msg={shown.data_type_override} />
-                  {form.data_type_override && (
-                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                      Known gap: the planner reads its override from hyperparams or a planner.data_type_override event, not
-                      this saved field, so check the next data plan&apos;s guardrail line before relying on it.
-                    </p>
-                  )}
                 </div>
               </Group>
 
@@ -303,7 +297,7 @@ function RunSettingsDrawer({
                   err={shown.budget_usd}
                   prefix="$"
                   step="0.01"
-                  hint={`At least $${(Math.max(base.ticket.approved_cents, base.ticket.spent_cents) / 100).toFixed(2)}, already approved or spent. Stripe test mode.`}
+                  hint={`At least $${(Math.max(base.ticket.approved_cents, base.ticket.spent_cents) / 100).toFixed(2)}, already approved or spent.`}
                 />
               </Group>
 

@@ -34,8 +34,8 @@ export const TDM107_MODE_LABEL: Record<Tdm107Mode, string> = {
 };
 
 export const TDM107_MODE_HINT: Record<Tdm107Mode, string> = {
-  sim: 'The MuJoCo YAM in its deployed scene. Practice, sim data and sim evals. Labelled SIMULATED everywhere.',
-  real: 'The Jetson YAM. Only real-robot results count toward real success numbers.',
+  sim: 'YAM in its 3D scene.',
+  real: 'The YAM arm.',
 };
 
 /** The default for a new ticket: the sim robot. Evals on the real arm need a deployed policy, so a real arm
@@ -76,7 +76,7 @@ export function tdm107IsTeleopOnly(r: RobotLike): boolean {
   return !!r && !tdm107CanEval(r);
 }
 
-/** The note the form shows (and the server returns) when a Real ticket on a teleop-only arm becomes a split. */
-export function tdm125SplitNote(realName: string): string {
-  return `${realName} can collect data but can't run evals tonight, so this ticket evaluates on the sim robot and collects on ${realName}.`;
+/** The one-line field the form shows when a Real ticket on a teleop-only arm becomes a split (the server does the split). */
+export function tdm125SplitLine(simName: string, realName: string): string {
+  return `Evals: ${simName} · Data: ${realName}`;
 }

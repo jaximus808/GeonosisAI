@@ -192,7 +192,7 @@ def test_offer_fan_out_text_and_rate_limits():
     out = o.on_page(req([10]), m.rows)
     assert out["count"] == 3 and out["contributors"] == [1, 2, 3]
     body = tr.sent[0][1]
-    assert body == "$3.50 robot job, about 2 min: recovery takeover on yam sim. Reply YES to claim. (Stripe test mode)"
+    assert body == "$3.50 robot job, about 2 min: recovery takeover on yam sim. Reply YES to claim."
     assert [t for t, _ in ev].count(tx.EV_OFFER) == 1
     clock.t += 30  # inside the 2 min window: 1-3 are rate-limited, 4-5 get the next one
     out = o.on_page(req([11]), m.rows)

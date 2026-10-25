@@ -28,7 +28,6 @@ import {
   type BudgetEvent,
   type Payment,
 } from '@/lib/payments/tdm64';
-import { TestModeTag } from './TestModeBand';
 
 const HATCH_APPROVED = 'repeating-linear-gradient(-45deg, rgb(161 161 170 / .45) 0 3px, transparent 3px 7px)';
 const HATCH_BLOCKED = 'repeating-linear-gradient(-45deg, rgb(194 65 12 / .75) 0 3px, transparent 3px 7px)';
@@ -122,8 +121,6 @@ export function TicketSpendPanel({ ticketId, className = '' }: { ticketId: bigin
         <h2 id={`tdm64-spend-${ticketId}`} className="text-lg font-semibold tracking-tight">
           Spend
         </h2>
-        <TestModeTag />
-        <span className="text-sm text-zinc-500">Payouts are Stripe test transfers. No real money moves.</span>
       </div>
 
       {paused && !terminal && (
@@ -290,8 +287,7 @@ function PausedBanner({
       </ul>
       {capByApproval && (
         <p className="mt-2 text-sm">
-          A data plan&apos;s approved spend is the limit here. Approve more spend on that plan (Approve spend, or the
-          Claude connector&apos;s approve_spend); raising the budget makes room for it.
+          The plan&apos;s approved spend is the limit. Approve more spend to continue.
         </p>
       )}
       <BudgetForm ticketId={ticketId} budget={budget} initial={suggested} cta="Approve more spend" />
@@ -348,7 +344,7 @@ function BudgetForm({ ticketId, budget, initial, cta }: { ticketId: bigint; budg
     <form onSubmit={submit} className="mt-3 flex flex-wrap items-end gap-2">
       <div>
         <label htmlFor={id} className="block text-xs text-zinc-600 dark:text-zinc-400">
-          New budget (USD, test mode)
+          New budget (USD)
         </label>
         <div className="mt-1 flex items-center rounded-md border border-zinc-400 bg-white focus-within:outline-2 focus-within:outline-blue-600 dark:border-zinc-600 dark:bg-zinc-900">
           <span className="pl-2 text-zinc-500">$</span>

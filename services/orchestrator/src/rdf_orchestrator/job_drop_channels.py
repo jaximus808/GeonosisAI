@@ -152,8 +152,8 @@ def _first_sentence(text: str, limit: int) -> str:
 
 
 def headline(p: DropPost) -> str:
-    """Numbers first: "$3.50 test mode. Recovery takeover, about 2 min, from your phone." """
-    money = f"{p.price} test mode" if p.test_mode else p.price
+    """Numbers first: "Paid task: $3.50. Recovery takeover, about 2 min, from your phone." """
+    money = p.price
     many = f"{p.count} paid tasks at {money} each" if p.count > 1 else f"Paid task: {money}"
     on = f" on the {p.arm}" if p.arm else ""  # TDM-125: say which arm the job drives
     return f"{many}. {p.kind}{on}, about {p.minutes} min, {p.where.lower()}."
@@ -209,12 +209,12 @@ class Discord:
             "description": desc,
             "color": self.s.discord_color,
             "fields": [
-                {"name": "Pay", "value": f"{p.price}{' (test mode)' if p.test_mode else ''}", "inline": True},
+                {"name": "Pay", "value": p.price, "inline": True},
                 {"name": "Time", "value": f"About {p.minutes} min", "inline": True},
                 {"name": "Where", "value": f"{p.where} · {p.robot}", "inline": True},
             ],
             "image": {"url": "attachment://card.png"},
-            "footer": {"text": f"GeonosisAI · task #{p.task_id}" + (" · test mode" if p.test_mode else "")},
+            "footer": {"text": f"GeonosisAI · task #{p.task_id}"},
         }
         body: dict[str, Any] = {
             "content": self.text(p)[:2000],

@@ -19,7 +19,7 @@ export function FakeBadge({ title }: { title?: string }) {
 /** RDF_SEED_EVALS: the eval's outcomes were drawn from a seed, not run on the robot. */
 export function SeededBadge() {
   return (
-    <span title="Seeded, not run: outcomes drawn at the sim policy's calibrated rate (demo run-through, RDF_SEED_EVALS). No robot trials, no episodes."
+    <span title="Seeded outcomes, not run on a robot"
       className="gx-tag gx-tag-sim" style={{ background: 'var(--slag-soft)', color: 'var(--slag)', boxShadow: 'inset 0 0 0 1px var(--slag)' }}>
       <i className="gx-rivet" aria-hidden />
       SEEDED · not run
@@ -30,7 +30,7 @@ export function SeededBadge() {
 /** RDF_MODAL_STUB: training ran no GPU; the checkpoint is a fake stand-in. */
 export function StubBadge() {
   return (
-    <span title="[STUB] no GPU: RDF_MODAL_STUB training (no Modal credit spent). The checkpoint is fake; the sim policy uses its fine-tuned calibration for it."
+    <span title="Stub training run, no GPU"
       className="gx-tag gx-tag-sim" style={{ background: 'var(--slag-soft)', color: 'var(--slag)', boxShadow: 'inset 0 0 0 1px var(--slag)' }}>
       <i className="gx-rivet" aria-hidden />
       [STUB] no GPU
@@ -41,22 +41,12 @@ export function StubBadge() {
 export function SimBadge({ title }: { title?: string }) {
   return (
     <span
-      title={title ?? 'Recorded on the SIM robot (MuJoCo simulation of the YAM). Never counted in real-robot numbers.'}
+      title={title ?? 'Sim robot'}
       className="gx-tag gx-tag-sim"
       data-gx-sim
     >
       <i className="gx-rivet" aria-hidden />
       SIM
-    </span>
-  );
-}
-
-/** Stripe test mode marker: no real money moves. TDM-109: ochre money tag. */
-export function TestModeBadge() {
-  return (
-    <span title="Stripe test mode. No real money moves." className="gx-tag gx-tag-money">
-      <i className="gx-rivet" aria-hidden />
-      Test mode
     </span>
   );
 }

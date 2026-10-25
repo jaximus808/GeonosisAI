@@ -8,8 +8,7 @@ export default function EventsPage() {
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Event log</h1>
       <p className="mt-1 mb-6 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-        Everything the factory did, in the order the database recorded it. Each row is written once by a reducer
-        call. The seal below is computed in this browser from the live rows.
+        Everything the factory did, in order.
       </p>
       <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
         <EventLogExplorer />

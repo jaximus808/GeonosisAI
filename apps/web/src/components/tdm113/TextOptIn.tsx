@@ -88,7 +88,6 @@ export function TextOptIn({ className = '' }: { className?: string }) {
   if (!eligible || unavailable || state == null) return null;
 
   const box = `rounded-lg border px-4 py-3 text-sm ${className}`;
-  const dry = state.mode === 'dry_run';
 
   async function act<T>(fn: () => Promise<T>) {
     setBusy(true);
@@ -139,7 +138,6 @@ export function TextOptIn({ className = '' }: { className?: string }) {
             {WELCOME_NOTE[welcome.state] ?? `Welcome text: ${welcome.state}.`} {welcome.hint ?? ''}
           </p>
         )}
-        {dry && <p className="mt-1 text-xs text-emerald-900/70 dark:text-emerald-200/70">Dry run: the factory logs texts and sends none.</p>}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
           <button
             type="button"
@@ -210,7 +208,7 @@ export function TextOptIn({ className = '' }: { className?: string }) {
           </button>
           <span className="text-xs text-zinc-500">
             {state.stopped ? 'You stopped job texts. Saving turns them back on. ' : ''}
-            Kept private, never shown on the site. Payouts are Stripe test mode.{dry ? ' Dry run: texts are logged, not sent.' : ''}
+            Kept private, never shown on the site.
           </span>
         </div>
       </form>

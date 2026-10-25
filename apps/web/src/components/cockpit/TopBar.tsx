@@ -63,7 +63,7 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false,
             <span className="gx-id text-ink">{ref4}</span>
           )}
           <StatusTag status={t.status} />
-          {d.mode === 'sim' && <SimBadge title="This ticket runs on the SIM robot (MuJoCo YAM). Its numbers are sim results, never real-arm success rates." />}
+          {d.mode === 'sim' && <SimBadge title="Sim robot" />}
           {d.mode === 'real' && <Tag tone="cancelled">Real robot</Tag>}
           {d.robotFake && <FakeBadge />}
           <SampleBadgeFor description={t.taskDescription} />

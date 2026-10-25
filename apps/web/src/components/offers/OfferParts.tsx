@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { fmtCents } from '@/lib/format';
-import { StatusPill, TestModeBadge } from '@/components/ticket/Badges';
+import { StatusPill } from '@/components/ticket/Badges';
 import {
   PAYMENT_STATUS_TEXT,
   type EpisodeView,
@@ -267,7 +267,6 @@ export function PayoutStatus({ view }: { view: OfferView }) {
   return (
     <div className="space-y-1.5 text-sm">
       <p className="flex flex-wrap items-center gap-2">
-        <TestModeBadge />
         <span className="tabular-nums">
           {settled ? 'Settled' : 'So far'}: {view.billable} accepted × {fmtCents(price)} = <strong>{fmtCents(view.projectedPayoutCents)}</strong>
         </span>

@@ -16,7 +16,6 @@ import { useTicket } from '@/lib/spacetime/hooks';
 import { useContributor } from '@/lib/contributor/hooks';
 import { fmtCents } from '@/lib/format';
 import { StatusPill } from '@/components/ticket/Badges';
-import { TestModeBand } from '@/components/payments/TestModeBand';
 import { EpisodeVerdicts, OfferCounts, PayoutStatus, QaFlags, SlotRail, type UploadSlot } from './OfferParts';
 import { INGESTABLE, neededArithmetic, OFFER_STATUS_TEXT, type OfferView } from '@/lib/tdm94/offers';
 import { useOfferLive } from '@/lib/tdm94/useOfferLive';
@@ -95,9 +94,6 @@ function SellerHeader({ view: v, task }: { view: OfferView; task?: string }) {
             {o.neededCount} × {fmtCents(o.pricePerEpisodeCents)}; extra episodes are not bought
           </span>
         </Term>
-      </div>
-      <div className="mt-4">
-        <TestModeBand detail="Payouts for this offer are Stripe test transfers. Nobody is paid real money." />
       </div>
       {o.sourceUri && (
         <p className="mt-3 text-sm text-zinc-500">

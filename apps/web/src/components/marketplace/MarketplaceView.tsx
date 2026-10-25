@@ -64,7 +64,6 @@ const TYPE_STYLE: Record<string, { rail: string; text: string; chip: string }> =
 };
 const styleOf = (type: string) => TYPE_STYLE[type] ?? TYPE_STYLE.reset;
 
-const HAZARD = 'repeating-linear-gradient(-45deg, var(--ochre) 0 6px, var(--surface-sunken) 6px 12px)';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -72,18 +71,6 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'recovery_takeover', label: 'Takeover' },
   { id: 'reset', label: 'Reset' },
 ];
-
-function TestStripe({ className = '' }: { className?: string }) {
-  return (
-    <span
-      title="Stripe test mode. No real money moves."
-      className={`inline-flex items-center gap-1 text-[11px] font-semibold text-ochre ${className}`}
-    >
-      <span aria-hidden className="h-2.5 w-4 rounded-[2px]" style={{ backgroundImage: HAZARD }} />
-      Test mode
-    </span>
-  );
-}
 
 // ------------------------------------------------------------------ view
 
@@ -212,7 +199,7 @@ export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
     setBusy(task.id);
     try {
       await completeTask({ taskId: task.id, resultJson: JSON.stringify({ source: 'marketplace', done: 'reset' }) });
-      say(`Reset marked done. ${fmtPrice(task.priceCents)} (test mode) is on its way.`, 'good');
+      say(`Reset marked done. ${fmtPrice(task.priceCents)} is on its way.`, 'good');
       setTab('mine');
     } catch (e) {
       say(actionErrorMessage(e), 'bad');
@@ -241,12 +228,6 @@ export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
         <p className="gx-small mt-1 mb-0">Claim one, do it, and get paid once it passes review.</p>
       </div>
 
-      <p className="mb-4 flex items-center gap-2 rounded-sm bg-ochre-soft px-3 py-2 text-sm text-ink">
-        <span aria-hidden className="h-4 w-5 shrink-0" style={{ backgroundImage: HAZARD }} />
-        <span>
-          <span className="font-semibold text-ochre">Test mode.</span> Prices are paid as Stripe test transfers. No real money moves.
-        </span>
-      </p>
 
       {!ready && <p className="gx-small py-8 text-center">{isActive ? 'Loading tasks…' : 'Connecting to the factory…'}</p>}
 
@@ -359,7 +340,6 @@ export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
               guest={!contributor}
             />
           )}
-          <p className="gx-small mt-6 mb-0">Test mode. No real money moves.</p>
         </>
       )}
 
@@ -450,7 +430,6 @@ function TaskTicket({
       )}
       <ShareTask taskId={task.id} />
       {action}
-      <TestStripe />
     </li>
   );
 }
@@ -678,7 +657,6 @@ function MyTasks({
         <span>
           Paid so far <span className="font-mono font-medium tabular-nums text-ochre">{fmtPrice(paidTotal)}</span>
         </span>
-        <TestStripe />
       </p>
       <ul className="m-0 list-none divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface p-0">
         {tasks.map((t) => {

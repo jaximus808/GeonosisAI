@@ -7,7 +7,7 @@ Flow (hooked in next to TDM-65's web push and TDM-108's job drops)::
     dispatcher pages new paid tasks -> page listener -> TextOffers.on_page
         -> up to RDF_TEXT_OFFER_FANOUT (3) opted-in contributors, least recently offered first, skipping anyone
            rate-limited (1 offer / 2 min, 20 / day per number), busy (holds a claimed task) or, for resets, not in person
-        -> "$3.50 robot job, about 2 min: recovery takeover on yam sim. Reply YES to claim. (Stripe test mode)"
+        -> "$3.50 robot job, about 2 min: recovery takeover on yam sim. Reply YES to claim."
     Inkbox webhook (imessage.received / text.received) -> in-process Inkbox tunnel -> handle_webhook
         -> signature + 300 s timestamp window -> TextOffers.on_inbound
         -> YES: claim_task(task, contributor) as the orchestrator (atomic in SpacetimeDB; first valid YES wins)
@@ -83,13 +83,12 @@ KIND = {"clean_teleop": "clean demo", "recovery_takeover": "recovery takeover", 
 
 CONSENT_TEXT = "GeonosisAI will text you paid robot jobs. Msg frequency varies. Reply STOP to stop."
 WELCOME = "You're in. GeonosisAI will text you robot jobs. Reply STOP anytime."
-HELP = ("GeonosisAI robot jobs: we text you paid tasks, reply YES to claim one. Payouts are Stripe test mode. "
-        "Reply STOP to stop.")
+HELP = "GeonosisAI robot jobs: we text you paid tasks, reply YES to claim one. Reply STOP to stop."
 STOP_CONFIRM = "You're unsubscribed from GeonosisAI job texts. Reply START to get them again."
 TAKEN = "Taken, we'll text you the next one."
 NO_OFFER = "No open job right now. We'll text you the next one."
 NUDGE = "Reply YES to claim the job, or STOP to stop job texts."
-OFFER_FMT = "{price} robot job, about {mins} min: {kind} on {robot}. Reply YES to claim. (Stripe test mode)"
+OFFER_FMT = "{price} robot job, about {mins} min: {kind} on {robot}. Reply YES to claim."
 CLAIMED_FMT = "It's yours: {kind}, task #{task}. Open {link} in the next 3 minutes to start."
 
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}

@@ -350,7 +350,7 @@ function PlanAsk({ cell }: { cell: Tdm115Cell }) {
   return (
     <span className="fiso-ask">
       <span className="fiso-ask-what">
-        {plan.words} <span className="fiso-test">test mode</span>
+        {plan.words}
       </span>
       <ApproveButton ticketId={cell.ticketId} planId={plan.id} cents={plan.priceCents} />
     </span>

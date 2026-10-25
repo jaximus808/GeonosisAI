@@ -37,7 +37,6 @@ import {
 import { attachPhoto, downscalePhoto, useResetInfo, useResetView, type ArmSafety } from '@/lib/tdm62/reset';
 import { TaskCameraFeed } from '@/components/teleop/CameraFeed';
 
-const HAZARD = 'repeating-linear-gradient(-45deg, #f5b301 0 6px, #1f2937 6px 12px)';
 const RED_HAZARD = 'repeating-linear-gradient(-45deg, #b91c1c 0 10px, #7f1d1d 10px 20px)';
 const ACCENT = '#0e7c6b';
 const PHOTO_BUDGET_MS = 1500; // the camera photo never holds the robot up for longer than this
@@ -369,14 +368,10 @@ export function ResetTaskView({ taskId }: { taskId: bigint }) {
         </div>
         <div className="shrink-0 rounded-lg border-2 border-dashed border-zinc-300 px-3 py-2 text-center dark:border-zinc-700">
           <p className="text-[1.7rem] font-bold leading-none tabular-nums">{fmtPrice(t.priceCents)}</p>
-          <p className="mt-1 flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-            <span aria-hidden className="h-2 w-3 rounded-[2px]" style={{ backgroundImage: HAZARD }} />
-            Test mode
-          </p>
         </div>
       </header>
       <p className="mt-2 text-[13px] text-zinc-500">
-        Paid as a Stripe test transfer as soon as you tap Done. No review, no real money.
+        Paid as soon as you tap Done. No review.
       </p>
 
       {/* waiting / escalation */}
@@ -420,17 +415,16 @@ export function ResetTaskView({ taskId }: { taskId: bigint }) {
               tone={pay ? (['failed', 'reversed', 'blocked_budget'].includes(pay.status) ? 'bad' : 'done') : 'now'}
               title={
                 <>
-                  {fmtPrice(pay?.amountCents ?? t.priceCents)} payout{' '}
-                  <span className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-300">test mode</span>
+                  {fmtPrice(pay?.amountCents ?? t.priceCents)} payout
                 </>
               }
               detail={
                 !pay
                   ? 'Reserving the payment…'
                   : pay.status === 'paid'
-                    ? 'Paid (Stripe test transfer).'
+                    ? 'Paid.'
                     : pay.status === 'pending'
-                      ? 'Reserved. The Stripe test transfer goes out shortly.'
+                      ? 'Reserved. The transfer goes out shortly.'
                       : pay.status === 'awaiting_onboarding'
                         ? 'Reserved. Set up payouts on the earnings page to receive it.'
                         : `Payment ${pay.status.replace('_', ' ')}.`

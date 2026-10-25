@@ -376,7 +376,7 @@ def test_real_yam_baseline_is_the_yam_smoke_checkpoint_capped_and_slow(db):
     assert run["checkpoint_uri"] == REAL_YAM_BASELINE_CHECKPOINT != PI05_BASE_CHECKPOINT
     p = json.loads(run_eval_cmds(db)[0]["payload_json"])
     assert p["checkpoint_uri"] == REAL_YAM_BASELINE_CHECKPOINT and p["robot_mode"] == "real"
-    assert p["timeout_s"] <= 45 and p["speed_scale"] <= 0.5 and p["outcome_timeout_s"] >= 120
+    assert p["timeout_s"] <= 15 and p["speed_scale"] <= 0.5 and p["outcome_timeout_s"] >= 120
 
 
 def test_real_yam_never_gets_a_fake_or_base_checkpoint(db):

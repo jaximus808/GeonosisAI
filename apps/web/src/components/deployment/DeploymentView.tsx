@@ -5,6 +5,7 @@
 // (checkpoint, endpoint, where it runs, how to call it) and "Run my policy": one watched rollout of the
 // deployed checkpoint on the ticket's sim robot (orchestrator POST /tickets/{id}/deployment/run), with the
 // live sim view inline. Every value is a live SpacetimeDB row or event_log row (the cockpit's own hook).
+// TDM-126: plus "Real arm: pre-trained π0.5" / "Real arm: fine-tuned" (RealArmPanel) when a real arm has policy on.
 
 import '@/components/cockpit/cockpit.css';
 import Link from 'next/link';
@@ -13,6 +14,7 @@ import { Button, ButtonLink } from '@/components/brand/Button';
 import { Tag } from '@/components/brand/StatusTag';
 import { gxCx } from '@/components/brand/cx';
 import { Tdm116RobotWell } from '@/components/cockpit/RobotWell';
+import { Tdm126RealArmPanel } from './RealArmPanel';
 import { useTdm116Cockpit } from '@/components/cockpit/useCockpitData';
 import { isStubCheckpoint, parseObj } from '@/components/ticket/util';
 import { useRows } from '@/lib/spacetime/hooks';
@@ -330,6 +332,9 @@ actions = r.json()["actions"]                    # 50 steps x 7 (joint_pos_abs)`
           </div>
         </div>
       </section>
+
+      {/* TDM-126: the real arm, only when one advertises policy */}
+      <Tdm126RealArmPanel d={d} id={id} shipped={shipped} uri={uri} />
 
       {shipped && next.length > 0 && (
         <section className="border border-line bg-surface" aria-label="Next steps" data-testid="deployment-next">

@@ -4,6 +4,10 @@
 //
 // Operator only: requireOperator() first, then this server adds X-RDF-Operator-Key (RDF_OPERATOR_KEY), which
 // never reaches the browser. The orchestrator refuses real and teleop-only robots and answers 409 robot_busy.
+//
+// TDM-126 "Real arm": body {real_arm: true, confirm: "HANDS_ON_ESTOP", checkpoint: "before"|"after", robot_id?}.
+// Only those four fields are forwarded (never a checkpoint URI: the orchestrator resolves it), and every real-arm
+// gate is the orchestrator's (confirm, robot advertises policy, shipped real checkpoint).
 
 import type { NextRequest } from 'next/server';
 import { requireOperator } from '@/lib/operator/session';
@@ -20,13 +24,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const key = tdm78Env('RDF_OPERATOR_KEY');
   if (!key) return Response.json({ detail: { code: 'no_operator_key', message: 'RDF_OPERATOR_KEY is not set on the web server' } }, { status: 503 });
   const headers: Record<string, string> = { 'content-type': 'application/json', 'x-rdf-operator-key': key };
+  const raw = (await req.json().catch(() => ({}))) as Record<string, unknown> | null;
+  const body: Record<string, unknown> = {};
+  if (raw && raw.real_arm === true) {
+    body.real_arm = true;
+    if (typeof raw.confirm === 'string') body.confirm = raw.confirm.slice(0, 64);
+    if (raw.checkpoint === 'before' || raw.checkpoint === 'after') body.checkpoint = raw.checkpoint;
+    if (typeof raw.robot_id === 'number' && Number.isInteger(raw.robot_id) && raw.robot_id > 0) body.robot_id = raw.robot_id;
+  }
   const who = req.headers.get('x-human-id');
   if (who && HUMAN_ID.test(who)) headers['x-human-id'] = who;
   try {
     const res = await fetch(`${tdm78Orchestrator()}/tickets/${id}/deployment/run`, {
       method: 'POST',
       headers,
-      body: '{}',
+      body: JSON.stringify(body),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     });

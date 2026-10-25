@@ -3,12 +3,13 @@ import Link from 'next/link';
 import { ButtonLink } from '@/components/brand/Button';
 import { GX_LINE_STATIONS, Line, gxTicketStations } from '@/components/brand/Line';
 import { Wordmark } from '@/components/brand/Wordmark';
-import { HeroFoundry } from '@/components/landing/HeroFoundry';
+import { HeroSchematic } from '@/components/landing/HeroSchematic';
 import { LandingLiveStrip } from '@/components/tdm111/LandingLiveStrip';
 
 // TDM-111: the public landing page. Open without the access code (lib/tdm110/access.ts, public_guard.py);
 // the operator dashboard moved to /dashboard. Text, the brand Line and four live numbers; the hero's 3D arm
-// (components/landing/HeroFoundry) is the Anatomy foundry cell, pure SVG.
+// (components/landing/HeroSchematic) is the YAM as a hidden-line technical drawing, three.js loaded after first
+// paint; the Anatomy foundry cell (HeroFoundry, pure SVG) is its no-WebGL fallback.
 
 export const metadata: Metadata = {
   title: 'GeonosisAI: ticket in, deployed robot out',
@@ -67,8 +68,8 @@ export default function Landing() {
             </Link>
           </div>
         </div>
-        {/* the showpiece: the Anatomy foundry cell walking a demo ticket down the line (SVG; the box is reserved) */}
-        <HeroFoundry className="h-[260px] min-[640px]:h-[340px] min-[900px]:-my-6 min-[900px]:h-[clamp(400px,38vw,500px)]" />
+        {/* the showpiece: the YAM as a turning technical drawing (three.js, lazy; the box is reserved) */}
+        <HeroSchematic className="h-[260px] min-[640px]:h-[340px] min-[900px]:-my-6 min-[900px]:h-[clamp(400px,38vw,500px)]" />
       </section>
 
       <LandingLiveStrip />

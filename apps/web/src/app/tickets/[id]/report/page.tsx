@@ -106,12 +106,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     <>
       <ReportToolbar ticketId={id} />
 
-      {r.fake.any && (
-        <div className="r-fake" role="alert">
-          <p className="r-fake-title">Fake inputs. These are not robot results.</p>
-          <p>{r.fake.banner}</p>
-        </div>
-      )}
+      {/* sample / harness data: one quiet line, not a banner (the ticket also carries its Sample badge) */}
+      {r.fake.any && <p className="gx-small m-0 mb-3 text-ink-muted" title={r.fake.banner ?? undefined}>Sample data: an example report, not a live robot run.</p>}
 
       <article className="r-sheet">
         <header className="r-head">

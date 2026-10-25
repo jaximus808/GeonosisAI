@@ -201,18 +201,21 @@ export function Tdm86ZoneStick({
   axis = 'xy',
   onChange,
   testId,
+  compact = false,
 }: {
   label: string;
   hint: string;
   axis?: 'xy' | 'y';
   onChange: (v: Tdm56StickValue) => void;
   testId: string;
+  /** Half-height zone (two stacked on one side): a smaller idle stick, no hint line, shorter travel. */
+  compact?: boolean;
 }) {
   const zone = useRef<HTMLDivElement>(null);
   const pid = useRef<number | null>(null);
   const origin = useRef({ x: 0, y: 0 });
   const [knob, setKnob] = useState<{ ox: number; oy: number; dx: number; dy: number } | null>(null);
-  const R = 46; // px of thumb travel for full speed
+  const R = compact ? 34 : 46; // px of thumb travel for full speed
 
   const local = (e: React.PointerEvent) => {
     const b = zone.current!.getBoundingClientRect();
@@ -273,18 +276,18 @@ export function Tdm86ZoneStick({
             style={{ width: R * 2 + 20, height: R * 2 + 20, left: knob.ox - R - 10, top: knob.oy - R - 10 }}
           />
           <span
-            className="pointer-events-none absolute h-14 w-14 rounded-full bg-melt shadow-overlay"
-            style={{ left: knob.ox + knob.dx - 28, top: knob.oy + knob.dy - 28 }}
+            className={`pointer-events-none absolute rounded-full bg-melt shadow-overlay ${compact ? 'h-10 w-10' : 'h-14 w-14'}`}
+            style={{ left: knob.ox + knob.dx - (compact ? 20 : 28), top: knob.oy + knob.dy - (compact ? 20 : 28) }}
           />
         </>
       ) : (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-1 text-center">
-          <span className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 border-line-strong">
+          <span className={`relative flex items-center justify-center rounded-full border-2 border-line-strong ${compact ? 'h-[46px] w-[46px]' : 'h-[72px] w-[72px]'}`}>
             <Chevrons axis={axis} />
-            <span className="h-7 w-7 rounded-full bg-ink-muted/70" />
+            <span className={`rounded-full bg-ink-muted/70 ${compact ? 'h-5 w-5' : 'h-7 w-7'}`} />
           </span>
-          <span className="text-[15px] font-semibold leading-tight text-ink">{label}</span>
-          <span className="text-[12px] leading-tight text-ink-muted">{hint}</span>
+          <span className={`font-semibold leading-tight text-ink ${compact ? 'text-[13px]' : 'text-[15px]'}`}>{label}</span>
+          {!compact && <span className="text-[12px] leading-tight text-ink-muted">{hint}</span>}
         </div>
       )}
     </div>

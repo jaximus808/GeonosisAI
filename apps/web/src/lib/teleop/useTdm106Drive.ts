@@ -115,6 +115,8 @@ export function useTdm106Drive(opts: Tdm106DriveOptions) {
   const clutchBtn = useRef(false);
   const stickL = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
   const stickR = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
+  /** Tilt stick: pitches the hand (tips the gripper down or up) about the base frame's horizontal y axis. */
+  const stickT = useRef<Tdm56StickValue>({ x: 0, y: 0, active: false });
   const grip = useRef(new Tdm106Gripper());
   grip.current.mode = settings.gripMode;
   const [gripper, setGripperState] = useState(1);
@@ -193,16 +195,19 @@ export function useTdm106Drive(opts: Tdm106DriveOptions) {
       if (pad) twist = addTwist(twist, tdm106TranslationOnly(pad.twist, s.rotation));
       const L = stickL.current;
       const R = stickR.current;
+      const T = stickT.current;
       if (L.active || R.active) {
         twist = addTwist(twist, { lin: [deadzone(L.y), -deadzone(L.x), deadzone(R.y)], ang: [0, 0, s.rotation ? -deadzone(R.x) : 0] });
       }
+      // +rotation about base +y tips a forward-pointing hand down, so pulling the stick down tips it down
+      if (T.active) twist = addTwist(twist, { lin: [0, 0, 0], ang: [0, -deadzone(T.y), 0] });
 
       const sources: string[] = [];
       if (s.directKeys && tdm106KeysWantDrive(keys.current, s.rotation)) sources.push('keys');
       if (pad?.clutch) sources.push('gamepad');
       if (spaceHeld.current) sources.push('keyboard');
       if (clutchBtn.current) sources.push('clutch button');
-      if (s.stickEngages && (L.active || R.active)) sources.push('stick');
+      if (s.stickEngages && (L.active || R.active || T.active)) sources.push('stick');
       if (g.pulse(now)) sources.push('gripper');
       const want = sources.length > 0;
       lastWant.current = want;
@@ -303,6 +308,7 @@ export function useTdm106Drive(opts: Tdm106DriveOptions) {
       clutchBtn.current = false;
       stickL.current = { x: 0, y: 0, active: false };
       stickR.current = { x: 0, y: 0, active: false };
+      stickT.current = { x: 0, y: 0, active: false };
       if (grip.current.mode === 'hold' && !grip.current.open) {
         grip.current.keyUp(performance.now());
         syncGrip();
@@ -371,6 +377,9 @@ export function useTdm106Drive(opts: Tdm106DriveOptions) {
       },
       right: (v: Tdm56StickValue) => {
         stickR.current = v;
+      },
+      tilt: (v: Tdm56StickValue) => {
+        stickT.current = v;
       },
     }),
     [],

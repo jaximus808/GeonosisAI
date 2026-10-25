@@ -660,13 +660,18 @@ function ConsoleInner({
             left={<Tdm86ZoneStick label="Move" hint="forward, back, left, right" onChange={drive.sticks.left} testId="tdm56-stick-move" />}
             center={<Tdm86GripButton drive={drive} state={hud.grip} testId="tdm56-grip-toggle" className="h-[min(112px,100%)]" />}
             right={
-              <Tdm86ZoneStick
-                axis={drive.settings.rotation ? 'xy' : 'y'}
-                label="Up / down"
-                hint={drive.settings.rotation ? 'up, down; sideways turns' : 'push up to lift'}
-                onChange={drive.sticks.right}
-                testId="tdm56-stick-updown"
-              />
+              // two half-height sticks: lift on top, tilt (tip the hand down / up) below
+              <div className="grid h-full min-h-0 grid-rows-2 gap-1.5">
+                <Tdm86ZoneStick
+                  axis={drive.settings.rotation ? 'xy' : 'y'}
+                  label="Up / down"
+                  hint={drive.settings.rotation ? 'up, down; sideways turns' : 'push up to lift'}
+                  onChange={drive.sticks.right}
+                  testId="tdm56-stick-updown"
+                  compact
+                />
+                <Tdm86ZoneStick compact axis="y" label="Tilt" hint="pull down to tip the hand down" onChange={drive.sticks.tilt} testId="tdm56-stick-tilt" />
+              </div>
             }
           />
           {/* the details a judge never needs mid-drive: a sheet over the cockpit behind the "⋯" button. Always

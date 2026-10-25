@@ -1,0 +1,32 @@
+# TDM-118: GeonosisAI robot client on the real YAM, READ-ONLY (joint reads, no motion, no teleop input).
+# A systemd --user unit (no sudo): installed to ~/.config/systemd/user/ by tdm118_user_setup.sh and left
+# DISABLED, so it never starts at boot and never grabs CAN while the user's vrteleop-rh runs.
+#   start:  systemctl --user start geonosis-robot     (after: sudo systemctl stop vrteleop-rh)
+#   stop:   systemctl --user stop geonosis-robot      (then: sudo systemctl start vrteleop-rh)
+#   logs:   journalctl --user -u geonosis-robot -f
+[Unit]
+Description=GeonosisAI robot client (TDM-118 read-only YAM: joint reads, no motion)
+Documentation=file://%h/geonosis/app/docs/jetson-inventory.md
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/geonosis/app/services/robot-client
+# later files win: local = Jetson-only non-secret settings (CAN channel, gripper), env = pushed from the laptop
+EnvironmentFile=%h/.config/geonosis/robot.local.env
+EnvironmentFile=%h/.config/geonosis/robot.env
+Environment=PYTHONUNBUFFERED=1 RDF_ENV_FILE=%h/.config/geonosis/robot.env
+# refuses (exit 3) while vrteleop-rh is active or the CAN link is down; prints the user's stop command
+ExecStartPre=%h/geonosis/app/scripts/jetson/remote/tdm118_guard.sh
+ExecStart=%h/geonosis/app/services/robot-client/.venv/bin/python -m rdf_robot_client.tdm118_readonly
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+SyslogIdentifier=geonosis-robot
+
+[Install]
+WantedBy=default.target

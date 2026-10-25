@@ -14,6 +14,11 @@ const STATES: { id: SessionState; label: string; hint: string }[] = [
   { id: 'uploading', label: 'Uploading', hint: 'Sending your demo to the factory. Keep this page open.' },
 ];
 
+/** TDM-86 phone cockpit: the strip as one word ("Watching"), for the top bar. */
+export function sessionStateLabel(state: SessionState): string {
+  return (STATES.find((s) => s.id === state) ?? STATES[0]).label;
+}
+
 export function SessionStateBar({ state, className = '' }: { state: SessionState; className?: string }) {
   const cur = STATES.findIndex((s) => s.id === state);
   const info = STATES[Math.max(0, cur)];

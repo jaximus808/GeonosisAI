@@ -31,7 +31,8 @@ export interface CameraFeedProps {
   fps?: number;
   /** An image older than this is flagged stale. Default 700 ms. */
   staleMs?: number;
-  layout?: 'grid' | 'stack';
+  /** 'fill' (phone cockpit): fill the parent's height, cameras stacked (side by side in landscape), status over the picture. */
+  layout?: 'grid' | 'stack' | 'fill';
   onHealth?: (h: FeedHealth) => void;
   className?: string;
 }
@@ -93,16 +94,25 @@ export function CameraFeed({ getGrant, cams, fps, staleMs = 700, layout = 'grid'
     healthRef.current?.({ state: snap.state, stale, worstLatencyMs: lats.length ? Math.max(...lats) : null, detail: snap.detail });
   }, [snap, staleMs, shown]);
 
+  const fill = layout === 'fill';
   return (
-    <div className={className}>
-      <div className={layout === 'grid' ? 'grid grid-cols-1 gap-2 sm:grid-cols-2' : 'flex flex-col gap-2'}>
+    <div className={fill ? `relative flex h-full min-h-0 flex-col ${className ?? ''}` : className}>
+      <div
+        className={
+          fill
+            ? 'flex min-h-0 flex-1 flex-col gap-1.5 [@media(orientation:landscape)]:flex-row'
+            : layout === 'grid'
+              ? 'grid grid-cols-1 gap-2 sm:grid-cols-2'
+              : 'flex flex-col gap-2'
+        }
+      >
         {shown.map((cam) => {
           const s = snap.stats[cam];
           const stale = !s || s.ageMs == null || s.ageMs > staleMs || (snap.state !== 'live' && snap.state !== 'fallback');
           return (
             <figure
               key={cam}
-              className={`relative overflow-hidden rounded-lg bg-black ring-2 ${stale && s?.lastFrameAt ? 'ring-red-600' : 'ring-transparent'}`}
+              className={`relative overflow-hidden rounded-lg bg-black ring-2 ${fill ? 'min-h-0 min-w-0 flex-1' : ''} ${stale && s?.lastFrameAt ? 'ring-red-600' : 'ring-transparent'}`}
             >
               <canvas
                 ref={(el) => {
@@ -110,7 +120,7 @@ export function CameraFeed({ getGrant, cams, fps, staleMs = 700, layout = 'grid'
                 }}
                 width={424}
                 height={318}
-                className="block aspect-[4/3] w-full object-contain"
+                className={fill ? 'block h-full w-full object-contain' : 'block aspect-[4/3] w-full object-contain'}
                 aria-label={`${LABEL[cam] ?? cam} camera`}
               />
               <figcaption className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">
@@ -144,7 +154,13 @@ export function CameraFeed({ getGrant, cams, fps, staleMs = 700, layout = 'grid'
           );
         })}
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+      <div
+        className={
+          fill
+            ? 'pointer-events-none absolute inset-x-1.5 bottom-1.5 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-hidden whitespace-nowrap rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-zinc-200'
+            : 'mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400'
+        }
+      >
         <span className="inline-flex items-center gap-1">
           <span
             className={`inline-block h-2 w-2 rounded-full ${
@@ -154,7 +170,7 @@ export function CameraFeed({ getGrant, cams, fps, staleMs = 700, layout = 'grid'
           {STATE_TEXT[snap.state]}
         </span>
         {snap.rttMs != null && <span>RTT {snap.rttMs} ms</span>}
-        {snap.detail && <span className="truncate">{snap.detail}</span>}
+        {snap.detail && <span className="min-w-0 truncate">{snap.detail}</span>}
       </div>
     </div>
   );
@@ -165,7 +181,9 @@ export function TaskCameraFeed({ taskId, ...rest }: Omit<CameraFeedProps, 'getGr
   const { identity } = useContributor();
   const getGrant = useMemo(() => (identity ? taskStreamGrant(taskId, identity) : null), [taskId, identity]);
   if (!getGrant) {
-    return <div className="rounded-lg bg-black/80 p-6 text-center text-sm text-zinc-300">Connecting to the factory…</div>;
+    return (
+      <div className={`rounded-lg bg-black/80 p-6 text-center text-sm text-zinc-300 ${rest.layout === 'fill' ? 'grid h-full place-items-center' : ''}`}>Connecting to the factory…</div>
+    );
   }
   return <CameraFeed key={`${taskId}:${identity}`} getGrant={getGrant} {...rest} />;
 }

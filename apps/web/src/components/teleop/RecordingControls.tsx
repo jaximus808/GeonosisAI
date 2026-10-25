@@ -75,6 +75,7 @@ function Btn({
   tone = 'neutral',
   busy,
   testId,
+  compact,
 }: {
   children: React.ReactNode;
   onClick: () => void;
@@ -82,6 +83,7 @@ function Btn({
   tone?: 'rec' | 'go' | 'take' | 'neutral' | 'quiet';
   busy?: boolean;
   testId?: string;
+  compact?: boolean;
 }) {
   const tones = {
     rec: 'bg-red-600 text-white hover:bg-red-500',
@@ -96,7 +98,7 @@ function Btn({
       data-testid={testId}
       onClick={onClick}
       disabled={disabled || busy}
-      className={`min-h-12 rounded-lg px-4 py-3 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tones[tone]}`}
+      className={`${compact ? 'h-11 shrink-0 whitespace-nowrap rounded-sm px-2.5 text-[14px]' : 'min-h-12 rounded-lg px-4 py-3 text-base'} font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tones[tone]}`}
     >
       {busy ? '…' : children}
     </button>
@@ -206,10 +208,19 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
   const rolloutOwned = active && rec?.owner === 'rollout';
   // create_episode allows one pending/accepted episode per task: don't record a second one
   const blocking = taskEpisodes.find((e) => e.reviewStatus === 'pending' || e.reviewStatus === 'accepted');
+  // TDM-86 phone: the row never grows. A confirm step, an error or the upload / verdict float in a panel
+  // just above it (over the camera view), so the view and the sticks never move. The panel can be hidden
+  // until something in it changes; the confirm questions can't be.
+  const asking = (confirming && active) || (askRecovered && active && isTakeover && phase === 'human');
+  const showRecError = !!compact && !active && !!recError;
+  const hasExtras = asking || (!active && !!blocking) || !!error || (!!last && !active) || showRecError;
+  const extrasKey = [confirming, askRecovered, error, active, recError, last?.status, last?.upload?.state, last?.upload?.episode_id, blocking?.id].join('|');
+  const [hiddenKey, setHiddenKey] = useState<string | null>(null);
+  const showExtras = hasExtras && (!compact || asking || hiddenKey !== extrasKey);
 
   return (
     <section
-      className={`${compact ? 'rounded-sm bg-surface px-2 py-1.5 ring-1 ring-line' : 'rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950'} ${className ?? ''}`}
+      className={`${compact ? 'flex h-full min-w-0 flex-1 items-center rounded-sm bg-surface px-1.5 ring-1 ring-line' : 'rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950'} ${className ?? ''}`}
       data-testid="tdm58-recording-controls"
       data-phase={phase}
       data-compact={compact ? 'true' : undefined}
@@ -226,17 +237,30 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
       </header>
       )}
 
-      <div className={compact ? 'flex flex-wrap items-center gap-2' : undefined}>
+      <div className={compact ? 'flex min-w-0 flex-1 items-center gap-1.5' : undefined}>
       {/* status line */}
-      <div className={compact ? 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1' : 'mb-4 flex flex-wrap items-center gap-x-4 gap-y-2'} aria-live="polite">
+      <div className={compact ? 'flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden' : 'mb-4 flex flex-wrap items-center gap-x-4 gap-y-2'} aria-live="polite">
         {active ? (
-          <span className="inline-flex items-center gap-2 rounded-md bg-red-600/10 px-2 py-1 font-mono text-lg font-semibold tabular-nums text-red-700 dark:text-red-400">
+          <span
+            className={`inline-flex shrink-0 items-center gap-2 rounded-md bg-red-600/10 font-mono font-semibold tabular-nums text-red-700 dark:text-red-400 ${compact ? 'px-1.5 py-1 text-[15px]' : 'px-2 py-1 text-lg'}`}
+            data-testid="tdm58-rec-clock"
+            aria-label={`Recording, ${fmtClock(elapsed)}`}
+          >
             <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />
-            REC {fmtClock(elapsed)}
+            {compact ? fmtClock(elapsed) : `REC ${fmtClock(elapsed)}`}
+          </span>
+        ) : compact ? (
+          // two short lines at most; a recorder error also shows in full in the panel above the bar
+          <span
+            className={`line-clamp-2 min-w-0 text-[12px] leading-tight ${recError ? 'text-red-500' : 'text-zinc-500'}`}
+            title={recError ?? undefined}
+            data-testid="tdm58-status-line"
+          >
+            {recError ?? (!live ? 'Waiting for the robot' : PHASE_TEXT.idle)}
           </span>
         ) : (
           <span className={`text-sm ${recError ? 'text-red-500' : 'text-zinc-500'}`}>
-            {recError ?? (compact && !live ? 'Waiting for the robot' : PHASE_TEXT.idle)}
+            {recError ?? PHASE_TEXT.idle}
           </span>
         )}
         {active && !compact && (
@@ -244,9 +268,9 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             {rec?.frames ?? 0} frames
           </span>
         )}
-        {active && (
+        {active && !(compact && phase === 'recording') && (
           <span
-            className={`rounded px-2 py-0.5 text-sm font-medium ${
+            className={`rounded px-2 py-0.5 font-medium ${compact ? 'min-w-0 truncate text-[12px]' : 'text-sm'} ${
               phase === 'human' || phase === 'recording'
                 ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200'
                 : 'bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200'
@@ -270,7 +294,7 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
       )}
 
       {/* buttons */}
-      <div className="flex flex-wrap gap-2">
+      <div className={compact ? 'flex shrink-0 flex-nowrap gap-1.5' : 'flex flex-wrap gap-2'}>
         {!active && (
           <Btn
             tone="rec"
@@ -281,12 +305,13 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             }}
             disabled={lockOut || !can?.start || !!blocking}
             busy={busy('record_start')}
+            compact={compact}
           >
-            {isTakeover ? 'Start episode (policy drives)' : last ? 'Record again' : 'Start recording'}
+            {isTakeover ? (compact ? 'Start episode' : 'Start episode (policy drives)') : last ? 'Record again' : compact ? 'Record' : 'Start recording'}
           </Btn>
         )}
         {active && isTakeover && phase === 'policy' && (
-          <Btn tone="take" testId="tdm58-takeover" onClick={() => send('takeover')} disabled={lockOut || !can?.takeover} busy={busy('takeover')}>
+          <Btn tone="take" testId="tdm58-takeover" onClick={() => send('takeover')} disabled={lockOut || !can?.takeover} busy={busy('takeover')} compact={compact}>
             Take over
           </Btn>
         )}
@@ -297,23 +322,49 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             onClick={() => (rolloutOwned ? setAskRecovered(true) : send('handback'))}
             disabled={lockOut || !can?.handback}
             busy={busy('handback')}
+            compact={compact}
           >
-            Hand back to policy
+            {compact ? 'Hand back' : 'Hand back to policy'}
           </Btn>
         )}
         {active && !rolloutOwned && (phase === 'recording' || phase === 'handed_back') && !confirming && (
-          <Btn tone="go" testId="tdm58-finish" onClick={() => setConfirming(true)} disabled={lockOut || !can?.stop || elapsed < REVIEW_MIN_S * 1000}>
-            Finish — success
+          <Btn tone="go" testId="tdm58-finish" onClick={() => setConfirming(true)} disabled={lockOut || !can?.stop || elapsed < REVIEW_MIN_S * 1000} compact={compact}>
+            {compact ? 'Finish' : 'Finish — success'}
           </Btn>
         )}
         {active && !rolloutOwned && (
-          <Btn tone="quiet" testId="tdm58-discard" onClick={() => send('record_discard', { reason: 'discarded by operator' })} disabled={lockOut || !can?.discard} busy={busy('record_discard')}>
+          <Btn tone="quiet" testId="tdm58-discard" onClick={() => send('record_discard', { reason: 'discarded by operator' })} disabled={lockOut || !can?.discard} busy={busy('record_discard')} compact={compact}>
             Discard
           </Btn>
         )}
       </div>
       </div>
 
+      {showExtras && (
+      <div
+        className={
+          compact
+            ? 'absolute inset-x-0 bottom-full z-30 mb-1.5 max-h-[45dvh] touch-pan-y overflow-y-auto overscroll-contain rounded-md bg-surface p-2 shadow-overlay ring-1 ring-line-strong [&>*:first-child]:mt-0!'
+            : undefined
+        }
+        data-testid={compact ? 'tdm58-float' : undefined}
+      >
+      {compact && !asking && (
+        <button
+          type="button"
+          onClick={() => setHiddenKey(extrasKey)}
+          className="float-right -mr-1 -mt-1 ml-1 h-9 rounded-sm px-2 text-[13px] font-semibold text-ink-muted ring-1 ring-line"
+          aria-label="Hide this message"
+          data-testid="tdm58-float-hide"
+        >
+          Hide
+        </button>
+      )}
+      {showRecError && (
+        <p className="mt-0 text-sm font-medium text-red-600 dark:text-red-400" role="alert" data-testid="tdm58-rec-error">
+          {recError}
+        </p>
+      )}
       {confirming && active && (
         <div className="mt-3 rounded-lg border border-emerald-600/40 bg-emerald-50 p-3 text-sm dark:bg-emerald-950/30" data-testid="tdm58-confirm">
           <p className="mb-2 font-medium">Did the task succeed? The reviewer checks the video, and failed demos are not paid.</p>
@@ -404,6 +455,8 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
       )}
 
       {last && !active && <AfterSubmit last={last} taskId={taskId} />}
+      </div>
+      )}
     </section>
   );
 }

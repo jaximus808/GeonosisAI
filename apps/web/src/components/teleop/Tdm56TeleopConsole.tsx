@@ -29,7 +29,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CameraFeed, TaskCameraFeed, type FeedHealth } from '@/components/teleop/CameraFeed';
 import { FixtureSimCameras, TaskSimCameras } from '@/components/robotview/SimCameras';
-import { OneLine, ReservedSlot, ViewQualityToggle, ViewerToasts, type ViewerToast } from '@/components/teleop/TeleopOverlay';
+import { OneLine, ViewQualityToggle, ViewerToasts, type ViewerToast } from '@/components/teleop/TeleopOverlay';
 import { useViewQuality } from '@/lib/teleop/useViewQuality';
 import { tdm56WireCmd } from '@/lib/teleop/teleopSafety';
 import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
@@ -46,6 +46,10 @@ import {
 } from '@/lib/teleop/tdm56ControlClient';
 import type { V3 } from '@/lib/teleop/tdm56Input';
 import { useTdm106Drive, type Tdm106DriveUi } from '@/lib/teleop/useTdm106Drive';
+import { LatencyBadge } from '@/components/teleop/LatencyBadge';
+import { sessionStateLabel } from '@/components/teleop/SessionStateBar';
+import { TDM59_OPEN_HELP } from '@/components/teleop/Tdm59TeleopOnboarding';
+import { useConsoleTelemetry } from '@/lib/teleop/tdm59Telemetry';
 import { Tdm86Coach, Tdm86Cockpit, Tdm86GripButton, Tdm86ViewReadouts, Tdm86ViewTabs, Tdm86ZoneStick, useTdm86Phone } from '@/components/teleop/Tdm86Phone';
 import { YAM_MODEL, YAM_BODIES } from '@/components/robotview/yamModel';
 import { createYamKinematics } from '@/components/robotview/yamFk';
@@ -351,6 +355,7 @@ function ConsoleInner({
 
   // ---- TDM-86 phone cockpit
   const { phone, landscape } = useTdm86Phone();
+  const [details, setDetails] = useState(false);
   const [view, setView] = useState<string>(TDM86_DRIVER_CAM.id);
   const liveRef = useRef<RobotLiveState | null>(null);
   const onLiveState = useCallback((st: RobotLiveState | null) => {
@@ -488,6 +493,7 @@ function ConsoleInner({
       coach = { tag: `${hud.guide.n}/5`, title: tdm86TouchWords(hud.guide.title), detail: tdm86TouchWords(hud.guide.detail), step: hud.guide.step };
     else coach = { title: 'Drag the Move stick', detail: 'The Up/down stick lifts and lowers. Grip closes the fingers.', step: 'move' };
 
+    const statusLine2 = taskCompleted ? 'Thanks for driving.' : barTone === 'blocked' ? status.sub : null;
     return (
       <Tdm56Ctx.Provider value={api}>
         <div
@@ -495,47 +501,90 @@ function ConsoleInner({
           style={{ ['--tdm56-drive' as string]: 'var(--melt)', ['--tdm56-stop' as string]: '#d4221a', ['--tdm56-ok' as string]: '#1f9d6b' }}
         >
           <Tdm86Cockpit
+            fixed
             landscape={landscape}
             testId="tdm56-phone"
             bar={
-              <div className="shrink-0">
-                <div className="flex items-stretch gap-2">
-                  <div
-                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2.5 py-1 transition-colors ${
-                      barTone === 'drive'
-                        ? 'bg-[var(--tdm56-drive)] text-black'
-                        : barTone === 'blocked'
-                          ? 'bg-slag-soft text-ink ring-1 ring-slag'
-                          : 'bg-surface text-ink ring-1 ring-line'
-                    }`}
-                    aria-live="polite"
-                    data-testid="tdm56-clutch-status"
-                    data-state={barTone}
-                  >
-                    <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${barTone === 'drive' ? 'animate-pulse bg-black' : barTone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
-                    <div className="min-w-0">
-                      <div className="truncate text-[15px] font-semibold leading-tight">{taskCompleted ? 'Task finished' : status.title}</div>
-                      <div className="truncate text-[12px] leading-tight opacity-80">{taskCompleted ? 'Thanks for driving. The arm is free for the next person.' : status.sub}</div>
+              // fixed height, one line each: a status or error that comes and goes never moves anything
+              <div className="flex min-w-0 flex-1 items-stretch gap-1.5">
+                <div
+                  className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 transition-colors ${
+                    barTone === 'drive'
+                      ? 'bg-[var(--tdm56-drive)] text-black'
+                      : barTone === 'blocked'
+                        ? 'bg-slag-soft text-ink ring-1 ring-slag'
+                        : 'bg-surface text-ink ring-1 ring-line'
+                  }`}
+                  aria-live="polite"
+                  title={taskCompleted ? undefined : status.sub}
+                  data-testid="tdm56-clutch-status"
+                  data-state={barTone}
+                >
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${barTone === 'drive' ? 'animate-pulse bg-black' : barTone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <div className="truncate text-[15px] font-semibold">{taskCompleted ? 'Task finished' : status.title}</div>
+                    <div className="truncate text-[12px] opacity-80">
+                      {statusLine2 ?? (
+                        <>
+                          Task {taskId} · <PhoneSessionWord />
+                        </>
+                      )}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={pressStop}
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      pressStop();
-                    }}
-                    className="h-12 shrink-0 rounded-sm border-2 border-red-900/30 bg-[var(--tdm56-stop)] px-5 text-xl font-black tracking-wide text-white shadow-[0_3px_0_#7f1410] active:translate-y-0.5 active:shadow-none"
-                    aria-label="Stop the robot"
-                    data-testid="tdm56-stop"
-                  >
-                    STOP
-                  </button>
                 </div>
+                <LatencyBadge
+                  compact
+                  className="shrink-0"
+                  videoMs={feed?.worstLatencyMs}
+                  videoStale={feed ? feed.stale && (feed.state === 'live' || feed.state === 'fallback') : false}
+                  videoDown={feed && ['denied', 'error', 'closed'].includes(feed.state) ? feed.state : undefined}
+                  rttMs={link.ackRttMs}
+                  cmdHz={link.cmdHz}
+                  driving={ui.engaged}
+                />
               </div>
+            }
+            stop={
+              <button
+                type="button"
+                onClick={pressStop}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  pressStop();
+                }}
+                className="h-full min-h-11 shrink-0 rounded-sm border-2 border-red-900/30 bg-[var(--tdm56-stop)] px-4 text-lg font-black tracking-wide text-white shadow-[0_3px_0_#7f1410] active:translate-y-0.5 active:shadow-none"
+                aria-label="Stop the robot"
+                data-testid="tdm56-stop"
+              >
+                STOP
+              </button>
+            }
+            tools={
+              <>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new Event(TDM59_OPEN_HELP))}
+                  className="h-full w-11 shrink-0 rounded-sm bg-surface text-[18px] font-bold text-ink ring-1 ring-line"
+                  aria-label="How to drive"
+                  data-testid="tdm59-help"
+                >
+                  ?
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetails(true)}
+                  className="h-full w-11 shrink-0 rounded-sm bg-surface text-[18px] font-bold leading-none text-ink ring-1 ring-line"
+                  aria-label="Details and settings"
+                  aria-expanded={details}
+                  data-testid="tdm56-details-open"
+                >
+                  ⋯
+                </button>
+              </>
             }
             coach={
               <Tdm86Coach
+                dense
                 tag={coach.tag}
                 title={coach.title}
                 detail={coach.detail}
@@ -552,12 +601,17 @@ function ConsoleInner({
               />
             }
             action={
-              // reserved: the recording row keeps its height; its confirm step or an error is drawn over the view
-              !dev || recordingSlot ? <ReservedSlot height={62} testId="tdm56-action-slot">{recordingSlot}</ReservedSlot> : undefined
+              // the recording bar: one row, fixed height. Its confirm step / error float above it over the view.
+              // Room on the right for more session buttons (Exit, Reset arm) passed in with the slot.
+              !dev || recordingSlot ? (
+                <div className="flex h-full min-w-0 items-stretch gap-1.5 [&>*]:shrink-0 [&>section]:shrink" data-testid="tdm56-action-slot">
+                  {recordingSlot}
+                </div>
+              ) : undefined
             }
             view={
               <div
-                className={`relative h-full rounded-md outline-offset-2 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
+                className={`relative h-full overflow-hidden rounded-md outline-offset-2 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
                 data-testid="tdm56-feed-frame"
               >
                 <ViewerToasts
@@ -579,12 +633,12 @@ function ConsoleInner({
                     }}
                   />
                 ) : dev ? (
-                  <CameraFeed getGrant={getGrant} onHealth={onHealth} />
+                  <CameraFeed getGrant={getGrant} onHealth={onHealth} layout="fill" />
                 ) : (
                   <TaskSimCameras
                     taskId={taskId}
                     onHealth={onHealth}
-                    fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} />}
+                    fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} layout="fill" />}
                     phone={{
                       single: view,
                       spec: PHONE_SPEC,
@@ -604,7 +658,7 @@ function ConsoleInner({
               </div>
             }
             left={<Tdm86ZoneStick label="Move" hint="forward, back, left, right" onChange={drive.sticks.left} testId="tdm56-stick-move" />}
-            center={<Tdm86GripButton drive={drive} state={hud.grip} testId="tdm56-grip-toggle" />}
+            center={<Tdm86GripButton drive={drive} state={hud.grip} testId="tdm56-grip-toggle" className="h-[min(112px,100%)]" />}
             right={
               <Tdm86ZoneStick
                 axis={drive.settings.rotation ? 'xy' : 'y'}
@@ -615,15 +669,37 @@ function ConsoleInner({
               />
             }
           />
-          {/* below the cockpit: the details a judge never needs mid-drive */}
-          <div className="mt-4 flex flex-col gap-4 text-sm">
-            {(dev || canDrive) && controlSlot}
-            {dev && (
-              <p className="rounded-md bg-amber-100 px-3 py-1.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200" data-testid="tdm56-dev">
-                Direct link: <code className="text-xs">{dev.streamUrl}</code>
-              </p>
-            )}
-            {asidePanels}
+          {/* the details a judge never needs mid-drive: a sheet over the cockpit behind the "⋯" button. Always
+              mounted (hidden when shut): TDM-59's telemetry reads the link / cmd-rate rows from it. */}
+          <div
+            className={details ? 'fixed inset-0 z-[45] flex flex-col bg-black/55' : 'hidden'}
+            onClick={() => setDetails(false)}
+            data-testid="tdm56-details"
+            data-open={details}
+          >
+            <div
+              role="dialog"
+              aria-label="Details and settings"
+              className="mt-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-md bg-ground px-3 pt-2 ring-1 ring-line-strong"
+              style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 z-10 -mx-3 mb-2 flex items-center justify-between bg-ground px-3 py-1">
+                <span className="text-[15px] font-semibold">Details and settings</span>
+                <button type="button" onClick={() => setDetails(false)} className="h-11 rounded-sm px-4 text-[15px] font-semibold ring-1 ring-line" data-testid="tdm56-details-close">
+                  Done
+                </button>
+              </div>
+              <div className="flex flex-col gap-4 text-sm">
+                {(dev || canDrive) && controlSlot}
+                {dev && (
+                  <p className="rounded-md bg-amber-100 px-3 py-1.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200" data-testid="tdm56-dev">
+                    Direct link: <code className="break-all text-xs">{dev.streamUrl}</code>
+                  </p>
+                )}
+                {asidePanels}
+              </div>
+            </div>
           </div>
           {feed && (
             <span className="sr-only" data-testid="tdm56-feed-health">
@@ -738,6 +814,12 @@ function ConsoleInner({
 }
 
 // ------------------------------------------------------------------ bits
+
+/** TDM-86 phone top bar: where the session is (TDM-59's five states) as one word. */
+function PhoneSessionWord() {
+  const t = useConsoleTelemetry();
+  return <span data-testid="tdm56-session-word">{sessionStateLabel(t.session)}</span>;
+}
 
 function clutchStatus(ui: Tdm106DriveUi, touch: boolean): { tone: 'drive' | 'blocked' | 'idle'; title: string; sub: string } {
   if (ui.engaged)

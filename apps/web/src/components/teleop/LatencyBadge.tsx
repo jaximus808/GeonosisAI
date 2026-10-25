@@ -34,9 +34,11 @@ export interface LatencyBadgeProps {
   /** Label the numbers as simulated (practice mode). */
   simulated?: boolean;
   className?: string;
+  /** Phone cockpit: a 44 px chip (dot + the number), its details open in a sheet under the top bar. */
+  compact?: boolean;
 }
 
-export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, driving, pauseAtMs = 400, simulated, className = '' }: LatencyBadgeProps) {
+export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, driving, pauseAtMs = 400, simulated, className = '', compact }: LatencyBadgeProps) {
   const [open, setOpen] = useState(false);
   const [net, setNet] = useState<NetInfo | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -66,15 +68,19 @@ export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, dri
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={pid}
-        className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm ring-1 ${st.chip}`}
+        aria-label={compact ? `${a.headline}, ${lead}. Connection details` : undefined}
+        className={`flex shrink-0 items-center whitespace-nowrap ring-1 ${st.chip} ${
+          compact ? 'h-full min-h-11 gap-1.5 rounded-sm px-2.5 text-[13px]' : 'gap-2 rounded-full px-3 py-1.5 text-sm'
+        }`}
         data-testid="tdm59-latency"
         data-grade={a.grade}
       >
-        <span className={`inline-block h-2.5 w-2.5 rounded-full ${st.dot} ${a.grade === 'bad' ? 'animate-pulse' : ''}`} />
-        <span className="font-semibold">{a.headline}</span>
-        <span className="tabular-nums opacity-75">{lead}</span>
+        <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${st.dot} ${a.grade === 'bad' ? 'animate-pulse' : ''}`} />
+        {!compact && <span className="font-semibold">{a.headline}</span>}
+        {/* fixed width for the number: 89 ms -> 120 ms never nudges the chips beside it */}
+        <span className={`tabular-nums ${compact ? 'inline-block min-w-[3.25rem] text-left font-semibold' : 'opacity-75'}`}>{lead}</span>
       </button>
-      {a.grade === 'bad' && !open && (
+      {a.grade === 'bad' && !open && !compact && (
         <p className="min-w-0 max-w-xs truncate text-xs font-medium text-red-700 dark:text-red-300" role="status" title={a.tips[0]} data-testid="tdm59-latency-tip">
           {a.tips[0]}
         </p>
@@ -82,7 +88,7 @@ export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, dri
       {open && (
         <div
           id={pid}
-          className="absolute left-0 top-full z-40 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl bg-white p-4 text-sm shadow-xl ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-700"
+          className={`${compact ? 'fixed inset-x-2 top-[calc(env(safe-area-inset-top)+3.75rem)] z-50' : 'absolute left-0 top-full z-40 mt-2 w-[min(22rem,calc(100vw-2rem))]'} rounded-2xl bg-white p-4 text-sm shadow-xl ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-700`}
           role="dialog"
           aria-label="Connection details"
         >

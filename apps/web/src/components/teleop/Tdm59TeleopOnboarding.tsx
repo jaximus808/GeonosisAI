@@ -22,10 +22,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { InstructionsOverlay, TDM59_SHIELDED_KEY, type OverlayKind } from '@/components/teleop/InstructionsOverlay';
 import { LatencyBadge } from '@/components/teleop/LatencyBadge';
 import { SessionStateBar } from '@/components/teleop/SessionStateBar';
+import { useTdm86Phone } from '@/components/teleop/Tdm86Phone';
 import { useRows } from '@/lib/spacetime/hooks';
 import { cleanInstructions } from '@/lib/marketplace/tdm61';
 import { introSeen, markIntroSeen, useTdm59Readiness } from '@/lib/teleop/tdm59Readiness';
 import { useConsoleTelemetry } from '@/lib/teleop/tdm59Telemetry';
+
+/** The phone cockpit's "?" button fires this on window: open the "How to drive" walkthrough. */
+export const TDM59_OPEN_HELP = 'tdm59:open-help';
 
 /** Swallow keydown on window (capture) while `active`. Must be registered before the console's listener. */
 export function useTdm59KeyShield(active: boolean) {
@@ -69,8 +73,18 @@ export function Tdm59TeleopOnboarding({ taskId }: { taskId: string }) {
     setOpen(false);
   }, [kind]);
 
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener(TDM59_OPEN_HELP, show);
+    return () => window.removeEventListener(TDM59_OPEN_HELP, show);
+  }, []);
+
   const t = useConsoleTelemetry();
   const driving = t.clutch === 'drive';
+  // TDM-86: on a phone the console's full-screen cockpit carries the connection chip, the session
+  // state (one word in its top bar) and a "?" that opens this walkthrough; only the dialog lives here
+  const { phone } = useTdm86Phone();
+  if (phone) return <InstructionsOverlay open={open} onClose={close} kind={kind} taskText={taskText} />;
 
   return (
     <div className="mb-3 flex flex-col gap-2" data-testid="tdm59-onboarding">

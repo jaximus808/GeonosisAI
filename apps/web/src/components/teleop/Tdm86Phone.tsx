@@ -54,6 +54,9 @@ export function Tdm86Cockpit({
   center,
   right,
   testId,
+  stop,
+  tools,
+  fixed,
 }: {
   landscape: boolean;
   bar: ReactNode;
@@ -64,12 +67,91 @@ export function Tdm86Cockpit({
   center: ReactNode;
   right: ReactNode;
   testId: string;
+  /** fixed only: the STOP button (top right in portrait, top of the left column in landscape). */
+  stop?: ReactNode;
+  /** fixed only: small 44 px buttons beside the coach line ("?", details). */
+  tools?: ReactNode;
+  /** Teleop: a full-screen console over the page (100dvh, no page scroll, safe-area padded). */
+  fixed?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // one tap from the QR / task link should land on the controls, not on the page title
-    ref.current?.scrollIntoView({ block: 'start' });
-  }, [landscape]);
+    if (!fixed) ref.current?.scrollIntoView({ block: 'start' });
+  }, [landscape, fixed]);
+  useEffect(() => {
+    if (!fixed) return;
+    // the console covers the page: nothing behind it may scroll (iOS rubber-band included)
+    const h = document.documentElement;
+    const b = document.body;
+    const prev = [h.style.overflow, b.style.overflow, h.style.overscrollBehavior];
+    h.style.overflow = 'hidden';
+    b.style.overflow = 'hidden';
+    h.style.overscrollBehavior = 'none';
+    window.scrollTo(0, 0);
+    return () => {
+      [h.style.overflow, b.style.overflow, h.style.overscrollBehavior] = prev;
+    };
+  }, [fixed]);
+  if (fixed) {
+    // 100dvh: the visible screen, so the sticks are never under Safari's URL bar. touch-none: a swipe
+    // anywhere on the console never scrolls or zooms the page (the sticks and buttons still get it).
+    const root = 'fixed inset-x-0 top-0 z-40 h-[100dvh] touch-none overscroll-none bg-ground';
+    const pad = {
+      paddingTop: 'max(0.375rem, env(safe-area-inset-top))',
+      paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))',
+      paddingLeft: 'max(0.375rem, env(safe-area-inset-left))',
+      paddingRight: 'max(0.375rem, env(safe-area-inset-right))',
+    };
+    if (landscape) {
+      return (
+        <div
+          ref={ref}
+          className={`${root} grid grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)_minmax(0,1fr)] gap-1.5`}
+          style={pad}
+          data-testid={testId}
+          data-layout="landscape"
+        >
+          <div className="flex min-h-0 flex-col gap-1.5">
+            <div className="flex h-12 shrink-0 [&>*]:flex-1">{stop}</div>
+            <div className="flex min-h-0 flex-1 flex-col">{left}</div>
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-col gap-1.5">
+            <div className="flex h-11 shrink-0 items-stretch gap-1.5">
+              {bar}
+              {tools}
+            </div>
+            <div className="h-9 shrink-0">{coach}</div>
+            <div className="relative min-h-0 flex-1">{view}</div>
+            {action && <div className="relative h-14 shrink-0">{action}</div>}
+          </div>
+          <div className="flex min-h-0 flex-col gap-1.5">
+            <div className="h-[min(112px,36%)] shrink-0">{center}</div>
+            <div className="flex min-h-0 flex-1 flex-col">{right}</div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div ref={ref} className={`${root} flex flex-col gap-1.5`} style={pad} data-testid={testId} data-layout="portrait">
+        <div className="flex h-12 shrink-0 items-stretch gap-1.5">
+          {bar}
+          {stop}
+        </div>
+        <div className="flex h-11 shrink-0 items-stretch gap-1.5">
+          <div className="min-w-0 flex-1">{coach}</div>
+          {tools}
+        </div>
+        <div className="relative min-h-0 flex-1">{view}</div>
+        {action && <div className="relative h-14 shrink-0">{action}</div>}
+        <div className="grid h-[min(25dvh,180px)] min-h-[136px] shrink-0 grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] gap-1.5">
+          {left}
+          <div className="flex min-h-0 flex-col justify-center">{center}</div>
+          {right}
+        </div>
+      </div>
+    );
+  }
   if (landscape) {
     return (
       <div
@@ -226,12 +308,12 @@ function Chevrons({ axis }: { axis: 'xy' | 'y' }) {
 }
 
 /** The one grip button: says what a tap will do, and what the gripper is doing now. */
-export function Tdm86GripButton({ drive, state, testId }: { drive: Tdm106Drive; state: { text: string; tone: Tdm86GripTone }; testId: string }) {
+export function Tdm86GripButton({ drive, state, testId, className = 'h-[112px]' }: { drive: Tdm106Drive; state: { text: string; tone: Tdm86GripTone }; testId: string; className?: string }) {
   const open = drive.gripper > 0.5;
   return (
     <button
       type="button"
-      className={`flex h-[112px] w-full touch-none select-none flex-col items-center justify-center gap-1 rounded-sm border-b-4 px-1 text-center transition-colors ${
+      className={`flex ${className} w-full touch-none select-none flex-col items-center justify-center gap-1 rounded-sm border-b-4 px-1 text-center transition-colors ${
         open ? 'border-line-strong bg-surface text-ink ring-1 ring-line-strong' : 'border-melt bg-melt text-on-melt'
       }`}
       onClick={drive.toggleGripper}
@@ -295,7 +377,7 @@ export function Tdm86ViewReadouts({ grip, height, extra, testPrefix }: { grip: {
 }
 
 /** The one-line coach: step tag, what to do now, and an optional button on the right. */
-export function Tdm86Coach({ tag, title, detail, tone = 'plain', action, testId, data }: {
+export function Tdm86Coach({ tag, title, detail, tone = 'plain', action, testId, data, dense }: {
   tag?: string;
   title: string;
   detail?: string;
@@ -303,8 +385,30 @@ export function Tdm86Coach({ tag, title, detail, tone = 'plain', action, testId,
   action?: ReactNode;
   testId: string;
   data?: Record<string, string | undefined>;
+  /** Teleop cockpit: fills its fixed-height row, title + one truncated detail line (the "?" has the rest). */
+  dense?: boolean;
 }) {
   const dataAttrs = Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, v]));
+  if (dense) {
+    return (
+      <div
+        className={`flex h-full min-w-0 items-center gap-2 overflow-hidden rounded-sm px-2 ring-1 ${
+          tone === 'done' ? 'bg-arc-soft ring-arc' : tone === 'warn' ? 'bg-ochre-soft ring-ochre' : 'bg-surface ring-line'
+        }`}
+        aria-live="polite"
+        title={detail ? `${title}. ${detail}` : title}
+        data-testid={testId}
+        {...dataAttrs}
+      >
+        {tag && <span className="gx-tag shrink-0 tabular-nums">{tag}</span>}
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="truncate text-[14px] font-semibold text-ink">{title}</div>
+          {detail && <div className="truncate text-[12px] text-ink-muted [@media(max-height:500px)]:hidden">{detail}</div>}
+        </div>
+        {action}
+      </div>
+    );
+  }
   return (
     // fixed height (title + two lines of detail): a longer or shorter hint never resizes the 3D view below
     <div

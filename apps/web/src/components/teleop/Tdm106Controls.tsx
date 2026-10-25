@@ -92,7 +92,8 @@ export function Tdm106KeyLegend({ drive, hint = [], className = '', testPrefix =
         )}
         {!settings.directKeys && <Cap code="Space" cap="Space" label="hold to drive" held={h('Space')} hint={false} wide />}
       </div>
-      <p className="mt-2 text-[11px] text-ink-muted" data-testid={`${testPrefix}-gamepad`}>
+      {/* two lines reserved: connecting a gamepad changes the text, never the legend's height */}
+      <p className="mt-2 line-clamp-2 h-[3em] text-[11px] leading-[1.5] text-ink-muted" data-testid={`${testPrefix}-gamepad`}>
         {ui.pad
           ? `Gamepad: hold RT to drive, left stick moves, right stick up/down${rot ? ' and turn' : ''}, A grip, B stop.`
           : 'Gamepad works too: press any button on one to connect it.'}
@@ -158,7 +159,8 @@ export function Tdm106OnScreenControls({ drive, stickSize = 112, testPrefix = 't
   );
 }
 
-export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix = 'tdm106' }: { drive: Tdm106Drive; snapAvailable: boolean; snapNote?: string; testPrefix?: string }) {
+/** `hideSnap`: a real robot. The snap-to-grasp toggle is not shown at all (it needs a sim scene's object pose). */
+export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, hideSnap = false, testPrefix = 'tdm106' }: { drive: Tdm106Drive; snapAvailable: boolean; snapNote?: string; hideSnap?: boolean; testPrefix?: string }) {
   const { settings, set } = drive;
   return (
     <div className="space-y-3 text-sm" data-testid="tdm106-settings">
@@ -208,6 +210,7 @@ export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix
         note="Off: tap G to open or close. On: the gripper stays closed only while you hold G."
         testId="tdm106-griphold"
       />
+      {!hideSnap && (
       <Toggle
         checked={snapAvailable && settings.snap}
         disabled={!snapAvailable}
@@ -216,6 +219,7 @@ export function Tdm106DriveSettings({ drive, snapAvailable, snapNote, testPrefix
         note={snapAvailable ? (snapNote ?? 'Near the object, the hand is pulled toward its centre as you move, so it lines up by itself.') : 'Needs the object position, which only a simulated scene has.'}
         testId="tdm106-snap"
       />
+      )}
     </div>
   );
 }

@@ -19,12 +19,15 @@ import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { FeedHealth } from '@/components/teleop/CameraFeed';
 import { Tdm86Pip } from '@/components/teleop/Tdm86Phone';
+import { PausedView } from '@/components/teleop/TeleopOverlay';
 import { useContributor } from '@/lib/contributor/hooks';
 import { SIM_DEFAULT_SCENE, type SceneSpecV1 } from '@/lib/robotview/scene';
 import { classifyRobot } from '@/lib/robotview/sources';
 import type { RobotLiveState } from '@/lib/robotview/types';
 import { useRobotLive, type RobotLiveResult } from '@/lib/robotview/useRobotLive';
+import { useRobotScene } from '@/lib/robotview/useRobotScene';
 import { useRows } from '@/lib/spacetime/hooks';
+import { paneLayout, twinPerf, type TwinPerf, type ViewQuality } from '@/lib/teleop/viewQuality';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
@@ -63,6 +66,12 @@ export interface SimCamerasProps {
   overlay?: ReactNode;
   /** TDM-86: a small second view in the corner of the single view (e.g. Side, to judge the hand's height). */
   pip?: { camera: string; label: string; onTap?: () => void } | null;
+  /** Teleop "Quality" (lib/teleop/viewQuality.ts). Omit: every pane at full quality (Sharp). */
+  quality?: ViewQuality;
+  /** The user holds control: in Smooth, only the big pane and one small pane draw (the others pause). */
+  driving?: boolean;
+  /** Drawn at the right of the footer line (e.g. the Quality toggle). */
+  toolbar?: ReactNode;
 }
 
 /** Frames per second of the page's render loop (every canvas here draws on it), over the last second. */
@@ -93,7 +102,7 @@ declare global {
   }
 }
 
-function Pane({ id, state, spec, primary, stale, className, ghost, caption = true }: {
+function Pane({ id, state, spec, primary, stale, className, ghost, caption = true, perf }: {
   id: string;
   state: RobotLiveState | null;
   spec: SceneSpecV1;
@@ -103,6 +112,7 @@ function Pane({ id, state, spec, primary, stale, className, ghost, caption = tru
   /** TDM-86: the ghost to draw instead of the policy's chunk preview (null = none). */
   ghost?: number[][] | null;
   caption?: boolean;
+  perf?: TwinPerf | null;
 }) {
   const name = cameraName(id);
   return (
@@ -120,6 +130,7 @@ function Pane({ id, state, spec, primary, stale, className, ghost, caption = tru
           controls={false}
           ghost={ghost !== undefined ? (ghost ?? undefined) : primary ? state?.chunk_preview : undefined}
           className="h-full w-full"
+          perf={perf}
         />
       </div>
       {/* steel wash at the edges: reads as "not a real camera" without hiding the scene */}
@@ -132,10 +143,13 @@ function Pane({ id, state, spec, primary, stale, className, ghost, caption = tru
   );
 }
 
-export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDetail, robotName, framed = true, className, single, ghost, overlay, pip }: SimCamerasProps) {
+export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDetail, robotName, framed = true, className, single, ghost, overlay, pip, quality, driving = false, toolbar }: SimCamerasProps) {
   const scene = spec ?? SIM_DEFAULT_SCENE;
   const ids = useMemo(() => (cameras && cameras.length ? [...cameras] : [...SIM_CAMERA_IDS]), [cameras]);
   const [first, ...rest] = ids;
+  // Smooth while driving: the big pane + one live small pane; the others are unmounted (WebGL context freed)
+  const [inset, setInset] = useState<string | null>(null);
+  const layout = paneLayout(ids, { quality, driving, inset });
   const fps = useRenderFps();
   const fpsRef = useRef(fps);
   fpsRef.current = fps;
@@ -194,7 +208,7 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
       {framed && <div aria-hidden className="absolute inset-x-0 top-0 h-1 rounded-t-lg" style={{ backgroundImage: SIM_TAPE }} />}
       <div className={`${framed ? 'mt-1' : ''} grid grid-cols-2 gap-1.5 @2xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @2xl:grid-rows-2`}>
         <div className="relative col-span-2 aspect-[4/3] @2xl:col-span-1 @2xl:row-span-2">
-          <Pane id={first} state={state} spec={scene} primary stale={stale} />
+          <Pane id={first} state={state} spec={scene} primary stale={stale} perf={twinPerf(quality, 'main')} />
           {framed && (
           <span
             className="gx-tag gx-tag-sim absolute left-2 top-2 shadow-[inset_0_0_0_1px_var(--steel)]"
@@ -219,16 +233,22 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
         </div>
         {rest.map((id) => (
           <div key={id} className="relative aspect-[4/3] @2xl:aspect-auto">
-            <Pane id={id} state={state} spec={scene} primary={false} stale={stale} />
+            {layout.paused.includes(id) ? (
+              <PausedView name={cameraName(id)} onShow={() => setInset(id)} testId={`simcam-paused-${id}`} />
+            ) : (
+              <Pane id={id} state={state} spec={scene} primary={false} stale={stale} perf={twinPerf(quality, 'inset')} />
+            )}
           </div>
         ))}
       </div>
-      <p className="mt-1.5 flex flex-wrap items-center gap-x-3 px-0.5 text-[11px] text-ink-muted font-mono tabular-nums">
-        <span>Drawn from the sim robot&apos;s joint state, not a video feed.</span>
-        <span className="ml-auto">
+      {/* one line, always: it sits between the views and the control dock */}
+      <p className="mt-1.5 flex h-5 flex-nowrap items-center gap-x-3 overflow-hidden whitespace-nowrap px-0.5 text-[11px] text-ink-muted font-mono tabular-nums">
+        <span className="min-w-0 truncate">Drawn from the sim robot&apos;s joint state, not a video feed.</span>
+        <span className="ml-auto shrink-0">
           {hz != null && `${hz.toFixed(0)} Hz state, `}
           {fps} fps
         </span>
+        {toolbar}
       </p>
     </section>
   );
@@ -259,15 +279,51 @@ export interface Tdm86SimViewOpts {
   onState?: (s: RobotLiveState | null) => void;
 }
 
-function SimTaskPane({ taskId, robotId, robotName, onHealth, phone }: {
+/** Desktop teleop: the Quality choice, whether the user holds control, and the footer toolbar. */
+export interface DeskSimViewOpts {
+  quality?: ViewQuality;
+  driving?: boolean;
+  toolbar?: ReactNode;
+}
+
+function SimTaskPane({ taskId, robotId, robotName, onHealth, phone, desk }: {
   taskId: bigint;
   robotId: number;
   robotName: string;
   onHealth?: (h: FeedHealth) => void;
   phone?: Tdm86SimViewOpts;
+  desk?: DeskSimViewOpts;
 }) {
   const { identity } = useContributor();
   const live = useRobotLive(robotId, { taskId, identity });
+  // TDM-114: the scene the robot has LOADED, the same one RobotView's twin draws (else the built-in default)
+  const robotScene = useRobotScene(robotId);
+  return <SimLivePane live={live} robotName={robotName} onHealth={onHealth} phone={phone} desk={desk} spec={robotScene.spec} />;
+}
+
+/** The robot's loaded scene, keeping any extra cameras the caller added (e.g. the phone's driver view). */
+function withCameras(robotSpec: SceneSpecV1 | null | undefined, callerSpec: SceneSpecV1 | null | undefined): SceneSpecV1 | null | undefined {
+  if (!robotSpec) return callerSpec;
+  const have = new Set((robotSpec.cameras ?? []).map((c) => c.id));
+  const extra = (callerSpec?.cameras ?? []).filter((c) => !have.has(c.id) && !(SIM_DEFAULT_SCENE.cameras ?? []).some((d) => d.id === c.id));
+  return extra.length ? { ...robotSpec, cameras: [...(robotSpec.cameras ?? []), ...extra] } : robotSpec;
+}
+
+/** Dev only: the teleop pane on the recorded sim fixture (no robot, no stream). /teleop/<id>?dev_url=fixture */
+export function FixtureSimCameras({ onHealth, phone, desk }: { onHealth?: (h: FeedHealth) => void; phone?: Tdm86SimViewOpts; desk?: DeskSimViewOpts }) {
+  const live = useRobotLive(null, { fixture: true });
+  return <SimLivePane live={live} robotName="fixture" onHealth={onHealth} phone={phone} desk={desk} />;
+}
+
+function SimLivePane({ live, robotName, onHealth, phone, desk, spec }: {
+  live: RobotLiveResult;
+  /** The robot's loaded scene (null: the built-in default). */
+  spec?: SceneSpecV1 | null;
+  robotName: string;
+  onHealth?: (h: FeedHealth) => void;
+  phone?: Tdm86SimViewOpts;
+  desk?: DeskSimViewOpts;
+}) {
   const health = simFeedHealth(live);
   const key = `${health.state}|${health.stale}|${health.worstLatencyMs == null ? '' : Math.round(health.worstLatencyMs / 25)}`;
   const onHealthRef = useRef(onHealth);
@@ -288,26 +344,40 @@ function SimTaskPane({ taskId, robotId, robotName, onHealth, phone }: {
         waitingDetail={live.error}
         robotName={robotName}
         single={phone.single}
-        spec={phone.spec}
+        spec={withCameras(spec, phone.spec)}
         ghost={phone.ghost}
         overlay={phone.overlay}
         pip={phone.pip}
       />
     );
   }
-  return <SimCameras state={live.state} stale={live.stale} hz={live.hz} waitingDetail={live.error} robotName={robotName} />;
+  return (
+    <SimCameras
+      state={live.state}
+      stale={live.stale}
+      hz={live.hz}
+      waitingDetail={live.error}
+      robotName={robotName}
+      spec={spec}
+      quality={desk?.quality}
+      driving={desk?.driving}
+      toolbar={desk?.toolbar}
+    />
+  );
 }
 
 /**
  * The teleop video pane: for a simulated robot, the three rendered views (no video stream needed,
  * and its health comes from the state feed); for any other robot, `fallback` (the real camera feed).
  */
-export function TaskSimCameras({ taskId, onHealth, fallback, phone }: {
+export function TaskSimCameras({ taskId, onHealth, fallback, phone, desk }: {
   taskId: bigint | number | string;
   onHealth?: (h: FeedHealth) => void;
   fallback: ReactNode;
   /** TDM-86 phone cockpit: one big view (see Tdm86SimViewOpts). */
   phone?: Tdm86SimViewOpts;
+  /** Desktop: Quality / holds-control / toolbar (see DeskSimViewOpts). */
+  desk?: DeskSimViewOpts;
 }) {
   const id = useMemo(() => {
     try {
@@ -326,7 +396,7 @@ export function TaskSimCameras({ taskId, onHealth, fallback, phone }: {
     return <div className={`grid place-items-center rounded-lg bg-zinc-900 text-sm text-zinc-400 ${phone?.single ? 'h-full' : 'aspect-[4/3]'}`}>Finding this task&apos;s robot…</div>;
   }
   if (!robot || classifyRobot(robot).kind !== 'sim') return <>{fallback}</>;
-  return <SimTaskPane taskId={id} robotId={Number(robot.id)} robotName={robot.name} onHealth={onHealth} phone={phone} />;
+  return <SimTaskPane taskId={id} robotId={Number(robot.id)} robotName={robot.name} onHealth={onHealth} phone={phone} desk={desk} />;
 }
 
 export default SimCameras;
@@ -335,6 +405,22 @@ export default SimCameras;
  * Ready-made filler for RobotView's `simCameras` slot: reuses RobotView's own state feed (no second socket).
  *   <RobotView simCameras={simCamerasSlot} />
  */
-export function simCamerasSlot({ live, compact }: { live: RobotLiveResult; robotId: number; compact: boolean }): ReactNode {
-  return <SimCameras state={live.state} stale={live.stale} hz={live.hz} waitingDetail={live.error} framed={false} cameras={compact ? ['top', 'wrist'] : undefined} />;
+export function simCamerasSlot({ live, robotId, compact }: { live: RobotLiveResult; robotId: number; compact: boolean }): ReactNode {
+  return <SlotSimCameras live={live} robotId={robotId} compact={compact} />;
+}
+
+/** TDM-114: the slot's panes draw the scene the robot has loaded, like RobotView's twin next to them. */
+function SlotSimCameras({ live, robotId, compact }: { live: RobotLiveResult; robotId: number; compact: boolean }) {
+  const robotScene = useRobotScene(robotId);
+  return (
+    <SimCameras
+      state={live.state}
+      stale={live.stale}
+      hz={live.hz}
+      waitingDetail={live.error}
+      framed={false}
+      spec={robotScene.spec}
+      cameras={compact ? ['top', 'wrist'] : undefined}
+    />
+  );
 }

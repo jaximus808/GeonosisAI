@@ -27,6 +27,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { SimTag } from '@/components/brand';
 import { InstructionsOverlay } from '@/components/teleop/InstructionsOverlay';
 import { LatencyBadge } from '@/components/teleop/LatencyBadge';
+import { OneLine, PausedView, ViewQualityToggle, ViewerToasts, type ViewerToast } from '@/components/teleop/TeleopOverlay';
+import { paneLayout, twinPerf, type TwinPerf } from '@/lib/teleop/viewQuality';
+import { useViewQuality } from '@/lib/teleop/useViewQuality';
 import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
 import { Tdm86Coach, Tdm86Cockpit, Tdm86GripButton, Tdm86Pip, Tdm86ViewReadouts, Tdm86ViewTabs, Tdm86ZoneStick, useTdm86Phone } from '@/components/teleop/Tdm86Phone';
 import { tdm86GripState, tdm86HeightText, tdm86TouchWords, type Tdm86GripTone } from '@/lib/teleop/tdm86Phone';
@@ -346,6 +349,32 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
     return { tone: 'idle' as const, title: 'Holding still', sub: touch ? 'Drag a stick to move the hand.' : 'Hold W A S D to move, Q / E for up and down, tap G to grip.' };
   }, [ui, touch]);
 
+  // ---- Quality: Smooth / Sharp. Practice is always "driving": in Smooth the driver's view and ONE small view draw.
+  const [quality, setQuality] = useViewQuality();
+  const [inset, setInset] = useState<string | null>(null);
+  const panes = paneLayout([DRIVER_CAM.id, 'side', 'wrist'], { quality, driving: true, inset });
+  const qualityToggle = <ViewQualityToggle value={quality} onChange={setQuality} testPrefix="tdm59" className="text-xs text-ink-muted" />;
+  // messages drawn over the views (never above or below them, so the views and the controls never move)
+  const stopToast: ViewerToast | null = stopped
+    ? {
+        id: 'stop',
+        tone: 'bad',
+        role: 'alert',
+        testId: 'tdm59-stop-alert',
+        title: phone ? 'Stopped. The real robot stays locked like this until you resume.' : 'Stopped. On the real robot it stays locked like this until you resume.',
+        action: (
+          <button type="button" className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50" onClick={resume} data-testid="tdm59-practice-resume">
+            Resume
+          </button>
+        ),
+      }
+    : null;
+  const clampChips = [
+    hud.clamps.includes('clamped_workspace') && 'Workspace edge',
+    hud.clamps.includes('table') && 'Table',
+    hud.clamps.includes('reach') && 'Out of reach',
+  ].filter(Boolean) as string[];
+
   const sceneLabel =
     source.from === 'ticket'
       ? `Ticket ${source.ticketId}'s scene${source.revision ? ` (rev ${source.revision})` : ''}`
@@ -499,14 +528,6 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
                   STOP
                 </button>
               </div>
-              {stopped && (
-                <div className="mt-1.5 flex items-center gap-2 rounded-sm bg-red-600 px-2.5 py-1.5 text-sm text-white" role="alert">
-                  <span className="flex-1 font-semibold">Stopped. The real robot stays locked like this until you resume.</span>
-                  <button type="button" className="rounded-sm bg-white px-4 py-2 font-semibold text-red-700" onClick={resume} data-testid="tdm59-practice-resume">
-                    Resume
-                  </button>
-                </div>
-              )}
             </div>
           }
           coach={
@@ -543,6 +564,7 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
                 <PracticeTwin sim={sim} spec={spec} camera={view === 'side' ? DRIVER_CAM.id : 'side'} lagMs={lag} ghost />
               </Tdm86Pip>
               <Tdm86ViewReadouts grip={phoneRead.grip} height={phoneRead.height} testPrefix="tdm59" />
+              <ViewerToasts at="bottom" items={stopToast ? [stopToast] : []} />
               {toast && (
                 <div
                   className={`pointer-events-none absolute inset-x-0 top-12 z-20 mx-auto w-fit max-w-[92%] rounded-sm px-3 py-2 text-[14px] font-semibold shadow-overlay ${toast.tone === 'good' ? 'bg-arc text-on-arc' : 'bg-zinc-900/90 text-white'}`}
@@ -611,9 +633,9 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
             data-state={status.tone}
           >
             <span className={`inline-block h-3 w-3 shrink-0 rounded-full ${status.tone === 'drive' ? 'animate-pulse bg-on-melt' : status.tone === 'blocked' ? 'bg-red-600' : 'bg-zinc-400'}`} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate text-base font-semibold leading-tight sm:text-lg">{status.title}</div>
-              <div className="truncate text-xs opacity-80 sm:text-sm">{status.sub}</div>
+              <OneLine text={status.sub} className="text-xs opacity-80 sm:text-sm" />
             </div>
           </div>
           <button
@@ -630,19 +652,12 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
             STOP
           </button>
         </div>
-        {stopped && (
-          <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-red-600 px-3 py-2 text-sm text-white" role="alert">
-            <span className="font-semibold">Stopped. On the real robot it stays locked like this until you resume.</span>
-            <button type="button" className="rounded-md bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50" onClick={resume} data-testid="tdm59-practice-resume">
-              Resume
-            </button>
-          </div>
-        )}
       </div>
 
       {/* ---------------- coach: the one next thing to do */}
+      {/* fixed height, one line each: the next hint never resizes this box or moves the views below */}
       <div
-        className={`mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-sm px-4 py-3 ring-1 ${
+        className={`mb-3 flex h-[68px] flex-nowrap items-center gap-x-4 rounded-sm px-4 ring-1 ${
           coach?.kind === 'task' && coach.step === 'done'
             ? 'bg-arc-soft ring-arc'
             : 'bg-surface ring-line-strong'
@@ -652,19 +667,21 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
         data-step={coach?.kind === 'task' ? coach.step : lesson?.id}
       >
         {coach && (
-          <div className="flex min-w-0 grow basis-72 items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="gx-tag shrink-0 tabular-nums">
               {coach.kind === 'lesson' ? `Basics ${coach.n}/${BASICS.length}` : `Task ${Math.min(coach.n, 5)}/5`}
             </span>
-            <div className="min-w-0">
-              <div className="gx-heading leading-tight">{coach.title}</div>
-              <div className="text-[15px] leading-snug text-ink-muted">{coach.detail}</div>
+            <div className="min-w-0 flex-1">
+              <div className="gx-heading truncate leading-tight" title={coach.title}>
+                {coach.title}
+              </div>
+              <OneLine text={coach.detail} className="text-[15px] leading-snug text-ink-muted" testId="tdm59-coach-detail" />
             </div>
           </div>
         )}
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <div className="flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap text-sm">
           {coach?.kind === 'task' && (
-            <span className="gx-data text-ink-muted" data-testid="tdm106-task-time">
+            <span className="gx-data hidden text-ink-muted sm:inline" data-testid="tdm106-task-time">
               {taskDone && taskMs != null ? `Done in ${fmtTime(taskMs)}` : clock ? `Task time ${fmtTime(clock)}` : 'Clock starts when you move'}
               {bestMs != null && ` · best ${fmtTime(bestMs)}`}
             </span>
@@ -687,15 +704,23 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
           {/* ---------------- 3D views of the scene */}
           <div className={`relative rounded-xl p-1 transition-colors ${ui.engaged ? 'bg-melt' : 'bg-transparent'}`} data-testid="tdm59-practice-views">
             <div className="grid grid-cols-3 gap-1 sm:h-[min(46vh,460px)] sm:grid-rows-2">
-              <View label="Driver's view (from behind the robot)" lagMs={lag} className="col-span-3 aspect-[16/10] sm:col-span-2 sm:row-span-2 sm:aspect-auto">
-                <PracticeTwin sim={sim} spec={spec} camera={DRIVER_CAM.id} lagMs={lag} controls ghost />
+              <View
+                label="Driver's view (from behind the robot)"
+                lagMs={lag}
+                className="col-span-3 aspect-[16/10] sm:col-span-2 sm:row-span-2 sm:aspect-auto"
+                badges={[...clampChips, ...(hud.watchdog ? ['Watchdog hold'] : [])]}
+              >
+                <PracticeTwin sim={sim} spec={spec} camera={DRIVER_CAM.id} lagMs={lag} controls ghost perf={twinPerf(quality, 'main')} />
               </View>
-              <View label="Side" lagMs={lag} compact className="aspect-[4/3] sm:aspect-auto">
-                <PracticeTwin sim={sim} spec={spec} camera="side" lagMs={lag} ghost />
-              </View>
-              <View label="Wrist camera" lagMs={lag} compact className="aspect-[4/3] sm:aspect-auto">
-                <PracticeTwin sim={sim} spec={spec} camera="wrist" lagMs={lag} />
-              </View>
+              {(['side', 'wrist'] as const).map((id) => (
+                <View key={id} label={id === 'side' ? 'Side' : 'Wrist camera'} lagMs={lag} compact className="aspect-[4/3] sm:aspect-auto">
+                  {panes.paused.includes(id) ? (
+                    <PausedView name={id === 'side' ? 'Side' : 'Wrist camera'} onShow={() => setInset(id)} testId={`tdm59-paused-${id}`} />
+                  ) : (
+                    <PracticeTwin sim={sim} spec={spec} camera={id} lagMs={lag} ghost={id === 'side'} perf={twinPerf(quality, 'inset')} />
+                  )}
+                </View>
+              ))}
               <div className="flex flex-col justify-center gap-1 rounded-sm bg-surface-sunken px-2 py-1.5 text-[11px] leading-snug text-ink-muted sm:hidden">
                 <span>
                   <b className="text-arc">Blue ghost</b>: where the hand lands if you lower straight down.
@@ -711,6 +736,7 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
                 {toast.text}
               </div>
             )}
+            <ViewerToasts items={stopToast ? [stopToast] : []} />
           </div>
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -726,16 +752,14 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
               <button type="button" className="rounded-md px-2 py-1 text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400" onClick={() => setIntro(true)}>
                 How to drive
               </button>
+              {qualityToggle}
             </div>
-            <span className="text-xs tabular-nums text-zinc-500">
+            {/* one line: the safety chips (workspace edge, table...) are drawn over the driver's view instead */}
+            <span className="whitespace-nowrap text-xs tabular-nums text-zinc-500">
               <span className="hidden sm:inline">
                 <b className="text-arc">Blue ghost</b> = where the hand lands if you lower straight down ·{' '}
               </span>
               Hand {Math.round(hud.z * 100)} cm above the table
-              {hud.clamps.includes('clamped_workspace') && <Chip>Workspace edge</Chip>}
-              {hud.clamps.includes('table') && <Chip>Table</Chip>}
-              {hud.clamps.includes('reach') && <Chip>Out of reach</Chip>}
-              {hud.watchdog && <span className="ml-2 rounded bg-amber-500 px-1.5 py-0.5 font-semibold text-black">Watchdog hold</span>}
             </span>
           </div>
           {source.note && (
@@ -766,7 +790,7 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
 
 // ------------------------------------------------------------------ the twin, fed from the sim at ~30 Hz
 
-function PracticeTwin({ sim, spec, camera, lagMs, controls = false, ghost = false }: { sim: Tdm106SceneSim; spec: SceneSpecV1; camera: string; lagMs: number; controls?: boolean; ghost?: boolean }) {
+function PracticeTwin({ sim, spec, camera, lagMs, controls = false, ghost = false, perf }: { sim: Tdm106SceneSim; spec: SceneSpecV1; camera: string; lagMs: number; controls?: boolean; ghost?: boolean; perf?: TwinPerf | null }) {
   const [state, setState] = useState<RobotLiveState | null>(null);
   const [rows, setRows] = useState<number[][] | undefined>(undefined);
   const history = useRef<{ at: number; s: RobotLiveState }[]>([]);
@@ -789,10 +813,10 @@ function PracticeTwin({ sim, spec, camera, lagMs, controls = false, ghost = fals
     }, 33);
     return () => window.clearInterval(id);
   }, [sim, ghost]);
-  return <RobotTwin3D state={state} spec={spec} camera={camera} sim controls={controls} ghost={rows} className="h-full w-full" />;
+  return <RobotTwin3D state={state} spec={spec} camera={camera} sim controls={controls} ghost={rows} className="h-full w-full" perf={perf} />;
 }
 
-function View({ label, lagMs, compact, className = '', children }: { label: string; lagMs: number; compact?: boolean; className?: string; children: ReactNode }) {
+function View({ label, lagMs, compact, className = '', badges, children }: { label: string; lagMs: number; compact?: boolean; className?: string; badges?: string[]; children: ReactNode }) {
   const tone = lagMs < 150 ? 'bg-emerald-600/85 text-white' : lagMs <= 300 ? 'bg-amber-500/90 text-black' : 'bg-red-600/90 text-white';
   return (
     <div className={`relative overflow-hidden rounded-lg bg-[#2f2c40] ${className}`}>
@@ -801,12 +825,17 @@ function View({ label, lagMs, compact, className = '', children }: { label: stri
       {lagMs > 0 && (
         <span className={`pointer-events-none absolute right-2 ${label ? 'top-2' : 'top-12 z-10'} rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs ${tone}`}>{lagMs} ms</span>
       )}
+      {badges && badges.length > 0 && (
+        <span className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1" data-testid="tdm59-safety-chips">
+          {badges.map((b) => (
+            <span key={b} className={`rounded-sm px-1.5 py-0.5 text-xs font-semibold ${b === 'Watchdog hold' ? 'bg-amber-500 text-black' : 'bg-ochre-soft text-ink'}`}>
+              {b}
+            </span>
+          ))}
+        </span>
+      )}
     </div>
   );
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return <span className="ml-2 rounded-sm bg-ochre-soft px-1.5 py-0.5 text-ink">{children}</span>;
 }
 
 function Step({ n, on, current, id, children }: { n: number; on: boolean; current: boolean; id: string; children: ReactNode }) {

@@ -41,7 +41,7 @@ export function SessionStateBar({ state, className = '' }: { state: SessionState
           </li>
         ))}
       </ol>
-      <p className="mt-1 text-xs text-zinc-500" aria-live="polite">
+      <p className="mt-1 truncate text-xs text-zinc-500" aria-live="polite" title={info.hint}>
         {info.hint}
       </p>
     </div>

@@ -19,6 +19,8 @@ import { Tdm56TeleopConsole, useTdm56Teleop } from '@/components/teleop/Tdm56Tel
 import { Tdm59TeleopOnboarding } from '@/components/teleop/Tdm59TeleopOnboarding';
 import { useTdm86Phone } from '@/components/teleop/Tdm86Phone';
 import { LOST_TEXT, useTeleopLease, type TeleopLease } from '@/lib/teleop/tdm57Lease';
+import { teleopAssistAllowed } from '@/lib/teleop/teleopSafety';
+import { useRows } from '@/lib/spacetime/hooks';
 
 /** True while TDM-59's walkthrough dialog (data-testid="tdm59-intro") is on the page. */
 function useWalkthroughOpen(): boolean {
@@ -66,12 +68,15 @@ function RecordingSlot({ taskId, kind, compact }: { taskId: string; kind: string
   return <RecordingControls taskId={taskId} kind={kind} controlSocket={controlSocket} compact={compact} />;
 }
 
-export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamUrl: string; token: string; controlUrl?: string } }) {
+export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamUrl: string; token: string; controlUrl?: string; fixture?: boolean } }) {
   const lease = useTeleopLease(taskId);
   const walkthrough = useWalkthroughOpen();
   const kind = lease.task?.type ?? 'clean_teleop';
   const isTaskId = /^\d+$/.test(taskId);
   const { phone } = useTdm86Phone(); // TDM-86: the recording row sits in the phone cockpit, one line tall
+  // the snap-to-grasp assist needs a sim scene's object pose: only a robot with camera_config_json.sim === true
+  const [robots] = useRows('robot', (r) => r.id.eq(lease.task?.robotId ?? 0n));
+  const simRobot = !!lease.task && teleopAssistAllowed(robots[0]);
 
   const canDrive = (dev ? true : lease.canControl) && !walkthrough;
   const canDriveReason = walkthrough ? 'Close the "How to drive" walkthrough to drive.' : dev ? undefined : leaseReason(lease);
@@ -86,7 +91,10 @@ export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamU
         canDrive={canDrive}
         canDriveReason={canDriveReason}
         stamp={dev ? undefined : lease.stamp}
-        controlSlot={dev ? undefined : <ControlLeaseBanner lease={lease} className="py-2" />}
+        // fixed height: a lease message or error never grows the top bar and pushes the viewer down
+        controlSlot={dev ? undefined : <ControlLeaseBanner lease={lease} variant="bar" />}
+        holdsControl={dev ? true : lease.state === 'held'}
+        simRobot={simRobot}
         recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} compact={phone} /> : undefined}
         taskKind={lease.task?.type}
         taskCompleted={lease.task?.status === 'completed'}

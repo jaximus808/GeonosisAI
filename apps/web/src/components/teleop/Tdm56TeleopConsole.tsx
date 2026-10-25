@@ -20,11 +20,18 @@
 //   stamp                      TDM-57 command gate (useTeleopLease().stamp): every outgoing cmd and recording op
 //                              goes through it; null = not allowed now, nothing is sent
 //   assistTarget               TDM-106 snap-to-grasp seam: {tool, obj} in the base frame when the object pose
-//                              is known (a sim robot's state.scene); without it the assist toggle is disabled
+//                              is known (a sim robot's state.scene). Used ONLY with simRobot === true (the robot's
+//                              camera_config_json.sim); on a real robot it is ignored and the toggle is hidden.
+//
+// Wire safety: every motion command is rebuilt by lib/teleop/teleopSafety.ts tdm56WireCmd() right before it is
+// sent: deltas from clutch-down + gripper + speed (+ lease stamp) only, never an IK target or a twin pose.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CameraFeed, TaskCameraFeed, type FeedHealth } from '@/components/teleop/CameraFeed';
-import { TaskSimCameras } from '@/components/robotview/SimCameras';
+import { FixtureSimCameras, TaskSimCameras } from '@/components/robotview/SimCameras';
+import { OneLine, ReservedSlot, ViewQualityToggle, ViewerToasts, type ViewerToast } from '@/components/teleop/TeleopOverlay';
+import { useViewQuality } from '@/lib/teleop/useViewQuality';
+import { tdm56WireCmd } from '@/lib/teleop/teleopSafety';
 import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
 import { useContributor } from '@/lib/contributor/hooks';
 import { staticStreamGrant, taskStreamGrant } from '@/lib/teleop/tdm55StreamGrant';
@@ -107,10 +114,17 @@ export interface Tdm56TeleopConsoleProps {
   stamp?: <T extends object>(msg: T) => (T & { task_id: number; claimed_at_us: number }) | null;
   /** Force the clutch off when the worst camera latency exceeds this. Default 400 ms. */
   maxLatencyMs?: number;
-  /** Dev / mock robot: a fixed stream URL + token instead of the claimant grant. Shown as such in the UI. */
-  dev?: { streamUrl: string; token: string; controlUrl?: string };
+  /** Dev / mock robot: a fixed stream URL + token instead of the claimant grant. Shown as such in the UI.
+   *  `fixture`: the views play the recorded sim fixture instead of a camera stream (layout / performance checks). */
+  dev?: { streamUrl: string; token: string; controlUrl?: string; fixture?: boolean };
+  /** The user holds this robot's control lease (even while a moment's block pauses driving). Smooth mode then
+   *  draws one big view and one small one. Default: canDrive. */
+  holdsControl?: boolean;
   /** TDM-106 snap-to-grasp: tool + object positions (base frame), when the object pose is known (sim robots). */
   assistTarget?: () => { tool: V3; obj: V3 } | null;
+  /** The robot is a sim robot (camera_config_json.sim === true, teleopAssistAllowed). Required for assistTarget
+   *  to have any effect; false / unknown = real robot: no assist, no assist toggle. Default false. */
+  simRobot?: boolean;
   /** TDM-86: task.type ('clean_teleop' | 'recovery_takeover'), for the phone coach's first step. */
   taskKind?: string;
   /** TDM-86: the task is completed (its episode was accepted): the phone shows the result, not "lost control". */
@@ -148,7 +162,12 @@ function ConsoleInner({
   assistTarget,
   taskKind,
   taskCompleted,
+  holdsControl,
+  simRobot = false,
 }: Tdm56TeleopConsoleProps & { getGrant: () => Promise<StreamGrant> }) {
+  // Quality: Smooth / Sharp (lib/teleop/viewQuality.ts), remembered in this browser
+  const [quality, setQuality] = useViewQuality();
+  const holding = holdsControl ?? canDrive;
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
   /** Lease-stamp a message; unstamped when no gate is mounted (dev page). */
@@ -197,8 +216,10 @@ function ConsoleInner({
   canDriveRef.current = { canDrive, canDriveReason };
   const maxLatRef = useRef(maxLatencyMs);
   maxLatRef.current = maxLatencyMs;
-  const assistRef = useRef(assistTarget);
-  assistRef.current = assistTarget;
+  // snap-to-grasp only on a sim robot: on a real robot the target is dropped here, whatever the caller passed
+  const assistOn = simRobot === true && !!assistTarget;
+  const assistRef = useRef(assistOn ? assistTarget : undefined);
+  assistRef.current = assistOn ? assistTarget : undefined;
 
   // STOP pressed here: stays latched until the operator confirms resume.
   const [localStop, setLocalStop] = useState(false);
@@ -250,12 +271,15 @@ function ConsoleInner({
       if (isRelease) {
         // One final clutch:false so the robot holds at once instead of waiting for its 200 ms watchdog.
         // Stamped when the lease allows it; otherwise sent bare (it can only make the arm hold).
-        clientRef.current?.sendCmd(gate(cmd) ?? cmd);
+        const wire = tdm56WireCmd({ ...(gate(cmd) ?? cmd), clutch: false });
+        if (wire) clientRef.current?.sendCmd(wire);
         return true;
       }
       const out = gate(cmd);
       if (!out) return false; // the lease gate said no at this instant: let go, press again later
-      clientRef.current?.sendCmd(out);
+      const wire = tdm56WireCmd(out); // contract fields only: deltas, gripper, speed, lease stamp
+      if (!wire) return false;
+      clientRef.current?.sendCmd(wire);
       return true;
     },
   });
@@ -295,29 +319,35 @@ function ConsoleInner({
   const robot = link.robot;
   const status = clutchStatus(ui, touch);
 
-  const stopAlert = (localStop || link.stopPending) && (
-  <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-red-600 px-3 py-2 text-sm text-white" role="alert">
-    <span className="font-semibold">
-      {link.stopPending
-        ? 'STOP not delivered: the control link is down. Use the physical e-stop at the table. Retrying on reconnect.'
-        : robot?.stopped
-          ? 'Robot stopped. It stays locked until someone at the arm clears it.'
-          : 'STOP sent. Motion from this page is off.'}
-    </span>
-    {!link.stopPending && (
-      <button
-        type="button"
-        className="rounded-md bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50"
-        onClick={() => {
-          localStopRef.current = false;
-          setLocalStop(false);
-        }}
-      >
-        Resume control
-      </button>
-    )}
-  </div>
-);
+  // STOP state: drawn over the viewer (never pushes it down), with Resume
+  const stopToast: ViewerToast | null =
+    localStop || link.stopPending
+      ? {
+          id: 'stop',
+          tone: 'bad',
+          role: 'alert',
+          testId: 'tdm56-stop-alert',
+          title: link.stopPending
+            ? 'STOP not delivered: the control link is down. Use the physical e-stop at the table. Retrying on reconnect.'
+            : robot?.stopped
+              ? 'Robot stopped. It stays locked until someone at the arm clears it.'
+              : 'STOP sent. Motion from this page is off.',
+          action: !link.stopPending ? (
+            <button
+              type="button"
+              className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50"
+              onClick={() => {
+                localStopRef.current = false;
+                setLocalStop(false);
+              }}
+            >
+              Resume control
+            </button>
+          ) : undefined,
+        }
+      : null;
+  const qualityToggle = <ViewQualityToggle value={quality} onChange={setQuality} testPrefix="tdm56" />;
+  const desk = { quality, driving: holding, toolbar: qualityToggle };
 
   // ---- TDM-86 phone cockpit
   const { phone, landscape } = useTdm86Phone();
@@ -394,15 +424,15 @@ function ConsoleInner({
             <span className="text-zinc-500"> (asked {Math.round(ui.gripper * 100)}%)</span>
           </dd>
           <dt className="text-zinc-500">Safety</dt>
-          <dd data-testid="tdm56-clamps">
+          <dd data-testid="tdm56-clamps" className="min-w-0 overflow-hidden">
             {robot?.stopped ? (
               <span className="rounded bg-red-600 px-1.5 py-0.5 text-xs font-semibold text-white">Latched stop</span>
             ) : robot?.watchdog ? (
               <span className="rounded bg-amber-500 px-1.5 py-0.5 text-xs font-semibold text-black">Watchdog hold</span>
             ) : robot?.clamps.length ? (
-              <span className="flex flex-wrap gap-1">
+              <span className="flex flex-nowrap gap-1 overflow-hidden" title={robot.clamps.map((c) => CLAMP_TEXT[c] ?? c).join(', ')}>
                 {robot.clamps.map((c) => (
-                  <span key={c} className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                  <span key={c} className="shrink-0 whitespace-nowrap rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
                     {CLAMP_TEXT[c] ?? c}
                   </span>
                 ))}
@@ -413,25 +443,18 @@ function ConsoleInner({
               '--'
             )}
           </dd>
-          {robot?.recording != null && (
-            <>
-              <dt className="text-zinc-500">Recording</dt>
-              <dd>{fmtRecording(robot.recording)}</dd>
-            </>
-          )}
-          {ui.engaged && (
-            <>
-              <dt className="text-zinc-500">This stroke</dt>
-              <dd className="tabular-nums">
-                {Math.round(Math.hypot(...ui.dPos) * 1000)} mm, {Math.round((Math.hypot(...ui.dRot) * 180) / Math.PI)}°
-              </dd>
-            </>
-          )}
+          {/* always present (-- when idle) so the panel keeps its height */}
+          <dt className="text-zinc-500">Recording</dt>
+          <dd>{robot?.recording != null ? fmtRecording(robot.recording) : '--'}</dd>
+          <dt className="text-zinc-500">This stroke</dt>
+          <dd className="tabular-nums">
+            {ui.engaged ? `${Math.round(Math.hypot(...ui.dPos) * 1000)} mm, ${Math.round((Math.hypot(...ui.dRot) * 180) / Math.PI)}°` : '--'}
+          </dd>
         </dl>
       </Panel>
 
       <Panel title="Driving">
-        <Tdm106DriveSettings drive={drive} snapAvailable={!!assistTarget} testPrefix="tdm56" />
+        <Tdm106DriveSettings drive={drive} snapAvailable={assistOn} hideSnap={!simRobot} testPrefix="tdm56" />
       </Panel>
 
       <Panel title="Gripper">
@@ -509,7 +532,6 @@ function ConsoleInner({
                     STOP
                   </button>
                 </div>
-                {stopAlert}
               </div>
             }
             coach={
@@ -530,17 +552,33 @@ function ConsoleInner({
               />
             }
             action={
-              <>
-                {!dev && !canDrive && !taskCompleted && controlSlot}
-                {recordingSlot && <div className="shrink-0">{recordingSlot}</div>}
-              </>
+              // reserved: the recording row keeps its height; its confirm step or an error is drawn over the view
+              !dev || recordingSlot ? <ReservedSlot height={62} testId="tdm56-action-slot">{recordingSlot}</ReservedSlot> : undefined
             }
             view={
               <div
-                className={`h-full rounded-md outline-offset-2 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
+                className={`relative h-full rounded-md outline-offset-2 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
                 data-testid="tdm56-feed-frame"
               >
-                {dev ? (
+                <ViewerToasts
+                  at="bottom"
+                  items={[
+                    ...(stopToast ? [stopToast] : []),
+                    ...(!dev && !canDrive && !taskCompleted && controlSlot ? [{ id: 'lease', tone: 'warn' as const, title: '', node: controlSlot }] : []),
+                  ]}
+                />
+                {dev?.fixture ? (
+                  <FixtureSimCameras
+                    onHealth={onHealth}
+                    phone={{
+                      single: view,
+                      spec: PHONE_SPEC,
+                      pip: view === 'side' ? { camera: TDM86_DRIVER_CAM.id, label: 'Driver', onTap: () => setView(TDM86_DRIVER_CAM.id) } : { camera: 'side', label: 'Side', onTap: () => setView('side') },
+                      onState: onLiveState,
+                      overlay: <Tdm86ViewTabs value={view} onChange={setView} testPrefix="tdm56" />,
+                    }}
+                  />
+                ) : dev ? (
                   <CameraFeed getGrant={getGrant} onHealth={onHealth} />
                 ) : (
                   <TaskSimCameras
@@ -623,12 +661,13 @@ function ConsoleInner({
                   status.tone === 'drive' ? 'animate-pulse bg-black' : status.tone === 'blocked' ? 'bg-red-600' : 'bg-zinc-400'
                 }`}
               />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="truncate text-base font-semibold leading-tight sm:text-lg">{status.title}</div>
-                <div className="truncate text-xs opacity-80 sm:text-sm">{status.sub}</div>
+                <OneLine text={status.sub} className="text-xs opacity-80 sm:text-sm" testId="tdm56-status-sub" />
               </div>
             </div>
-            {controlSlot && <div className="hidden shrink-0 md:block">{controlSlot}</div>}
+            {/* fixed height (ControlLeaseBanner variant="bar"): a lease message never grows the bar */}
+            {controlSlot && <div className="hidden w-[min(26rem,34vw)] shrink-0 md:block">{controlSlot}</div>}
             <button
               type="button"
               onClick={pressStop}
@@ -645,7 +684,6 @@ function ConsoleInner({
             </button>
           </div>
           {controlSlot && <div className="mt-2 md:hidden">{controlSlot}</div>}
-          {stopAlert}
         </div>
 
         {dev && (
@@ -659,14 +697,18 @@ function ConsoleInner({
           {/* ---------------- main view */}
           <div className="min-w-0">
             <div
-              className={`rounded-xl outline-offset-4 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
+              className={`relative rounded-xl outline-offset-4 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
               data-testid="tdm56-feed-frame"
             >
-              {dev ? (
+              {/* messages are drawn over the viewer, so it never moves or resizes */}
+              <ViewerToasts items={stopToast ? [stopToast] : []} />
+              {dev?.fixture ? (
+                <FixtureSimCameras onHealth={onHealth} desk={desk} />
+              ) : dev ? (
                 <CameraFeed getGrant={getGrant} onHealth={onHealth} />
               ) : (
                 // TDM-105: a sim robot has no video; its rendered top / side / wrist views stand in (health from its state feed)
-                <TaskSimCameras taskId={taskId} onHealth={onHealth} fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} />} />
+                <TaskSimCameras taskId={taskId} onHealth={onHealth} fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} />} desk={desk} />
               )}
             </div>
 

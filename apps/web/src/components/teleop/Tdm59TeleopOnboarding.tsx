@@ -75,8 +75,10 @@ export function Tdm59TeleopOnboarding({ taskId }: { taskId: string }) {
   return (
     <div className="mb-3 flex flex-col gap-2" data-testid="tdm59-onboarding">
       <SessionStateBar state={t.session} className="max-w-2xl" />
-      <div className="flex flex-wrap items-start gap-2">
+      {/* one fixed-height row: a bad-connection tip or the practice link never pushes the console down */}
+      <div className="flex h-9 min-w-0 flex-nowrap items-center gap-2 overflow-x-clip">
         <LatencyBadge
+          className="min-w-0 shrink"
           videoMs={t.feed?.worstLatencyMs}
           videoStale={t.feed ? t.feed.stale && (t.feed.state === 'live' || t.feed.state === 'fallback') : false}
           videoDown={t.feed && ['denied', 'error', 'closed'].includes(t.feed.state) ? t.feed.state : undefined}
@@ -87,7 +89,7 @@ export function Tdm59TeleopOnboarding({ taskId }: { taskId: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-full px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-zinc-300 hover:bg-zinc-100 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-zinc-800"
+          className="shrink-0 rounded-full px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-zinc-300 hover:bg-zinc-100 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-zinc-800"
           data-testid="tdm59-help"
         >
           How to drive
@@ -96,7 +98,7 @@ export function Tdm59TeleopOnboarding({ taskId }: { taskId: string }) {
           <Link
             href="/practice"
             target="_blank"
-            className="rounded-full px-3 py-1.5 text-sm text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400"
+            className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm text-zinc-600 underline-offset-2 hover:underline dark:text-zinc-400"
             title="Opens in a new tab. Your claim stays held while this tab stays open."
           >
             Practise first

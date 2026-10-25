@@ -2,6 +2,7 @@
 //   /teleop/<taskId>                                    claimant path (stream + control token from the orchestrator)
 //   /teleop/<taskId>?dev_url=ws://host:port/ws/cameras&token=<t>[&control_url=ws://.../ws/control]
 //                                                       fixed link, e.g. the spikes/tdm-56 mock robot (labelled in the UI)
+//   /teleop/<taskId>?dev_url=fixture                   the views on the recorded sim fixture (layout / performance checks)
 //
 // <TeleopSession> (components/teleop/TeleopSession.tsx) wires the parallel tickets into <Tdm56TeleopConsole>:
 //   TDM-57 (exclusive control): useTeleopLease -> canDrive / canDriveReason / stamp, ControlLeaseBanner in controlSlot
@@ -22,7 +23,11 @@ export default async function TeleopPage({
   const q = await searchParams;
   const one = (k: string) => (typeof q[k] === 'string' ? (q[k] as string) : undefined);
   const devUrl = one('dev_url');
-  const dev = devUrl ? { streamUrl: devUrl, token: one('token') ?? '', controlUrl: one('control_url') } : undefined;
+  // dev_url=fixture: the recorded sim fixture in the views (no robot, no stream; the control link stays down)
+  const fixture = devUrl === 'fixture';
+  const dev = devUrl
+    ? { streamUrl: devUrl, token: one('token') ?? '', controlUrl: one('control_url') ?? (fixture ? 'ws://127.0.0.1:9/ws/control' : undefined), fixture }
+    : undefined;
 
   return (
     <>

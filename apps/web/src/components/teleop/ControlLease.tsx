@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { OneLine } from '@/components/teleop/TeleopOverlay';
 import { fmtCountdown, typeInfo } from '@/lib/marketplace/tdm61';
 import { LOST_TEXT, useControlHolders, type TeleopLease } from '@/lib/teleop/tdm57Lease';
 
@@ -21,7 +22,9 @@ const TONE: Record<Tone, string> = {
 const BTN =
   'min-h-11 rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50';
 
-export function ControlLeaseBanner({ lease, className = '' }: { lease: TeleopLease; className?: string }) {
+/** `variant="bar"`: one fixed-height row (title + one truncated line, "More" for the rest), for the teleop top bar,
+ *  where a message that grows would push the viewer down. */
+export function ControlLeaseBanner({ lease, className = '', variant = 'banner' }: { lease: TeleopLease; className?: string; variant?: 'banner' | 'bar' }) {
   const { state, canControl, blockedBy, secondsLeft, holderName, lostReason, lostWhileHidden, error, busy } = lease;
   let tone: Tone = 'muted';
   let title = '';
@@ -88,6 +91,44 @@ export function ControlLeaseBanner({ lease, className = '' }: { lease: TeleopLea
     case 'closed':
       title = `This task is ${lease.task?.status ?? 'closed'}.`;
       break;
+  }
+
+  if (variant === 'bar') {
+    const line = error ?? body;
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        data-tdm57-state={state}
+        data-tdm57-can-control={canControl ? 'true' : 'false'}
+        data-tdm57-lost={lostReason ?? ''}
+        data-variant="bar"
+        className={`flex h-14 min-w-0 items-center gap-3 rounded-lg border px-3 ${TONE[tone]} ${className}`}
+      >
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="truncate text-sm font-semibold" title={title}>
+            {title}
+          </p>
+          {state === 'not_joined' ? (
+            <Link href="/join" className="text-xs font-semibold underline">
+              Join
+            </Link>
+          ) : (
+            line && <OneLine text={line} className={`text-xs ${error ? 'font-medium text-red-700 dark:text-red-300' : 'opacity-90'}`} testId="tdm57-bar-line" />
+          )}
+        </div>
+        {action && (
+          <button
+            type="button"
+            onClick={action.run}
+            disabled={action.disabled}
+            className={`h-10 shrink-0 whitespace-nowrap rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${tone === 'good' ? 'border border-current bg-transparent' : 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'}`}
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (

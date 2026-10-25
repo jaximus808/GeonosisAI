@@ -58,13 +58,15 @@ export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, dri
   const lead = videoDown ? 'off' : videoStale ? 'frozen' : videoMs != null ? `${Math.round(videoMs)} ms` : rttMs != null ? `${Math.round(rttMs)} ms` : '--';
 
   return (
-    <div ref={root} className={`relative ${className}`}>
+    // one row, always: the "bad" tip sits beside the badge, truncated (the badge opens the full advice), so it
+    // never pushes the teleop console down when the connection gets bad
+    <div ref={root} className={`relative flex min-w-0 items-center gap-2 ${className}`}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={pid}
-        className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ring-1 ${st.chip}`}
+        className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm ring-1 ${st.chip}`}
         data-testid="tdm59-latency"
         data-grade={a.grade}
       >
@@ -73,7 +75,7 @@ export function LatencyBadge({ videoMs, videoStale, videoDown, rttMs, cmdHz, dri
         <span className="tabular-nums opacity-75">{lead}</span>
       </button>
       {a.grade === 'bad' && !open && (
-        <p className="mt-1 max-w-xs text-xs font-medium text-red-700 dark:text-red-300" role="status" data-testid="tdm59-latency-tip">
+        <p className="min-w-0 max-w-xs truncate text-xs font-medium text-red-700 dark:text-red-300" role="status" title={a.tips[0]} data-testid="tdm59-latency-tip">
           {a.tips[0]}
         </p>
       )}

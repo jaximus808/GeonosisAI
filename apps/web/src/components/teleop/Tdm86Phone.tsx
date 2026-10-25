@@ -306,8 +306,9 @@ export function Tdm86Coach({ tag, title, detail, tone = 'plain', action, testId,
 }) {
   const dataAttrs = Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, v]));
   return (
+    // fixed height (title + two lines of detail): a longer or shorter hint never resizes the 3D view below
     <div
-      className={`flex shrink-0 items-center gap-2 rounded-sm px-2.5 py-1.5 ring-1 ${
+      className={`flex h-[68px] shrink-0 items-center gap-2 overflow-hidden rounded-sm px-2.5 py-1.5 ring-1 ${
         tone === 'done' ? 'bg-arc-soft ring-arc' : tone === 'warn' ? 'bg-ochre-soft ring-ochre' : 'bg-surface ring-line-strong'
       }`}
       aria-live="polite"
@@ -317,7 +318,7 @@ export function Tdm86Coach({ tag, title, detail, tone = 'plain', action, testId,
       {tag && <span className="gx-tag shrink-0 tabular-nums">{tag}</span>}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[16px] font-semibold leading-tight text-ink">{title}</div>
-        {detail && <div className="line-clamp-2 text-[13px] leading-snug text-ink-muted">{detail}</div>}
+        {detail && <div className="line-clamp-2 text-[13px] leading-snug text-ink-muted" title={detail}>{detail}</div>}
       </div>
       {action}
     </div>

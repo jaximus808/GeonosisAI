@@ -19,11 +19,13 @@
 // world: (x, y, z) -> three (x, z, -y). The arm sits in it at spec.robot.mount (identity in the sim).
 import { CameraControls, Environment, Grid, Lightformer, Line, PerformanceMonitor, RoundedBox, useGLTF } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { legacyScene, livePose, sceneLive, type SceneCamera, type SceneObject, type SceneRegion, type SceneSpecV1, type SceneTable } from '@/lib/robotview/scene';
 import type { RobotLiveState, Vec3 } from '@/lib/robotview/types';
+import type { TwinPerf } from '@/lib/teleop/viewQuality';
+import { usePageVisible } from '@/lib/teleop/useViewQuality';
 import { createYamKinematics, YAM_REST, type Mat4 } from './yamFk';
 import { YAM_BODIES, YAM_GRASP_SITE, YAM_MODEL, YAM_WRIST_CAMERA, type YamBody } from './yamModel';
 
@@ -46,6 +48,8 @@ export interface RobotTwin3DProps {
   /** Joint-space targets (rad, >= 6 per row) to draw as a ghost: tool-point path + the arm at the last row. */
   ghost?: number[][];
   className?: string;
+  /** Render budget (lib/teleop/viewQuality.ts twinPerf): pixel-ratio cap, shadows, frame-rate cap. Omit: full quality. */
+  perf?: TwinPerf | null;
 }
 
 const GLB_URL = '/robot/yam/yam.glb';
@@ -553,8 +557,38 @@ function DevProbe({ graspRef, smooth }: { graspRef: MutableRefObject<THREE.Objec
   return null;
 }
 
+// ---------------------------------------------------------------------------------------- frame budget
+/** frameloop="demand" at most `fps` frames a second (a small view does not need the display's 60). */
+function Pacer({ fps }: { fps: number }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    let raf = 0;
+    let last = 0;
+    const step = 1000 / fps;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      if (t - last >= step - 4) {
+        last = t;
+        invalidate();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [fps, invalidate]);
+  return null;
+}
+
+/** R3F's shared loop stops when every canvas is paused; going back to drawing has to restart it. */
+function Kick({ loop }: { loop: string }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (loop !== 'never') invalidate();
+  }, [loop, invalidate]);
+  return null;
+}
+
 // ---------------------------------------------------------------------------------------- component
-export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim = false, ghost, className }: RobotTwin3DProps) {
+export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim = false, ghost, className, perf }: RobotTwin3DProps) {
   const stateRef = useRef<RobotLiveState | null>(state);
   stateRef.current = state;
   const ghostRows = ghost && ghost.length ? ghost : null;
@@ -570,20 +604,37 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
   // Small tiles (phones, multi-view grids): cap the pixel ratio and use a lighter shadow map.
   const wrapRef = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
-  const maxDpr = narrow ? 1.5 : 2;
+  const maxDpr = perf?.maxDpr ?? (narrow ? 1.5 : 2);
+  // Draw only while on screen and the tab is in front (a hidden view keeps its last frame, costs nothing).
+  const [onScreen, setOnScreen] = useState(true);
+  const pageVisible = usePageVisible();
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < 720));
     ro.observe(el);
-    return () => ro.disconnect();
+    const io = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([e]) => setOnScreen(e.isIntersecting), { rootMargin: '64px' });
+    io?.observe(el);
+    return () => {
+      ro.disconnect();
+      io?.disconnect();
+    };
   }, []);
   useEffect(() => setDpr(Math.min(maxDpr, window.devicePixelRatio || 1)), [maxDpr]);
+  const frameloop: 'always' | 'demand' | 'never' = !onScreen || !pageVisible ? 'never' : perf?.maxFps ? 'demand' : 'always';
+  const shadowsOn = perf ? perf.shadows : true;
+  const shadowMap = perf?.shadowMapSize ?? (narrow ? 1024 : 2048);
+  const blurSamples = perf?.blurSamples || (narrow ? 8 : 16);
+  const glOpts = useMemo(() => ({ antialias: true, powerPreference: 'high-performance' as const }), []);
   const view = resolveTwinCamera(camera ?? preset, spec);
   const wrist = view.attach === 'wrist';
   useEffect(() => setMoved(false), [view.id]);
 
-  const ws = state?.workspace;
+  // Values the scene graph depends on, kept referentially stable so a new state sample (10-30 Hz) does not
+  // re-render the whole three.js tree: per-frame motion is read from refs by Driver / Arm / WristRig.
+  const wsRaw = state?.workspace;
+  const wsKey = wsRaw ? JSON.stringify([wsRaw.min, wsRaw.max, wsRaw.table_z]) : '';
+  const ws = useMemo(() => wsRaw, [wsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const estop = !!state?.estop;
   const mats = useArmMaterials();
 
@@ -599,12 +650,13 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
     const ids = new Set(objects.map((o) => o.id));
     for (const id of [...smooth.objects.keys()]) if (!ids.has(id)) smooth.objects.delete(id);
   }, [objects, smooth]);
-  const table: SceneTable = spec?.table ?? { ...DEFAULT_TABLE, top_z: ws?.table_z ?? 0 };
+  const table: SceneTable = useMemo(() => spec?.table ?? { ...DEFAULT_TABLE, top_z: ws?.table_z ?? 0 }, [spec?.table, ws?.table_z]);
   const mount = spec?.robot.mount;
-  const mountPos = (mount?.pos ?? [0, 0, 0]) as [number, number, number];
+  const mountPos = useMemo(() => (mount?.pos ?? [0, 0, 0]) as [number, number, number], [mount?.pos]);
   const mountQuat = useMemo(() => quatWxyz(mount?.quat ?? [1, 0, 0, 0]), [mount?.quat]);
   const mountM = useMemo(() => new THREE.Matrix4().compose(new THREE.Vector3(...mountPos), mountQuat, new THREE.Vector3(1, 1, 1)), [mountPos[0], mountPos[1], mountPos[2], mountQuat]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const onUserMove = useCallback(() => setMoved(true), []);
   const resetView = () => {
     const c = controlsRef.current;
     if (!c || wrist || !view.pos || !view.target) return;
@@ -612,22 +664,11 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
     setMoved(false);
   };
 
-  return (
-    <div
-      ref={wrapRef}
-      className={`relative h-full w-full select-none ${className ?? ''}`}
-      role="img"
-      aria-label={`3D view of the YAM arm${state ? '' : ' (no joint state yet, shown at rest)'}${estop ? ', e-stop engaged' : ''}`}
-      data-twin-ready={state ? 'live' : 'rest'}
-    >
-      <Canvas
-        shadows="variance"
-        dpr={dpr}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
-        camera={{ fov: view.fovy, near: 0.01, far: 30, position: r2t(view.pos ?? TWIN_CAMERAS.top.pos!) }}
-        style={{ touchAction: wrist || !controls ? 'auto' : 'none' }}
-      >
-        <PerformanceMonitor onDecline={() => setDpr(1)} onIncline={() => setDpr(Math.min(maxDpr, window.devicePixelRatio || 1))} />
+  // The three.js scene, memoised: it changes with the scene, the workspace, e-stop, the ghost and the view, not
+  // with every state sample (motion is applied per frame from refs).
+  const sceneGraph = useMemo(
+    () => (
+      <>
         <color attach="background" args={[sim ? C.stageSim : C.stage]} />
         <fog attach="fog" args={[sim ? C.stageSim : C.stage, 2.4, 7.5]} />
 
@@ -635,8 +676,8 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
         <directionalLight
           position={r2t([0.6, -0.6, 1.6])}
           intensity={2.8}
-          castShadow
-          shadow-mapSize={narrow ? [1024, 1024] : [2048, 2048]}
+          castShadow={shadowsOn}
+          shadow-mapSize={[shadowMap, shadowMap]}
           shadow-camera-left={-0.8}
           shadow-camera-right={0.8}
           shadow-camera-top={0.8}
@@ -644,7 +685,7 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
           shadow-camera-near={0.2}
           shadow-camera-far={4}
           shadow-radius={9}
-          shadow-blurSamples={narrow ? 8 : 16}
+          shadow-blurSamples={blurSamples}
           shadow-bias={-0.0006}
         />
         <directionalLight position={r2t([-0.5, 0.7, 0.9])} intensity={0.5} color="#c9d6ff" />
@@ -670,7 +711,7 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
           {/* robot base frame */}
           <group position={mountPos} quaternion={mountQuat}>
             <Suspense fallback={null}>
-              <Arm read={() => ({ q: smooth.q, gripper: smooth.gripper })} materials={mats.solid} graspRef={graspRef} />
+              <Arm read={() => ({ q: smooth.q, gripper: smooth.gripper })} materials={mats.solid} graspRef={graspRef} shadows={shadowsOn} />
               {ghostRows && <Arm read={() => (smooth.ghostQ ? { q: smooth.ghostQ, gripper: smooth.gripper } : null)} materials={mats.ghost} shadows={false} only={GHOST_BODIES} />}
             </Suspense>
             {ws && <Envelope ws={ws} estop={estop} />}
@@ -682,9 +723,38 @@ export function RobotTwin3D({ state, camera, preset, spec, controls = true, sim 
         {wrist ? (
           <WristRig smooth={smooth} fovy={view.fovy} mount={mountM} />
         ) : (
-          <OrbitRig view={view} controlsRef={controlsRef} onUserMove={() => setMoved(true)} enabled={controls} />
+          <OrbitRig view={view} controlsRef={controlsRef} onUserMove={onUserMove} enabled={controls} />
         )}
         <DevProbe graspRef={graspRef} smooth={smooth} />
+      </>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sim, table, scene, objects, mountPos, mountQuat, mountM, ws, estop, ghostRows, view, wrist, controls, mats, shadowsOn, shadowMap, blurSamples, onUserMove],
+  );
+
+  return (
+    <div
+      ref={wrapRef}
+      className={`relative h-full w-full select-none ${className ?? ''}`}
+      role="img"
+      aria-label={`3D view of the YAM arm${state ? '' : ' (no joint state yet, shown at rest)'}${estop ? ', e-stop engaged' : ''}`}
+      data-twin-ready={state ? 'live' : 'rest'}
+    >
+      <Canvas
+        // shadows on/off and the shadow-map size only take effect on a fresh renderer
+        key={`${shadowsOn ? 's' : 'n'}${shadowMap}`}
+        shadows={shadowsOn ? 'variance' : false}
+        dpr={dpr}
+        frameloop={frameloop}
+        gl={glOpts}
+        camera={{ fov: view.fovy, near: 0.01, far: 30, position: r2t(view.pos ?? TWIN_CAMERAS.top.pos!) }}
+        style={{ touchAction: wrist || !controls ? 'auto' : 'none' }}
+        data-frameloop={frameloop}
+      >
+        <PerformanceMonitor onDecline={() => setDpr(Math.min(1, maxDpr))} onIncline={() => setDpr(Math.min(maxDpr, window.devicePixelRatio || 1))} />
+        <Kick loop={frameloop} />
+        {frameloop === 'demand' && perf?.maxFps ? <Pacer fps={perf.maxFps} /> : null}
+        {sceneGraph}
       </Canvas>
 
       {moved && controls && !wrist && (

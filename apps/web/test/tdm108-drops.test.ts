@@ -82,7 +82,7 @@ describe('tdm108 per-task invites', () => {
       assert.deepEqual(decide(p, s), { action: 'pass', access: 'task:7' }, p + s);
     }
     for (const [p, s] of [['/marketplace', '?task=8'], ['/marketplace', ''], ['/teleop/8', ''], ['/tickets/3', ''],
-      ['/dashboard', ''], ['/practice', '?ticket=4'], ['/robots/2', ''], ['/earnings', '']]) {
+      ['/dashboard', ''], ['/practice', '?ticket=4'], ['/robots/2', ''], ['/earnings', '?contributor=3']]) {
       assert.equal(decide(p, s).action, 'redirect', p + s);
     }
     assert.deepEqual(decide('/api/tdm55/stream-token', '', 'POST'), { action: 'pass', access: 'task:7' });
@@ -90,8 +90,15 @@ describe('tdm108 per-task invites', () => {
     for (const p of ['/api/tdm62/resets/8', '/api/tdm104/robots/5/scene', '/api/tdm64/payments/mode', '/api/tdm108/drops']) {
       assert.equal(decide(p).action, 'deny', p);
     }
-    // /join stays open (and asks for the site-wide code), the operator and the site-wide cookie still open everything
-    assert.deepEqual(decide('/join'), { action: 'pass', access: 'required' });
+    // TDM-86: /join shows the invitee the join form (scope task:7), not the site-wide code form; without the
+    // invite it stays open and asks for the code. The operator and the site-wide cookie still open everything.
+    assert.deepEqual(decide('/join'), { action: 'pass', access: 'task:7' });
+    // TDM-86: the static files practice and teleop load (the 3D arm), and the push worker
+    for (const p of ['/robot/yam/yam.glb', '/tdm65-sw.js', '/tdm65/icon-192.png']) assert.deepEqual(decide(p), { action: 'pass', access: 'task:7' }, p);
+    assert.equal(decide('/robot/../tickets/3').action, 'redirect');
+    assert.deepEqual(decide('/earnings'), { action: 'pass', access: 'task:7' }); // TDM-86: their own payout
+    assert.deepEqual(acc.tdm110AccessDecision('K7QM2X', { path: '/join', search: '', method: 'GET', accept: 'text/html', cookie: undefined }),
+      { action: 'pass', access: 'required' });
     assert.deepEqual(acc.tdm110AccessDecision('K7QM2X', { path: '/tickets/3', search: '', method: 'GET', accept: 'text/html',
       cookie: acc.tdm110MintAccess('K7QM2X') }), { action: 'pass', access: 'ok' });
   });

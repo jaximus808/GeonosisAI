@@ -1,6 +1,10 @@
 # [SIM] demo reviewer config (scripts/demo/run.py -> RDF_REVIEW_CONFIG). Identical to production
-# services/orchestrator/config/review.yaml except fixtures.allow: the MuJoCo robot's episodes are
-# fixture:true (simulated), so they are checked on their merits instead of refused. Claude vision stays ON.
+# services/orchestrator/config/review.yaml except fixtures.allow (the MuJoCo robot's episodes are
+# fixture:true, so they are checked on their merits instead of refused) and frame_drops.max_ratio (TDM-86:
+# the sim's cameras and its recording ticks run on the demo laptop, which renders them at whatever rate it
+# can: 7-10% short at normal load and 73% short (8 of 30 fps) with several agents building on it. That is
+# the renderer's fault, not the contributor's, and it rejected clean phone demos, so on [SIM] episodes
+# only a nearly empty recording fails this check). Claude vision stays ON.
 version: 1
 
 duration:
@@ -9,7 +13,7 @@ duration:
   tolerance_s: 0.5    # episode.duration_ms vs the actions parquet's timestamp span
 
 frame_drops:
-  max_ratio: 0.02     # reject at >= 2% missing ticks (actions stream) or video frames (any camera)
+  max_ratio: 0.9      # [SIM] (production 0.02): reject at >= 90% missing ticks or rendered sim-camera frames
   max_frame_count_mismatch: 2   # episode.frame_count vs rows in the parquet
 
 jerk:

@@ -14,6 +14,7 @@
 // - "My tasks" follows each claim through review and payout (Stripe TEST MODE).
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReducer, useSpacetimeDB } from 'spacetimedb/react';
 import { reducers } from '@/module_bindings';
@@ -175,12 +176,19 @@ export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
   }, [toast]);
   const say = (text: string, tone: Toast['tone']) => setToast({ id: Date.now(), text, tone });
 
+  const router = useRouter();
+  // TDM-86: the task a QR / job link opened (?task=N) gets the one primary button, not the first card
+  const [deepTask, setDeepTask] = useState<string | null>(null);
+  useEffect(() => setDeepTask(new URLSearchParams(window.location.search).get('task')), []);
   async function onClaim(task: MarketTask) {
     if (me == null) return;
     setBusy(task.id);
     try {
       await claimTask({ taskId: task.id, contributorId: me });
       say(`Claimed task #${task.id}. It's yours for ${isArmControl(task.type) ? '60 seconds at a time' : '10 minutes'}.`, 'good');
+      // TDM-86: an arm-control claim goes straight to the controls (the 60 s hold starts now)
+      const href = workHref(task);
+      if (href) router.push(href);
     } catch (e) {
       say(claimErrorMessage(e), 'bad');
     } finally {
@@ -317,18 +325,18 @@ export function MarketplaceView({ onlyTasks }: { onlyTasks?: string[] } = {}) {
                       busy={busy === t.id}
                       action={
                         canClaim ? (
-                          <Tdm59ClaimGate taskType={t.type} taskId={t.id}><button
+                          <Tdm59ClaimGate taskType={t.type} taskId={t.id} primary={held.length === 0 && (deepTask && shown.some((x) => String(x.id) === deepTask) ? String(t.id) === deepTask : i === 0)}><button
                             type="button"
                             disabled={busy !== undefined}
                             onClick={() => void onClaim(t)}
-                            className={`gx-btn gx-btn-block ${i === 0 && held.length === 0 ? 'gx-btn-primary' : ''}`}
+                            className={`gx-btn gx-btn-block ${held.length === 0 && (deepTask && shown.some((x) => String(x.id) === deepTask) ? String(t.id) === deepTask : i === 0) ? 'gx-btn-primary' : ''}`}
                           >
                             {busy === t.id ? 'Claiming…' : `Claim for ${fmtPrice(t.priceCents)}`}
                           </button></Tdm59ClaimGate>
                         ) : contributor ? null : (
                           <Link
                             href="/join"
-                            className={`gx-btn gx-btn-block ${i === 0 ? 'gx-btn-primary' : ''}`}
+                            className={`gx-btn gx-btn-block ${(deepTask && shown.some((x) => String(x.id) === deepTask) ? String(t.id) === deepTask : i === 0) ? 'gx-btn-primary' : ''}`}
                           >
                             Join to claim
                           </Link>

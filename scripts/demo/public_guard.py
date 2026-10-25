@@ -272,6 +272,12 @@ def task_scope_allows(scope: dict, method: str, path: str, query: str) -> bool:
     q = {k: v[0] for k, v in parse_qs(query, keep_blank_values=True).items()}
     if path == "/marketplace":
         return _num(q.get("task")) in ids
+    if path == "/join":  # TDM-86: the invite's own sign-up form (not the site-wide code form)
+        return method in ("GET", "HEAD")
+    if path == "/earnings":  # TDM-86: the invitee's own payout; ?contributor=N (anyone's) stays gated
+        return method in ("GET", "HEAD") and "contributor" not in q
+    if re.fullmatch(r"/(robot/yam/[\w.-]+|tdm65-sw\.js|tdm65/[\w.-]+)", path):  # TDM-86: the 3D arm + push worker files
+        return method in ("GET", "HEAD")
     m = re.fullmatch(r"/(teleop|reset)/(\d{1,19})/?", path)
     if m:
         return int(m.group(2)) in ids

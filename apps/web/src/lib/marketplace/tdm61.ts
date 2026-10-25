@@ -93,7 +93,8 @@ export function workHref(task: MarketTask): string | undefined {
 
 /** Instructions without the dispatcher's internal `[ref ...]` tag. */
 export function cleanInstructions(text: string): string {
-  return text.replace(/\s*\[ref [^\]]+\]/g, '').trim();
+  // TDM-86: the dispatcher appends ". Start from..." to a task description that already ends in "."
+  return text.replace(/\s*\[ref [^\]]+\]/g, '').replace(/\.\.(\s|$)/g, '.$1').trim();
 }
 
 export function fmtCountdown(ms: number): string {

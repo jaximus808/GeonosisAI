@@ -28,6 +28,8 @@ import { SimTag } from '@/components/brand';
 import { InstructionsOverlay } from '@/components/teleop/InstructionsOverlay';
 import { LatencyBadge } from '@/components/teleop/LatencyBadge';
 import { Tdm106DriveSettings, Tdm106KeyLegend, Tdm106OnScreenControls } from '@/components/teleop/Tdm106Controls';
+import { Tdm86Coach, Tdm86Cockpit, Tdm86GripButton, Tdm86Pip, Tdm86ViewReadouts, Tdm86ViewTabs, Tdm86ZoneStick, useTdm86Phone } from '@/components/teleop/Tdm86Phone';
+import { tdm86GripState, tdm86HeightText, tdm86TouchWords, type Tdm86GripTone } from '@/lib/teleop/tdm86Phone';
 import { YAM_READY, createYamKinematics } from '@/components/robotview/yamFk';
 import { YAM_BODIES, YAM_MODEL } from '@/components/robotview/yamModel';
 import type { SceneSpecV1 } from '@/lib/robotview/scene';
@@ -92,6 +94,8 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
   const goalName = titleCase(sim.task?.goal ?? 'goal');
 
   const [touch, setTouch] = useState(false);
+  const { phone, landscape } = useTdm86Phone();
+  const [view, setView] = useState<string>(DRIVER_CAM.id);
   const [stickSize, setStickSize] = useState(112);
   const [wide, setWide] = useState(true); // lg: the legend sits at the top of the side column
   useEffect(() => {
@@ -233,6 +237,11 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
   const [guide, setGuide] = useState<Tdm106Guide | null>(null);
   const [clock, setClock] = useState(0);
   const [hud, setHud] = useState({ z: 0.2, clamps: [] as string[], watchdog: false });
+  // TDM-86 phone cockpit readouts (gripper state, hand height vs the cube)
+  const [phoneRead, setPhoneRead] = useState<{ grip: { text: string; tone: Tdm86GripTone }; height: string }>({
+    grip: { text: 'Gripper open', tone: 'open' },
+    height: '',
+  });
   useEffect(() => {
     const id = window.setInterval(() => {
       const s = simRef.current;
@@ -251,6 +260,10 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
         }),
       );
       setHud({ z: s.tool[2] - s.spec.table.top_z, clamps: s.clamps, watchdog: s.watchdog });
+      setPhoneRead({
+        grip: tdm86GripState({ opening: s.jaw, cmd: s.gripperCmd, holding: !!o?.held, objName }),
+        height: tdm86HeightText(s.tool, s.spec.table.top_z, o, objName),
+      });
       setClock(taskStart.current != null && !s.succeeded ? Date.now() - taskStart.current : 0);
     }, 100);
     return () => window.clearInterval(id);
@@ -293,6 +306,14 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
   const basicsDone = BASICS.every((l) => done[l]);
   const netOk = net != null && net.advice.grade !== 'bad';
   const ready = basicsDone && taskDone && netOk;
+  // TDM-86: the connection check is the last thing standing: test it again by itself (once), and the coach says so
+  const netRetried = useRef(false);
+  useEffect(() => {
+    if (basicsDone && taskDone && net && !netOk && !netBusy && !netRetried.current) {
+      netRetried.current = true;
+      void testNet();
+    }
+  }, [basicsDone, taskDone, net, netOk, netBusy, testNet]);
   const { status: readyStatus } = useTdm59Readiness();
   const saved = useRef(false);
   useEffect(() => {
@@ -331,6 +352,246 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
       : source.from === 'robot'
         ? `Scene deployed on sim robot ${source.robotId}`
         : 'Default sim scene';
+
+  // ---- TDM-86 phone cockpit
+  const sidePanels = (
+    <>
+      <Panel title="Readiness check" aside={<span className="tabular-nums text-zinc-500">{BASICS.filter((l) => done[l]).length + (taskDone ? 1 : 0) + (netOk ? 1 : 0)}/{BASICS.length + 2}</span>}>
+        <ol className="space-y-1" data-testid="tdm59-lessons">
+          {LESSONS.map((l, i) => (
+            <Step key={l.id} n={i + 1} on={done[l.id]} current={!inTask && lesson?.id === l.id} id={l.id}>
+              {l.title}
+            </Step>
+          ))}
+          <Step n={BASICS.length + 1} on={taskDone} current={inTask && !taskDone} id="pick_place">
+            Task: put the {objName} on the {goalName}
+          </Step>
+          <li className="flex items-start gap-2 rounded-md px-1.5 py-1" data-done={netOk}>
+            <Check on={netOk} n={BASICS.length + 2} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={netOk ? 'text-zinc-500' : 'font-medium'}>Your connection</span>
+                {net && (
+                  <span className={`inline-flex items-center gap-1 text-xs ${GRADE_STYLE[net.advice.grade].text}`} data-testid="tdm59-net" data-grade={net.advice.grade}>
+                    <span className={`h-2 w-2 rounded-full ${GRADE_STYLE[net.advice.grade].dot}`} />
+                    {net.advice.headline}
+                    {net.medianMs != null && ` · ${Math.round(net.medianMs)} ms`}
+                  </span>
+                )}
+                <button type="button" onClick={() => void testNet()} disabled={netBusy} className="text-xs text-zinc-600 underline underline-offset-2 disabled:no-underline disabled:opacity-60 dark:text-zinc-400">
+                  {netBusy ? 'Testing…' : 'Test again'}
+                </button>
+              </div>
+              {net && net.advice.grade !== 'good' && <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">{net.advice.tips[0]}</p>}
+            </div>
+          </li>
+        </ol>
+        {phone && (ready || readyStatus === 'ready') ? (
+          <p className="mt-3 text-sm font-semibold text-arc">You are ready to drive the real robot. Use the button at the top.</p>
+        ) : ready || readyStatus === 'ready' ? (
+          <div className="mt-3 rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-600/25 dark:bg-emerald-950/40" data-testid="tdm59-ready">
+            <p className="font-semibold text-emerald-900 dark:text-emerald-100">You are ready to drive the real robot.</p>
+            <p className="mt-0.5 text-xs text-emerald-900/80 dark:text-emerald-100/80">Claiming teleop and takeover tasks is unlocked on this device.</p>
+            <Link href={next ?? '/marketplace'} className="mt-2 inline-block rounded-md bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800" data-testid="tdm59-continue">
+              {next ? 'Back to the task' : 'Find a paid task'}
+            </Link>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-zinc-500">Four quick basics and the task once. That unlocks claiming paid teleop tasks.</p>
+        )}
+      </Panel>
+
+      <Panel title="Driving">
+        <Tdm106DriveSettings drive={drive} snapAvailable snapNote={`Near the ${objName}, the hand is pulled toward its centre as you move, so lowering lines up by itself. Turn it off to practise without help.`} />
+      </Panel>
+
+      <details className="gx-plate">
+        <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
+          Feel the lag
+          <LatencyBadge videoMs={lag} cmdHz={ui.hz} driving={ui.engaged} simulated pauseAtMs={PAUSE_AT_MS} />
+        </summary>
+        <div className="mt-2 flex gap-1" role="group" aria-label="Simulated video delay">
+          {LAGS.map((l) => (
+            <button
+              key={l.ms}
+              type="button"
+              onClick={() => setLag(l.ms)}
+              aria-pressed={lag === l.ms}
+              className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ring-1 ${
+                lag === l.ms ? 'bg-zinc-900 text-white ring-zinc-900 dark:bg-zinc-100 dark:text-zinc-900' : 'ring-zinc-300 hover:bg-zinc-100 dark:ring-zinc-700 dark:hover:bg-zinc-800'
+              }`}
+              data-testid={`tdm59-lag-${l.ms}`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          Adds a delay to everything you send, like a slow network. Under 150 ms feels smooth; over 300 ms is hard to drive; over 400 ms the real page pauses driving.
+        </p>
+      </details>
+    </>
+  );
+  const isReady = ready || readyStatus === 'ready';
+
+  if (phone) {
+    const detail = coach
+      ? coach.kind === 'lesson' && lesson?.id === 'grip'
+        ? 'Tap Grip, then tap Release.'
+        : tdm86TouchWords(coach.detail)
+      : undefined;
+    const netLast = basicsDone && taskDone && !netOk && !isReady;
+    const coachAction = netLast ? (
+      <button type="button" onClick={() => void testNet()} disabled={netBusy} className="gx-btn gx-btn-primary gx-btn-sm shrink-0" data-testid="tdm86-net-retest">
+        {netBusy ? 'Testing…' : 'Test again'}
+      </button>
+    ) : isReady ? (
+      <Link href={next ?? '/marketplace'} className="gx-btn gx-btn-primary shrink-0 whitespace-nowrap" data-testid="tdm59-continue">
+        {next ? 'Back to task' : 'Find a task'}
+      </Link>
+    ) : canSkip ? (
+      <button type="button" onClick={() => setSkipped(true)} className="gx-btn gx-btn-primary gx-btn-sm shrink-0" data-testid="tdm106-skip-to-task">
+        Skip to task
+      </button>
+    ) : taskDone ? (
+      <button type="button" onClick={() => resetScene(true)} className="gx-btn gx-btn-sm shrink-0" data-testid="tdm106-again">
+        Go again
+      </button>
+    ) : null;
+    const doneCount = BASICS.filter((l) => done[l]).length + (taskDone ? 1 : 0) + (netOk ? 1 : 0);
+    return (
+      <div style={{ ['--tdm56-drive' as string]: 'var(--melt)' }} data-testid="tdm59-practice">
+        <Tdm86Cockpit
+          landscape={landscape}
+          testId="tdm59-phone"
+          bar={
+            <div className="shrink-0">
+              <div className="flex items-stretch gap-2">
+                <div
+                  className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2.5 py-1 transition-colors ${
+                    status.tone === 'drive' ? 'bg-melt text-on-melt' : status.tone === 'blocked' ? 'bg-slag-soft text-ink ring-1 ring-slag' : 'bg-surface text-ink ring-1 ring-line'
+                  }`}
+                  aria-live="polite"
+                  data-testid="tdm59-practice-status"
+                  data-state={status.tone}
+                >
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${status.tone === 'drive' ? 'animate-pulse bg-on-melt' : status.tone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
+                  <div className="min-w-0">
+                    <div className="truncate text-[15px] font-semibold leading-tight">{status.tone === 'idle' && isReady ? 'Ready for paid tasks' : status.title}</div>
+                    <div className="truncate text-[12px] leading-tight opacity-80">
+                      {status.tone === 'idle' ? (isReady ? 'Practice passed on this phone.' : `Practice: ${doneCount} of ${BASICS.length + 2} checks done`) : status.sub}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={pressStop}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    pressStop();
+                  }}
+                  className={`h-12 shrink-0 rounded-sm border-2 border-red-900/30 bg-[#d4221a] px-5 text-xl font-black tracking-wide text-white shadow-[0_3px_0_#7f1410] active:translate-y-0.5 active:shadow-none ${
+                    hintKeys.includes('Escape') && !stopped ? 'ring-4 ring-arc motion-safe:animate-pulse' : ''
+                  }`}
+                  aria-label="Stop the practice arm"
+                  data-testid="tdm59-practice-stop"
+                >
+                  STOP
+                </button>
+              </div>
+              {stopped && (
+                <div className="mt-1.5 flex items-center gap-2 rounded-sm bg-red-600 px-2.5 py-1.5 text-sm text-white" role="alert">
+                  <span className="flex-1 font-semibold">Stopped. The real robot stays locked like this until you resume.</span>
+                  <button type="button" className="rounded-sm bg-white px-4 py-2 font-semibold text-red-700" onClick={resume} data-testid="tdm59-practice-resume">
+                    Resume
+                  </button>
+                </div>
+              )}
+            </div>
+          }
+          coach={
+            coach ? (
+              <Tdm86Coach
+                tag={isReady ? 'Ready' : coach.kind === 'lesson' ? `Basics ${coach.n}/${BASICS.length}` : `Task ${Math.min(coach.n, 5)}/5`}
+                title={isReady ? 'You are ready' : netLast ? 'Last check: your connection' : coach.title}
+                detail={
+                  isReady
+                    ? 'Paid teleop tasks are unlocked on this phone.'
+                    : netLast
+                      ? netBusy || !net
+                        ? 'Testing the connection to the robot…'
+                        : `${net.advice.headline}. ${net.advice.tips[0] ?? ''}`
+                      : detail
+                }
+                tone={isReady || (coach.kind === 'task' && coach.step === 'done') ? 'done' : 'plain'}
+                action={coachAction}
+                testId="tdm59-coach"
+                data={{ kind: coach.kind, step: coach.kind === 'task' ? coach.step : lesson?.id, keys: hintKeys.join(' ') }}
+              />
+            ) : (
+              <Tdm86Coach title="Loading the practice scene" testId="tdm59-coach" />
+            )
+          }
+          view={
+            <div className={`relative h-full overflow-hidden rounded-md p-0.5 transition-colors ${ui.engaged ? 'bg-melt' : 'bg-transparent'}`} data-testid="tdm59-practice-views">
+              <View label="" lagMs={lag} className="h-full">
+                <PracticeTwin sim={sim} spec={spec} camera={view} lagMs={lag} ghost={view !== 'wrist'} />
+              </View>
+              <Tdm86ViewTabs value={view} onChange={setView} testPrefix="tdm59" />
+              {/* the hand's height against the cube, always in view (tap to swap) */}
+              <Tdm86Pip label={view === 'side' ? 'Driver' : 'Side'} onTap={() => setView(view === 'side' ? DRIVER_CAM.id : 'side')}>
+                <PracticeTwin sim={sim} spec={spec} camera={view === 'side' ? DRIVER_CAM.id : 'side'} lagMs={lag} ghost />
+              </Tdm86Pip>
+              <Tdm86ViewReadouts grip={phoneRead.grip} height={phoneRead.height} testPrefix="tdm59" />
+              {toast && (
+                <div
+                  className={`pointer-events-none absolute inset-x-0 top-12 z-20 mx-auto w-fit max-w-[92%] rounded-sm px-3 py-2 text-[14px] font-semibold shadow-overlay ${toast.tone === 'good' ? 'bg-arc text-on-arc' : 'bg-zinc-900/90 text-white'}`}
+                  role="status"
+                  data-testid="tdm59-toast"
+                >
+                  {toast.text}
+                </div>
+              )}
+            </div>
+          }
+          left={<Tdm86ZoneStick label="Move" hint="forward, back, left, right" onChange={drive.sticks.left} testId="tdm59-stick-move" />}
+          center={<Tdm86GripButton drive={drive} state={phoneRead.grip} testId="tdm59-grip-toggle" />}
+          right={
+            <Tdm86ZoneStick
+              axis={drive.settings.rotation ? 'xy' : 'y'}
+              label="Up / down"
+              hint={drive.settings.rotation ? 'up, down; sideways turns' : 'push up to lift'}
+              onChange={drive.sticks.right}
+              testId="tdm59-stick-updown"
+            />
+          }
+        />
+        {/* below the cockpit */}
+        <div className="mt-4 flex flex-col gap-4 text-sm">
+          <div className="flex flex-wrap items-center gap-x-1">
+            <SimTag label={`Simulated · ${sceneLabel}`} className="mr-1" />
+            <span className="sr-only" data-testid="tdm106-sim-label">{sceneLabel}</span>
+            <button type="button" className="rounded-md px-2 py-2 text-ink-muted underline-offset-2 hover:underline" onClick={() => resetScene(false)} data-testid="tdm59-reset-scene">
+              Reset the scene
+            </button>
+            <button type="button" className="rounded-md px-2 py-2 text-ink-muted underline-offset-2 hover:underline" onClick={() => resetScene(true)}>
+              New layout
+            </button>
+            <button type="button" className="rounded-md px-2 py-2 text-ink-muted underline-offset-2 hover:underline" onClick={() => setIntro(true)}>
+              How to drive
+            </button>
+          </div>
+          {source.note && (
+            <p className="rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-100 dark:ring-amber-900" data-testid="tdm106-scene-note">
+              {source.note}
+            </p>
+          )}
+          {sidePanels}
+        </div>
+        <InstructionsOverlay open={intro} onClose={closeIntro} kind="practice" taskText={taskText ?? source.spec.task} doneLabel="Back to practice" />
+      </div>
+    );
+  }
 
   return (
     <div style={{ ['--tdm56-drive' as string]: 'var(--melt)' }} data-testid="tdm59-practice">
@@ -494,78 +755,7 @@ export function PracticeConsole({ next, taskText, scene: sceneFetch }: { next?: 
         {/* ---------------- side panel */}
         <aside className="flex flex-col gap-4 text-sm">
           {!touch && wide && <Tdm106KeyLegend drive={drive} hint={hintKeys} />}
-          <Panel title="Readiness check" aside={<span className="tabular-nums text-zinc-500">{BASICS.filter((l) => done[l]).length + (taskDone ? 1 : 0) + (netOk ? 1 : 0)}/{BASICS.length + 2}</span>}>
-            <ol className="space-y-1" data-testid="tdm59-lessons">
-              {LESSONS.map((l, i) => (
-                <Step key={l.id} n={i + 1} on={done[l.id]} current={!inTask && lesson?.id === l.id} id={l.id}>
-                  {l.title}
-                </Step>
-              ))}
-              <Step n={BASICS.length + 1} on={taskDone} current={inTask && !taskDone} id="pick_place">
-                Task: put the {objName} on the {goalName}
-              </Step>
-              <li className="flex items-start gap-2 rounded-md px-1.5 py-1" data-done={netOk}>
-                <Check on={netOk} n={BASICS.length + 2} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={netOk ? 'text-zinc-500' : 'font-medium'}>Your connection</span>
-                    {net && (
-                      <span className={`inline-flex items-center gap-1 text-xs ${GRADE_STYLE[net.advice.grade].text}`} data-testid="tdm59-net" data-grade={net.advice.grade}>
-                        <span className={`h-2 w-2 rounded-full ${GRADE_STYLE[net.advice.grade].dot}`} />
-                        {net.advice.headline}
-                        {net.medianMs != null && ` · ${Math.round(net.medianMs)} ms`}
-                      </span>
-                    )}
-                    <button type="button" onClick={() => void testNet()} disabled={netBusy} className="text-xs text-zinc-600 underline underline-offset-2 disabled:no-underline disabled:opacity-60 dark:text-zinc-400">
-                      {netBusy ? 'Testing…' : 'Test again'}
-                    </button>
-                  </div>
-                  {net && net.advice.grade !== 'good' && <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">{net.advice.tips[0]}</p>}
-                </div>
-              </li>
-            </ol>
-            {ready || readyStatus === 'ready' ? (
-              <div className="mt-3 rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-600/25 dark:bg-emerald-950/40" data-testid="tdm59-ready">
-                <p className="font-semibold text-emerald-900 dark:text-emerald-100">You are ready to drive the real robot.</p>
-                <p className="mt-0.5 text-xs text-emerald-900/80 dark:text-emerald-100/80">Claiming teleop and takeover tasks is unlocked on this device.</p>
-                <Link href={next ?? '/marketplace'} className="mt-2 inline-block rounded-md bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800" data-testid="tdm59-continue">
-                  {next ? 'Back to the task' : 'Find a paid task'}
-                </Link>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-zinc-500">Four quick basics and the task once. That unlocks claiming paid teleop tasks.</p>
-            )}
-          </Panel>
-
-          <Panel title="Driving">
-            <Tdm106DriveSettings drive={drive} snapAvailable snapNote={`Near the ${objName}, the hand is pulled toward its centre as you move, so lowering lines up by itself. Turn it off to practise without help.`} />
-          </Panel>
-
-          <details className="gx-plate">
-            <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
-              Feel the lag
-              <LatencyBadge videoMs={lag} cmdHz={ui.hz} driving={ui.engaged} simulated pauseAtMs={PAUSE_AT_MS} />
-            </summary>
-            <div className="mt-2 flex gap-1" role="group" aria-label="Simulated video delay">
-              {LAGS.map((l) => (
-                <button
-                  key={l.ms}
-                  type="button"
-                  onClick={() => setLag(l.ms)}
-                  aria-pressed={lag === l.ms}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ring-1 ${
-                    lag === l.ms ? 'bg-zinc-900 text-white ring-zinc-900 dark:bg-zinc-100 dark:text-zinc-900' : 'ring-zinc-300 hover:bg-zinc-100 dark:ring-zinc-700 dark:hover:bg-zinc-800'
-                  }`}
-                  data-testid={`tdm59-lag-${l.ms}`}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-zinc-500">
-              Adds a delay to everything you send, like a slow network. Under 150 ms feels smooth; over 300 ms is hard to drive; over 400 ms the real page pauses driving.
-            </p>
-          </details>
+          {sidePanels}
         </aside>
       </div>
 
@@ -607,9 +797,9 @@ function View({ label, lagMs, compact, className = '', children }: { label: stri
   return (
     <div className={`relative overflow-hidden rounded-lg bg-[#2f2c40] ${className}`}>
       {children}
-      <span className={`pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 font-medium text-white ${compact ? 'text-[10px] sm:text-xs' : 'text-xs'}`}>{label}</span>
+      {label && <span className={`pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 font-medium text-white ${compact ? 'text-[10px] sm:text-xs' : 'text-xs'}`}>{label}</span>}
       {lagMs > 0 && (
-        <span className={`pointer-events-none absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs ${tone}`}>{lagMs} ms</span>
+        <span className={`pointer-events-none absolute right-2 ${label ? 'top-2' : 'top-12 z-10'} rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs ${tone}`}>{lagMs} ms</span>
       )}
     </div>
   );

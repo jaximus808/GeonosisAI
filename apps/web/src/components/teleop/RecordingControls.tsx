@@ -46,9 +46,18 @@ export interface RecordingControlsProps {
   controlSocket: ControlChannel | null | undefined;
   onPhase?: (phase: RecordingPhase) => void;
   className?: string;
+  /** TDM-86 phone cockpit: one row (status + the next button), no header, timeline or hints. */
+  compact?: boolean;
 }
 
 const STATE_STALE_MS = 2500;
+/** TDM-86: the lease guard's refusal codes (robot-client tdm57_lease.py / teleop.py), in words. */
+const REFUSED_TEXT: Record<string, string> = {
+  wrong_task: 'The robot is still finishing the last person\'s session. Try again in about 15 seconds.',
+  not_active: 'Another page of yours holds the controls. Close the other tab and try again.',
+  lease_lost: 'You lost control of the robot. Claim the task again from the marketplace.',
+  token_expired: 'Your control pass expired. Reload the page.',
+};
 const ACK_TIMEOUT_MS: Partial<Record<RecordingOp, number>> = { record_stop: 15000, record_discard: 15000 };
 
 const PHASE_TEXT: Record<RecordingPhase, string> = {
@@ -94,7 +103,7 @@ function Btn({
   );
 }
 
-export function RecordingControls({ taskId, kind, controlSocket, onPhase, className }: RecordingControlsProps) {
+export function RecordingControls({ taskId, kind, controlSocket, onPhase, className, compact }: RecordingControlsProps) {
   const [rec, setRec] = useState<RecordingState | null>(null);
   const [recAt, setRecAt] = useState(0); // performance.now() of the last robot report
   const [lastStateAt, setLastStateAt] = useState(0);
@@ -129,6 +138,15 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
         if (p && ack.req === p.req) {
           setPending(null);
           setError(ack.ok ? null : (ack.error ?? 'refused by the robot'));
+        }
+      } else if (m.t === 'ack' && (m as { op?: string }).op) {
+        // TDM-86: the robot's lease guard refuses an op with a plain {t:"ack", op, req, ok:false, code}
+        // (no record_ack). Without this the button spun for 5 s and said "No answer from the robot".
+        const a = m as unknown as { op: string; req?: string; ok?: boolean; code?: string };
+        const p = pendingRef.current;
+        if (p && a.ok === false && (a.req === p.req || (!a.req && a.op === p.op))) {
+          setPending(null);
+          setError(REFUSED_TEXT[a.code ?? ''] ?? `The robot refused it (${a.code ?? 'no reason given'}).`);
         }
       }
     });
@@ -189,10 +207,12 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
 
   return (
     <section
-      className={`rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 ${className ?? ''}`}
+      className={`${compact ? 'rounded-sm bg-surface px-2 py-1.5 ring-1 ring-line' : 'rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950'} ${className ?? ''}`}
       data-testid="tdm58-recording-controls"
       data-phase={phase}
+      data-compact={compact ? 'true' : undefined}
     >
+      {!compact && (
       <header className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
           {isTakeover ? 'Recovery takeover' : 'Teleop demo'} recording
@@ -202,18 +222,20 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
           {live ? 'Robot connected' : controlSocket ? 'Waiting for robot state' : 'Not connected'}
         </span>
       </header>
+      )}
 
+      <div className={compact ? 'flex flex-wrap items-center gap-2' : undefined}>
       {/* status line */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" aria-live="polite">
+      <div className={compact ? 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1' : 'mb-4 flex flex-wrap items-center gap-x-4 gap-y-2'} aria-live="polite">
         {active ? (
           <span className="inline-flex items-center gap-2 rounded-md bg-red-600/10 px-2 py-1 font-mono text-lg font-semibold tabular-nums text-red-700 dark:text-red-400">
             <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />
             REC {fmtClock(elapsed)}
           </span>
         ) : (
-          <span className="text-sm text-zinc-500">{PHASE_TEXT.idle}</span>
+          <span className="text-sm text-zinc-500">{compact && !live ? 'Waiting for the robot' : PHASE_TEXT.idle}</span>
         )}
-        {active && (
+        {active && !compact && (
           <span className="font-mono text-sm tabular-nums text-zinc-600 dark:text-zinc-300" data-testid="tdm58-frames">
             {rec?.frames ?? 0} frames
           </span>
@@ -229,13 +251,13 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             {PHASE_TEXT[phase]}
           </span>
         )}
-        {active && overLong && (
+        {active && overLong && !compact && (
           <span className="text-sm font-medium text-red-600">Finish soon: episodes over {REVIEW_MAX_S} s are rejected.</span>
         )}
       </div>
 
       {/* takeover timeline */}
-      {isTakeover && active && rec && (
+      {isTakeover && active && rec && !compact && (
         <ol className="mb-4 grid grid-cols-3 gap-2 text-sm" data-testid="tdm58-timeline">
           <TimelineCell label="Start" atMs={0} ts={rec.started_at_us} on />
           <TimelineCell label="Takeover" atMs={rec.takeover_at_ms} ts={rec.takeover_ts} on={rec.takeover_ts != null} />
@@ -285,6 +307,7 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
             Discard
           </Btn>
         )}
+      </div>
       </div>
 
       {confirming && active && (
@@ -355,18 +378,18 @@ export function RecordingControls({ taskId, kind, controlSocket, onPhase, classN
       )}
 
       {/* hints */}
-      {rolloutOwned && (
+      {!compact && rolloutOwned && (
         <p className="mt-2 text-xs text-zinc-500">
           This episode is the paused rollout&apos;s own recording. Take over, recover, hand back: the robot finishes the trial and submits it.
         </p>
       )}
-      {active && isTakeover && phase === 'policy' && !can?.takeover && (
+      {!compact && active && isTakeover && phase === 'policy' && !can?.takeover && (
         <p className="mt-2 text-xs text-zinc-500">Let the policy run for a moment first: the reviewer needs the failure before your takeover.</p>
       )}
-      {active && isTakeover && phase === 'human' && (
+      {!compact && active && isTakeover && phase === 'human' && (
         <p className="mt-2 text-xs text-zinc-500">Recover the task, then hand back. A takeover must last at least 1 s.</p>
       )}
-      {active && !isTakeover && elapsed < REVIEW_MIN_S * 1000 && (
+      {active && !isTakeover && elapsed < REVIEW_MIN_S * 1000 && !compact && (
         <p className="mt-2 text-xs text-zinc-500">Demos shorter than {REVIEW_MIN_S} s are rejected.</p>
       )}
 

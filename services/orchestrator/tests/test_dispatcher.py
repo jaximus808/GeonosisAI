@@ -409,3 +409,28 @@ def test_accepted_clean_demo_completes_the_still_claimed_task():
     assert call[1] == task["id"] and json.loads(call[2])["reason"] == "episode_accepted"
     task["status"] = "completed"
     assert d.complete_on_accept(ep) is None
+
+
+def test_tdm86_lease_sweeper_expires_lapsed_claims_then_starts_the_waiting_session():
+    """TDM-86: an abandoned clean_teleop claim (tab closed, lease lapsed) used to keep its start_teleop
+    job on the robot forever (expiry only ran when someone claimed that same task), so the next
+    claimant's page got wrong_task for every command. The sweeper expires it, then starts the waiting
+    claim's session once the robot is free."""
+    db, d = setup(amount=1)
+    now_us = int(time.time() * 1e6)
+    d.clock = lambda: now_us / 1e6
+    stale = db.put("task", ticket_id=7, robot_id=1, data_plan_id=0, type="clean_teleop", status="claimed",
+                   instructions="", price_cents=1000, assignee_id=4, completed_at=None, lease_expires_at=now_us - 30_000_000)
+    live = db.put("task", ticket_id=7, robot_id=1, data_plan_id=0, type="clean_teleop", status="claimed",
+                  instructions="", price_cents=1000, assignee_id=5, completed_at=None, lease_expires_at=now_us + 50_000_000)
+    job = db.put("robot_command", robot_id=1, ticket_id=7, type="start_teleop", status="acked",
+                 payload_json=json.dumps({"task_id": stale["id"]}))
+    assert d.sweep_leases() == {"expired": True, "started": []}
+    assert ("expire_task_leases",) in db.calls
+    # the reducer reopens the stale claim; the dispatcher stops its session; the robot finishes the job
+    stale.update(status="open", lease_expires_at=None)
+    job["status"] = "done"
+    assert d.sweep_leases() == {"expired": False, "started": [live["id"]]}
+    started = [json.loads(c["payload_json"])["task_id"] for c in db.rows("robot_command") if c["type"] == "start_teleop" and c["status"] == "issued"]
+    assert started == [live["id"]]
+    assert d.sweep_leases() == {"expired": False, "started": []}  # idempotent: its job is open now

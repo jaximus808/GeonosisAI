@@ -53,6 +53,7 @@ Dedup is from rows, not memory (restart-safe): plan tasks by ``task.data_plan_id
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -720,6 +721,50 @@ class Dispatcher:
             self.event("dispatch.teleop_stopped", {**base, "task_status": st})
             return "stopped"
 
+    # ---- TDM-86: lapsed claims and waiting teleop sessions
+    def sweep_leases(self) -> dict:
+        """A claim whose 60 s lease lapsed (the claimant closed the tab) stays ``claimed`` until some
+        caller runs ``expire_task_leases``; until then its start_teleop job holds the robot and the next
+        claimant's page gets ``wrong_task`` for every command. So: expire lapsed claims, then start the
+        teleop session of any live clean_teleop claim that was blocked while the robot was busy."""
+        now_us = int(self.clock() * 1_000_000)
+        tasks = self.m.rows("task")
+        out: dict = {"expired": False, "started": []}
+        if any(t.get("status") == "claimed" and 0 < _i(t.get("lease_expires_at")) < now_us - 2_000_000 for t in tasks):
+            self.w.call_reducer("expire_task_leases")
+            out["expired"] = True
+            return out  # the task updates come back through the bus; start waiting sessions next tick
+        cmds = self.m.rows("robot_command")
+        for t in tasks:
+            if t.get("type") != "clean_teleop" or t.get("status") != "claimed" or _i(t.get("lease_expires_at")) <= now_us:
+                continue
+            rid, task_id = _i(t.get("robot_id")), _i(t["id"])
+            if not rid or self._robot_jobs_open(rid):
+                continue
+            if any(c.get("type") == "start_teleop" and _i(_json(c.get("payload_json")).get("task_id")) == task_id
+                   and c.get("status") in OPEN_JOB for c in cmds):
+                continue
+            if self.on_teleop_task(t, {"status": "open"}) == "issued":
+                out["started"].append(task_id)
+        return out
+
+    def start_lease_sweeper(self, every_s: float) -> None:
+        if every_s <= 0 or getattr(self, "_sweeper", None) is not None:
+            return
+
+        def loop() -> None:
+            stop = threading.Event()
+            while not stop.wait(every_s):
+                try:
+                    r = self.sweep_leases()
+                    if r["expired"] or r["started"]:
+                        log.info("dispatch.lease_sweep", extra={"fields": r})
+                except Exception:  # noqa: BLE001 - the sweeper must never die
+                    log.exception("dispatch.lease_sweep_error")
+
+        self._sweeper = threading.Thread(target=loop, name="dispatch-lease-sweeper", daemon=True)
+        self._sweeper.start()
+
 
 # --------------------------------------------------------------------------- per-bus singleton
 
@@ -740,4 +785,5 @@ def get_dispatcher(bus: Mirror) -> Dispatcher:
         d = _instances.get(id(bus))
         if d is None or d.m is not bus:
             d = _instances[id(bus)] = Dispatcher(bus, lambda: make_writer())
+            d.start_lease_sweeper(float(os.environ.get("RDF_LEASE_SWEEP_S", "10") or 0))  # TDM-86
         return d

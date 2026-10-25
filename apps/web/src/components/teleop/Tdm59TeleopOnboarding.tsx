@@ -58,16 +58,18 @@ export function Tdm59TeleopOnboarding({ taskId }: { taskId: string }) {
 
   const [open, setOpen] = useState(false);
   useTdm59KeyShield(open);
+  const { status } = useTdm59Readiness();
   useEffect(() => {
-    if (!introSeen(kind)) setOpen(true);
-  }, [kind]);
+    // TDM-86: someone who passed practice already learnt the controls; don't put a walkthrough over
+    // the arm they just claimed (it stays one tap away under "How to drive")
+    if (status === 'not_ready' && !introSeen(kind)) setOpen(true);
+  }, [kind, status]);
   const close = useCallback(() => {
     markIntroSeen(kind);
     setOpen(false);
   }, [kind]);
 
   const t = useConsoleTelemetry();
-  const { status } = useTdm59Readiness();
   const driving = t.clutch === 'drive';
 
   return (

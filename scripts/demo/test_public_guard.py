@@ -255,7 +255,7 @@ def test_tdm108_task_invite_opens_its_task_only(run):
             r = await c.get(ok, headers=h, allow_redirects=False)
             assert r.status == 200 and (await r.json())["access"] == "task:7", ok
         for no in ("/marketplace?task=8", "/marketplace", "/teleop/8", "/reset/8", "/tickets/3", "/dashboard",
-                   "/practice?ticket=4", "/earnings", "/robots/2"):
+                   "/practice?ticket=4", "/earnings?contributor=3", "/robots/2"):  # TDM-86: own /earnings is open
             r = await c.get(no, headers=h, allow_redirects=False)
             assert r.status == 302 and r.headers["location"].startswith("/join?next="), no
         for path, method in (("/api/tdm55/stream-token", "POST"), ("/api/tdm62/resets/7", "GET"),

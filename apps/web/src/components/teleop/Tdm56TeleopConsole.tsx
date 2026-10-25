@@ -39,8 +39,37 @@ import {
 } from '@/lib/teleop/tdm56ControlClient';
 import type { V3 } from '@/lib/teleop/tdm56Input';
 import { useTdm106Drive, type Tdm106DriveUi } from '@/lib/teleop/useTdm106Drive';
+import { Tdm86Coach, Tdm86Cockpit, Tdm86GripButton, Tdm86ViewReadouts, Tdm86ViewTabs, Tdm86ZoneStick, useTdm86Phone } from '@/components/teleop/Tdm86Phone';
+import { YAM_MODEL, YAM_BODIES } from '@/components/robotview/yamModel';
+import { createYamKinematics } from '@/components/robotview/yamFk';
+import { SIM_DEFAULT_SCENE, type SceneSpecV1 } from '@/lib/robotview/scene';
+import type { RobotLiveState } from '@/lib/robotview/types';
+import { tdm106Guide, type Tdm106Guide } from '@/lib/teleop/tdm106Guide';
+import { createTdm106Ik } from '@/lib/teleop/tdm106Ik';
+import {
+  TDM86_DRIVER_CAM,
+  tdm86GripState,
+  tdm86HeightText,
+  tdm86LandingZ,
+  tdm86TeleopGuideInput,
+  tdm86TouchWords,
+  type Tdm86GripTone,
+  type Tdm86SceneLive,
+} from '@/lib/teleop/tdm86Phone';
 
 const ROBOT_SILENT_MS = 1000;
+// TDM-86 phone cockpit: the twin's kinematics for the tool point and the landing ghost, and the
+// sim scene with the driver's view added (W / the Move stick's "up" is up the screen).
+const IK = createTdm106Ik(createYamKinematics(YAM_MODEL), YAM_BODIES);
+const PHONE_SPEC: SceneSpecV1 = { ...SIM_DEFAULT_SCENE, cameras: [...(SIM_DEFAULT_SCENE.cameras ?? []), TDM86_DRIVER_CAM] };
+interface PhoneHud {
+  guide: Tdm106Guide | null;
+  grip: { text: string; tone: Tdm86GripTone };
+  height: string | null;
+  ghost: number[][] | null;
+  policy: boolean;
+}
+const NO_HUD: PhoneHud = { guide: null, grip: { text: 'Gripper open', tone: 'open' }, height: null, ghost: null, policy: false };
 
 // ------------------------------------------------------------------ context for TDM-57 / TDM-58
 
@@ -82,6 +111,8 @@ export interface Tdm56TeleopConsoleProps {
   dev?: { streamUrl: string; token: string; controlUrl?: string };
   /** TDM-106 snap-to-grasp: tool + object positions (base frame), when the object pose is known (sim robots). */
   assistTarget?: () => { tool: V3; obj: V3 } | null;
+  /** TDM-86: task.type ('clean_teleop' | 'recovery_takeover'), for the phone coach's first step. */
+  taskKind?: string;
 }
 
 type Block = { code: string; text: string } | null;
@@ -113,6 +144,7 @@ function ConsoleInner({
   stamp,
   getGrant,
   assistTarget,
+  taskKind,
 }: Tdm56TeleopConsoleProps & { getGrant: () => Promise<StreamGrant> }) {
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
@@ -260,6 +292,298 @@ function ConsoleInner({
   const robot = link.robot;
   const status = clutchStatus(ui, touch);
 
+  const stopAlert = (localStop || link.stopPending) && (
+  <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-red-600 px-3 py-2 text-sm text-white" role="alert">
+    <span className="font-semibold">
+      {link.stopPending
+        ? 'STOP not delivered: the control link is down. Use the physical e-stop at the table. Retrying on reconnect.'
+        : robot?.stopped
+          ? 'Robot stopped. It stays locked until someone at the arm clears it.'
+          : 'STOP sent. Motion from this page is off.'}
+    </span>
+    {!link.stopPending && (
+      <button
+        type="button"
+        className="rounded-md bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50"
+        onClick={() => {
+          localStopRef.current = false;
+          setLocalStop(false);
+        }}
+      >
+        Resume control
+      </button>
+    )}
+  </div>
+);
+
+  // ---- TDM-86 phone cockpit
+  const { phone, landscape } = useTdm86Phone();
+  const [view, setView] = useState<string>(TDM86_DRIVER_CAM.id);
+  const liveRef = useRef<RobotLiveState | null>(null);
+  const onLiveState = useCallback((st: RobotLiveState | null) => {
+    liveRef.current = st;
+  }, []);
+  const gripCmdRef = useRef(drive.gripper);
+  gripCmdRef.current = drive.gripper;
+  const [hud, setHud] = useState<PhoneHud>(NO_HUD);
+  useEffect(() => {
+    if (!phone) return;
+    let n = 0;
+    let ghost: number[][] | null = null;
+    const id = window.setInterval(() => {
+      const st = liveRef.current;
+      if (!st?.joints?.length) return;
+      const tool = IK.toolPos(st.joints);
+      const scene = st.scene as Tdm86SceneLive | undefined;
+      const cmd = gripCmdRef.current;
+      const gi = tdm86TeleopGuideInput(tool, st.gripper, cmd, scene);
+      const tableZ = st.workspace?.table_z ?? 0;
+      const policy = st.control_source === 'policy';
+      if (n++ % 3 === 0) {
+        // the landing ghost: where the hand ends up if you lower straight down (~3 Hz, 10 IK steps)
+        const z = tdm86LandingZ(tool, tableZ, gi?.obj ?? null, gi?.goal ?? null);
+        ghost = null;
+        if (!policy && tool[2] - z > 0.01) {
+          const sol = IK.ik([tool[0], tool[1], z], IK.toolRot(st.joints), st.joints, 10);
+          if (sol.posErr < 0.01) ghost = [st.joints, sol.q];
+        }
+      }
+      setHud({
+        guide: gi ? tdm106Guide(gi) : null,
+        grip: tdm86GripState({ opening: st.gripper, cmd, holding: !!gi?.obj?.held }),
+        height: tdm86HeightText(tool, tableZ, gi?.obj ?? null),
+        ghost,
+        policy,
+      });
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [phone]);
+
+  const asidePanels = (
+    <>
+      <Panel title="Robot">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5" data-testid="tdm56-robot">
+          <dt className="text-zinc-500">Link</dt>
+          <dd className="flex items-center gap-2">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                link.state === 'open' ? 'bg-[var(--tdm56-ok)]' : link.state === 'denied' || link.state === 'error' ? 'bg-red-500' : 'bg-zinc-400'
+              }`}
+            />
+            <span data-testid="tdm56-link-state">{LINK_TEXT[link.state]}</span>
+            {link.ackRttMs != null && <span className="text-zinc-500 tabular-nums">{link.ackRttMs} ms</span>}
+          </dd>
+          <dt className="text-zinc-500">Sending</dt>
+          <dd className="tabular-nums" data-testid="tdm56-cmd-hz">
+            {link.cmdHz} cmd/s
+          </dd>
+          <dt className="text-zinc-500">Driven by</dt>
+          <dd data-testid="tdm56-control-source">{robot?.controlSource ?? '--'}</dd>
+          <dt className="text-zinc-500">Hand at</dt>
+          <dd className="tabular-nums">
+            {robot?.pos ? `${fmt(robot.pos[0], 1, 100)}, ${fmt(robot.pos[1], 1, 100)}, ${fmt(robot.pos[2], 1, 100)} cm` : '--'}
+          </dd>
+          <dt className="text-zinc-500">Orientation</dt>
+          <dd className="tabular-nums">{robot?.rot ? fmtRot(robot.rot, robot.rotKind) : '--'}</dd>
+          <dt className="text-zinc-500">Gripper</dt>
+          <dd className="tabular-nums">
+            {robot?.gripper != null ? `${Math.round(robot.gripper * 100)}% open` : '--'}
+            <span className="text-zinc-500"> (asked {Math.round(ui.gripper * 100)}%)</span>
+          </dd>
+          <dt className="text-zinc-500">Safety</dt>
+          <dd data-testid="tdm56-clamps">
+            {robot?.stopped ? (
+              <span className="rounded bg-red-600 px-1.5 py-0.5 text-xs font-semibold text-white">Latched stop</span>
+            ) : robot?.watchdog ? (
+              <span className="rounded bg-amber-500 px-1.5 py-0.5 text-xs font-semibold text-black">Watchdog hold</span>
+            ) : robot?.clamps.length ? (
+              <span className="flex flex-wrap gap-1">
+                {robot.clamps.map((c) => (
+                  <span key={c} className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                    {CLAMP_TEXT[c] ?? c}
+                  </span>
+                ))}
+              </span>
+            ) : robot ? (
+              <span className="text-zinc-500">No limits hit</span>
+            ) : (
+              '--'
+            )}
+          </dd>
+          {robot?.recording != null && (
+            <>
+              <dt className="text-zinc-500">Recording</dt>
+              <dd>{fmtRecording(robot.recording)}</dd>
+            </>
+          )}
+          {ui.engaged && (
+            <>
+              <dt className="text-zinc-500">This stroke</dt>
+              <dd className="tabular-nums">
+                {Math.round(Math.hypot(...ui.dPos) * 1000)} mm, {Math.round((Math.hypot(...ui.dRot) * 180) / Math.PI)}°
+              </dd>
+            </>
+          )}
+        </dl>
+      </Panel>
+
+      <Panel title="Driving">
+        <Tdm106DriveSettings drive={drive} snapAvailable={!!assistTarget} testPrefix="tdm56" />
+      </Panel>
+
+      <Panel title="Gripper">
+        <GripperSlider value={drive.gripper} onChange={drive.setGripper} />
+        <p className="mt-1 text-xs text-zinc-500">Tap G or the grip button to open or close. The arm holds still while the gripper moves.</p>
+      </Panel>
+
+    </>
+  );
+
+  if (phone) {
+    const rec = (robot?.recording ?? null) as { active?: boolean; phase?: string; last?: { status?: string } | null } | null;
+    const takeover = taskKind === 'recovery_takeover';
+    let coach: { tag?: string; title: string; detail?: string; tone?: 'plain' | 'done' | 'warn'; step?: string };
+    if (!dev && !canDrive) coach = { title: 'Waiting for control', detail: canDriveReason, tone: 'warn', step: 'lease' };
+    else if (rec && !rec.active && rec.last?.status === 'recorded')
+      coach = { title: 'Submitted. The reviewer is checking it', detail: 'The verdict and your payout show up right here.', tone: 'done', step: 'submitted' };
+    else if (rec && !rec.active)
+      coach = takeover
+        ? { tag: 'Step 1', title: 'Tap Start episode', detail: 'The policy drives first. Take over when it goes wrong.', step: 'start' }
+        : { tag: 'Step 1', title: 'Tap Start recording', detail: 'Then pick up the cube and set it on the plate.', step: 'start' };
+    else if (takeover && rec?.phase === 'policy') coach = { title: 'The policy is driving', detail: 'Watch it. Tap Take over when it goes wrong.', step: 'policy' };
+    else if (hud.guide?.step === 'done')
+      coach = takeover
+        ? { tag: '5/5', title: 'Recovered: hand back', detail: 'Tap Hand back to policy.', tone: 'done', step: 'done' }
+        : { tag: '5/5', title: 'Done: tap Finish', detail: 'Tap Finish, then Yes. The reviewer checks the video.', tone: 'done', step: 'done' };
+    else if (hud.guide)
+      coach = { tag: `${hud.guide.n}/5`, title: tdm86TouchWords(hud.guide.title), detail: tdm86TouchWords(hud.guide.detail), step: hud.guide.step };
+    else coach = { title: 'Drag the Move stick', detail: 'The Up/down stick lifts and lowers. Grip closes the fingers.', step: 'move' };
+
+    return (
+      <Tdm56Ctx.Provider value={api}>
+        <div
+          className="tdm56"
+          style={{ ['--tdm56-drive' as string]: 'var(--melt)', ['--tdm56-stop' as string]: '#d4221a', ['--tdm56-ok' as string]: '#1f9d6b' }}
+        >
+          <Tdm86Cockpit
+            landscape={landscape}
+            testId="tdm56-phone"
+            bar={
+              <div className="shrink-0">
+                <div className="flex items-stretch gap-2">
+                  <div
+                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2.5 py-1 transition-colors ${
+                      status.tone === 'drive'
+                        ? 'bg-[var(--tdm56-drive)] text-black'
+                        : status.tone === 'blocked'
+                          ? 'bg-slag-soft text-ink ring-1 ring-slag'
+                          : 'bg-surface text-ink ring-1 ring-line'
+                    }`}
+                    aria-live="polite"
+                    data-testid="tdm56-clutch-status"
+                    data-state={status.tone}
+                  >
+                    <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${status.tone === 'drive' ? 'animate-pulse bg-black' : status.tone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
+                    <div className="min-w-0">
+                      <div className="truncate text-[15px] font-semibold leading-tight">{status.title}</div>
+                      <div className="truncate text-[12px] leading-tight opacity-80">{status.sub}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={pressStop}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      pressStop();
+                    }}
+                    className="h-12 shrink-0 rounded-sm border-2 border-red-900/30 bg-[var(--tdm56-stop)] px-5 text-xl font-black tracking-wide text-white shadow-[0_3px_0_#7f1410] active:translate-y-0.5 active:shadow-none"
+                    aria-label="Stop the robot"
+                    data-testid="tdm56-stop"
+                  >
+                    STOP
+                  </button>
+                </div>
+                {stopAlert}
+              </div>
+            }
+            coach={
+              <Tdm86Coach
+                tag={coach.tag}
+                title={coach.title}
+                detail={coach.detail}
+                tone={coach.tone}
+                testId="tdm56-coach"
+                data={{ step: coach.step, keys: coach.step === hud.guide?.step ? hud.guide?.keys.join(' ') : '' }}
+              />
+            }
+            action={
+              <>
+                {!dev && !canDrive && controlSlot}
+                {recordingSlot && <div className="shrink-0">{recordingSlot}</div>}
+              </>
+            }
+            view={
+              <div
+                className={`h-full rounded-md outline-offset-2 transition-[outline-color] ${ui.engaged ? 'outline-4 outline-[var(--tdm56-drive)] outline-solid' : 'outline-0 outline-transparent'}`}
+                data-testid="tdm56-feed-frame"
+              >
+                {dev ? (
+                  <CameraFeed getGrant={getGrant} onHealth={onHealth} />
+                ) : (
+                  <TaskSimCameras
+                    taskId={taskId}
+                    onHealth={onHealth}
+                    fallback={<TaskCameraFeed taskId={taskId} onHealth={onHealth} />}
+                    phone={{
+                      single: view,
+                      spec: PHONE_SPEC,
+                      ghost: hud.policy ? undefined : hud.ghost,
+                      // the hand's height against the cube, always in view (tap to swap)
+                      pip: view === 'side' ? { camera: TDM86_DRIVER_CAM.id, label: 'Driver', onTap: () => setView(TDM86_DRIVER_CAM.id) } : { camera: 'side', label: 'Side', onTap: () => setView('side') },
+                      onState: onLiveState,
+                      overlay: (
+                        <>
+                          <Tdm86ViewTabs value={view} onChange={setView} testPrefix="tdm56" />
+                          <Tdm86ViewReadouts grip={hud.grip} height={hud.height} testPrefix="tdm56" />
+                        </>
+                      ),
+                    }}
+                  />
+                )}
+              </div>
+            }
+            left={<Tdm86ZoneStick label="Move" hint="forward, back, left, right" onChange={drive.sticks.left} testId="tdm56-stick-move" />}
+            center={<Tdm86GripButton drive={drive} state={hud.grip} testId="tdm56-grip-toggle" />}
+            right={
+              <Tdm86ZoneStick
+                axis={drive.settings.rotation ? 'xy' : 'y'}
+                label="Up / down"
+                hint={drive.settings.rotation ? 'up, down; sideways turns' : 'push up to lift'}
+                onChange={drive.sticks.right}
+                testId="tdm56-stick-updown"
+              />
+            }
+          />
+          {/* below the cockpit: the details a judge never needs mid-drive */}
+          <div className="mt-4 flex flex-col gap-4 text-sm">
+            {(dev || canDrive) && controlSlot}
+            {dev && (
+              <p className="rounded-md bg-amber-100 px-3 py-1.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200" data-testid="tdm56-dev">
+                Dev link: connected to <code className="text-xs">{dev.streamUrl}</code> with a fixed token, not a claimed task.
+              </p>
+            )}
+            {asidePanels}
+          </div>
+          {feed && (
+            <span className="sr-only" data-testid="tdm56-feed-health">
+              {JSON.stringify(feed)}
+            </span>
+          )}
+        </div>
+      </Tdm56Ctx.Provider>
+    );
+  }
+
   return (
     <Tdm56Ctx.Provider value={api}>
       <div
@@ -308,29 +632,7 @@ function ConsoleInner({
             </button>
           </div>
           {controlSlot && <div className="mt-2 md:hidden">{controlSlot}</div>}
-          {(localStop || link.stopPending) && (
-            <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-red-600 px-3 py-2 text-sm text-white" role="alert">
-              <span className="font-semibold">
-                {link.stopPending
-                  ? 'STOP not delivered: the control link is down. Use the physical e-stop at the table. Retrying on reconnect.'
-                  : robot?.stopped
-                    ? 'Robot stopped. It stays locked until someone at the arm clears it.'
-                    : 'STOP sent. Motion from this page is off.'}
-              </span>
-              {!link.stopPending && (
-                <button
-                  type="button"
-                  className="rounded-md bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50"
-                  onClick={() => {
-                    localStopRef.current = false;
-                    setLocalStop(false);
-                  }}
-                >
-                  Resume control
-                </button>
-              )}
-            </div>
-          )}
+          {stopAlert}
         </div>
 
         {dev && (
@@ -366,81 +668,7 @@ function ConsoleInner({
 
           {/* ---------------- side panel */}
           <aside className="flex flex-col gap-4 text-sm">
-            <Panel title="Robot">
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5" data-testid="tdm56-robot">
-                <dt className="text-zinc-500">Link</dt>
-                <dd className="flex items-center gap-2">
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${
-                      link.state === 'open' ? 'bg-[var(--tdm56-ok)]' : link.state === 'denied' || link.state === 'error' ? 'bg-red-500' : 'bg-zinc-400'
-                    }`}
-                  />
-                  <span data-testid="tdm56-link-state">{LINK_TEXT[link.state]}</span>
-                  {link.ackRttMs != null && <span className="text-zinc-500 tabular-nums">{link.ackRttMs} ms</span>}
-                </dd>
-                <dt className="text-zinc-500">Sending</dt>
-                <dd className="tabular-nums" data-testid="tdm56-cmd-hz">
-                  {link.cmdHz} cmd/s
-                </dd>
-                <dt className="text-zinc-500">Driven by</dt>
-                <dd data-testid="tdm56-control-source">{robot?.controlSource ?? '--'}</dd>
-                <dt className="text-zinc-500">Hand at</dt>
-                <dd className="tabular-nums">
-                  {robot?.pos ? `${fmt(robot.pos[0], 1, 100)}, ${fmt(robot.pos[1], 1, 100)}, ${fmt(robot.pos[2], 1, 100)} cm` : '--'}
-                </dd>
-                <dt className="text-zinc-500">Orientation</dt>
-                <dd className="tabular-nums">{robot?.rot ? fmtRot(robot.rot, robot.rotKind) : '--'}</dd>
-                <dt className="text-zinc-500">Gripper</dt>
-                <dd className="tabular-nums">
-                  {robot?.gripper != null ? `${Math.round(robot.gripper * 100)}% open` : '--'}
-                  <span className="text-zinc-500"> (asked {Math.round(ui.gripper * 100)}%)</span>
-                </dd>
-                <dt className="text-zinc-500">Safety</dt>
-                <dd data-testid="tdm56-clamps">
-                  {robot?.stopped ? (
-                    <span className="rounded bg-red-600 px-1.5 py-0.5 text-xs font-semibold text-white">Latched stop</span>
-                  ) : robot?.watchdog ? (
-                    <span className="rounded bg-amber-500 px-1.5 py-0.5 text-xs font-semibold text-black">Watchdog hold</span>
-                  ) : robot?.clamps.length ? (
-                    <span className="flex flex-wrap gap-1">
-                      {robot.clamps.map((c) => (
-                        <span key={c} className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                          {CLAMP_TEXT[c] ?? c}
-                        </span>
-                      ))}
-                    </span>
-                  ) : robot ? (
-                    <span className="text-zinc-500">No limits hit</span>
-                  ) : (
-                    '--'
-                  )}
-                </dd>
-                {robot?.recording != null && (
-                  <>
-                    <dt className="text-zinc-500">Recording</dt>
-                    <dd>{fmtRecording(robot.recording)}</dd>
-                  </>
-                )}
-                {ui.engaged && (
-                  <>
-                    <dt className="text-zinc-500">This stroke</dt>
-                    <dd className="tabular-nums">
-                      {Math.round(Math.hypot(...ui.dPos) * 1000)} mm, {Math.round((Math.hypot(...ui.dRot) * 180) / Math.PI)}°
-                    </dd>
-                  </>
-                )}
-              </dl>
-            </Panel>
-
-            <Panel title="Driving">
-              <Tdm106DriveSettings drive={drive} snapAvailable={!!assistTarget} testPrefix="tdm56" />
-            </Panel>
-
-            <Panel title="Gripper">
-              <GripperSlider value={drive.gripper} onChange={drive.setGripper} />
-              <p className="mt-1 text-xs text-zinc-500">Tap G or the grip button to open or close. The arm holds still while the gripper moves.</p>
-            </Panel>
-
+            {asidePanels}
             {recordingSlot && <Panel title="Recording">{recordingSlot}</Panel>}
 
           </aside>

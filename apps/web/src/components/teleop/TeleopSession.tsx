@@ -17,6 +17,7 @@ import { ControlLeaseBanner } from '@/components/teleop/ControlLease';
 import { RecordingControls } from '@/components/teleop/RecordingControls';
 import { Tdm56TeleopConsole, useTdm56Teleop } from '@/components/teleop/Tdm56TeleopConsole';
 import { Tdm59TeleopOnboarding } from '@/components/teleop/Tdm59TeleopOnboarding';
+import { useTdm86Phone } from '@/components/teleop/Tdm86Phone';
 import { LOST_TEXT, useTeleopLease, type TeleopLease } from '@/lib/teleop/tdm57Lease';
 
 /** True while TDM-59's walkthrough dialog (data-testid="tdm59-intro") is on the page. */
@@ -60,9 +61,9 @@ function leaseReason(l: TeleopLease): string {
 }
 
 /** Inside the console's provider: hands TDM-58 the console's /control socket. */
-function RecordingSlot({ taskId, kind }: { taskId: string; kind: string }) {
+function RecordingSlot({ taskId, kind, compact }: { taskId: string; kind: string; compact?: boolean }) {
   const { controlSocket } = useTdm56Teleop();
-  return <RecordingControls taskId={taskId} kind={kind} controlSocket={controlSocket} />;
+  return <RecordingControls taskId={taskId} kind={kind} controlSocket={controlSocket} compact={compact} />;
 }
 
 export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamUrl: string; token: string; controlUrl?: string } }) {
@@ -70,6 +71,7 @@ export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamU
   const walkthrough = useWalkthroughOpen();
   const kind = lease.task?.type ?? 'clean_teleop';
   const isTaskId = /^\d+$/.test(taskId);
+  const { phone } = useTdm86Phone(); // TDM-86: the recording row sits in the phone cockpit, one line tall
 
   const canDrive = (dev ? true : lease.canControl) && !walkthrough;
   const canDriveReason = walkthrough ? 'Close the "How to drive" walkthrough to drive.' : dev ? undefined : leaseReason(lease);
@@ -85,7 +87,8 @@ export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamU
         canDriveReason={canDriveReason}
         stamp={dev ? undefined : lease.stamp}
         controlSlot={dev ? undefined : <ControlLeaseBanner lease={lease} className="py-2" />}
-        recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} /> : undefined}
+        recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} compact={phone} /> : undefined}
+        taskKind={lease.task?.type}
       />
     </>
   );

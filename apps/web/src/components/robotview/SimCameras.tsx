@@ -18,6 +18,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { FeedHealth } from '@/components/teleop/CameraFeed';
+import { Tdm86Pip } from '@/components/teleop/Tdm86Phone';
 import { useContributor } from '@/lib/contributor/hooks';
 import { SIM_DEFAULT_SCENE, type SceneSpecV1 } from '@/lib/robotview/scene';
 import { classifyRobot } from '@/lib/robotview/sources';
@@ -54,6 +55,14 @@ export interface SimCamerasProps {
   /** false inside a frame that already carries the SIMULATED badge and steel tape (RobotView). Default true. */
   framed?: boolean;
   className?: string;
+  /** TDM-86 phone cockpit: show only this camera, filling the parent's height (switch it with a tab bar in `overlay`). */
+  single?: string;
+  /** TDM-86: ghost for the large pane instead of the policy's chunk preview (null = none). */
+  ghost?: number[][] | null;
+  /** TDM-86: drawn over the large pane (view tabs, gripper and height readouts). */
+  overlay?: ReactNode;
+  /** TDM-86: a small second view in the corner of the single view (e.g. Side, to judge the hand's height). */
+  pip?: { camera: string; label: string; onTap?: () => void } | null;
 }
 
 /** Frames per second of the page's render loop (every canvas here draws on it), over the last second. */
@@ -84,13 +93,16 @@ declare global {
   }
 }
 
-function Pane({ id, state, spec, primary, stale, className }: {
+function Pane({ id, state, spec, primary, stale, className, ghost, caption = true }: {
   id: string;
   state: RobotLiveState | null;
   spec: SceneSpecV1;
   primary: boolean;
   stale: boolean;
   className?: string;
+  /** TDM-86: the ghost to draw instead of the policy's chunk preview (null = none). */
+  ghost?: number[][] | null;
+  caption?: boolean;
 }) {
   const name = cameraName(id);
   return (
@@ -106,21 +118,21 @@ function Pane({ id, state, spec, primary, stale, className }: {
           spec={spec}
           sim
           controls={false}
-          ghost={primary ? state?.chunk_preview : undefined}
+          ghost={ghost !== undefined ? (ghost ?? undefined) : primary ? state?.chunk_preview : undefined}
           className="h-full w-full"
         />
       </div>
       {/* steel wash at the edges: reads as "not a real camera" without hiding the scene */}
       <div aria-hidden className="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_1px_rgb(167_139_250/0.35),inset_0_0_36px_rgb(76_29_149/0.55)]" />
-      <figcaption className="pointer-events-none absolute bottom-1.5 left-1.5 flex items-center gap-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm">
+      {caption && <figcaption className="pointer-events-none absolute bottom-1.5 left-1.5 flex items-center gap-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm">
         <span aria-hidden className="h-2 w-2 rounded-[2px]" style={{ backgroundImage: SIM_TAPE }} />
         {name}
-      </figcaption>
+      </figcaption>}
     </figure>
   );
 }
 
-export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDetail, robotName, framed = true, className }: SimCamerasProps) {
+export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDetail, robotName, framed = true, className, single, ghost, overlay, pip }: SimCamerasProps) {
   const scene = spec ?? SIM_DEFAULT_SCENE;
   const ids = useMemo(() => (cameras && cameras.length ? [...cameras] : [...SIM_CAMERA_IDS]), [cameras]);
   const [first, ...rest] = ids;
@@ -137,6 +149,40 @@ export function SimCameras({ state, spec, cameras, stale = false, hz, waitingDet
   }, [ids]);
 
   const waiting = !state;
+  if (single) {
+    return (
+      <section
+        aria-label="Simulated camera view"
+        className={`gx-foundry relative h-full overflow-hidden rounded-md bg-surface-sunken ring-2 ring-steel ${className ?? ''}`}
+        data-sim-cameras={single}
+        data-fps={fps}
+        data-state={waiting ? 'waiting' : stale ? 'stale' : 'live'}
+      >
+        <Pane id={single} state={state} spec={scene} primary stale={stale} ghost={ghost} caption={false} />
+        <span
+          className="gx-tag gx-tag-sim absolute left-2 top-12 z-10 shadow-[inset_0_0_0_1px_var(--steel)]"
+          title="This view is drawn in your browser from the simulated robot's joint state. No real camera is involved."
+        >
+          SIMULATED
+        </span>
+        {overlay}
+        {pip && (
+          <Tdm86Pip label={pip.label} onTap={pip.onTap}>
+            <Pane id={pip.camera} state={state} spec={scene} primary={false} stale={stale} ghost={ghost} caption={false} />
+          </Tdm86Pip>
+        )}
+        {waiting && (
+          <div className="absolute inset-0 z-20 grid place-items-center bg-black/55 p-4 text-center">
+            <div className="max-w-xs text-sm text-ink">
+              <p className="font-semibold">Waiting for the sim robot&apos;s joint state</p>
+              {waitingDetail && <p className="mt-1 text-xs text-ink-muted">{waitingDetail}</p>}
+            </div>
+          </div>
+        )}
+        {!waiting && stale && <span className="absolute right-2 top-12 z-10 gx-tag gx-tag-failed">State stalled</span>}
+      </section>
+    );
+  }
   return (
     <section
       aria-label="Simulated camera views"
@@ -202,11 +248,23 @@ export function simFeedHealth(live: Pick<RobotLiveResult, 'state' | 'stale' | 'l
   };
 }
 
-function SimTaskPane({ taskId, robotId, robotName, onHealth }: {
+/** TDM-86: what the phone cockpit passes through to the sim views. */
+export interface Tdm86SimViewOpts {
+  pip?: { camera: string; label: string; onTap?: () => void } | null;
+  single?: string;
+  spec?: SceneSpecV1 | null;
+  ghost?: number[][] | null;
+  overlay?: ReactNode;
+  /** Every state sample (keep it cheap: store it in a ref). */
+  onState?: (s: RobotLiveState | null) => void;
+}
+
+function SimTaskPane({ taskId, robotId, robotName, onHealth, phone }: {
   taskId: bigint;
   robotId: number;
   robotName: string;
   onHealth?: (h: FeedHealth) => void;
+  phone?: Tdm86SimViewOpts;
 }) {
   const { identity } = useContributor();
   const live = useRobotLive(robotId, { taskId, identity });
@@ -217,6 +275,26 @@ function SimTaskPane({ taskId, robotId, robotName, onHealth }: {
   useEffect(() => {
     onHealthRef.current?.(health);
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onStateRef = useRef(phone?.onState);
+  onStateRef.current = phone?.onState;
+  useEffect(() => {
+    onStateRef.current?.(live.state);
+  }, [live.state]);
+  if (phone?.single) {
+    return (
+      <SimCameras
+        state={live.state}
+        stale={live.stale}
+        waitingDetail={live.error}
+        robotName={robotName}
+        single={phone.single}
+        spec={phone.spec}
+        ghost={phone.ghost}
+        overlay={phone.overlay}
+        pip={phone.pip}
+      />
+    );
+  }
   return <SimCameras state={live.state} stale={live.stale} hz={live.hz} waitingDetail={live.error} robotName={robotName} />;
 }
 
@@ -224,10 +302,12 @@ function SimTaskPane({ taskId, robotId, robotName, onHealth }: {
  * The teleop video pane: for a simulated robot, the three rendered views (no video stream needed,
  * and its health comes from the state feed); for any other robot, `fallback` (the real camera feed).
  */
-export function TaskSimCameras({ taskId, onHealth, fallback }: {
+export function TaskSimCameras({ taskId, onHealth, fallback, phone }: {
   taskId: bigint | number | string;
   onHealth?: (h: FeedHealth) => void;
   fallback: ReactNode;
+  /** TDM-86 phone cockpit: one big view (see Tdm86SimViewOpts). */
+  phone?: Tdm86SimViewOpts;
 }) {
   const id = useMemo(() => {
     try {
@@ -243,10 +323,10 @@ export function TaskSimCameras({ taskId, onHealth, fallback }: {
 
   if (id == null) return <>{fallback}</>;
   if (!tasksReady || (tasks[0] && !robotsReady)) {
-    return <div className="grid aspect-[4/3] place-items-center rounded-lg bg-zinc-900 text-sm text-zinc-400">Finding this task&apos;s robot…</div>;
+    return <div className={`grid place-items-center rounded-lg bg-zinc-900 text-sm text-zinc-400 ${phone?.single ? 'h-full' : 'aspect-[4/3]'}`}>Finding this task&apos;s robot…</div>;
   }
   if (!robot || classifyRobot(robot).kind !== 'sim') return <>{fallback}</>;
-  return <SimTaskPane taskId={id} robotId={Number(robot.id)} robotName={robot.name} onHealth={onHealth} />;
+  return <SimTaskPane taskId={id} robotId={Number(robot.id)} robotName={robot.name} onHealth={onHealth} phone={phone} />;
 }
 
 export default SimCameras;

@@ -93,6 +93,14 @@ export function tdm108TaskScopeAllows(scope: Tdm108Scope, method: string, path: 
   const q = new URLSearchParams(search);
   let m: RegExpMatchArray | null;
   if (path === '/marketplace') return ids.has(num(q.get('task')));
+  // TDM-86: the invite's own sign-up. A judge who scanned the job QR taps "Join to claim" and must get the
+  // join form, not the site-wide code form (the scope still opens this task only).
+  if (path === '/join') return method === 'GET' || method === 'HEAD';
+  // TDM-86: the invitee's own earnings (their payout for this task); ?contributor=N (anyone's) stays gated
+  if (path === '/earnings') return (method === 'GET' || method === 'HEAD') && !q.has('contributor');
+  // TDM-86: the public static files those pages load: the 3D arm (practice and teleop crashed on a 401 for
+  // yam.glb) and the push service worker + its icons
+  if (/^\/(robot\/yam\/[\w.-]+|tdm65-sw\.js|tdm65\/[\w.-]+)$/.test(path)) return method === 'GET' || method === 'HEAD';
   if ((m = path.match(/^\/(teleop|reset)\/(\d{1,19})\/?$/))) return ids.has(Number(m[2]));
   if (path === '/practice') {
     if (num(q.get('ticket')) === scope.ticket || num(q.get('robot')) === scope.robot) return true;

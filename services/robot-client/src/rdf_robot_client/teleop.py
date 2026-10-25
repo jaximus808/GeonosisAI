@@ -726,11 +726,33 @@ class TeleopHub:
         return info
 
     # ---------------------------------------------------------------- clean teleop job
+    def _sim_fresh_scene(self, ctx: JobContext, task_id: int) -> None:
+        """[SIM] TDM-86: a clean demo starts from the reset scene. Nobody resets a sim robot's scene by hand
+        (no reset tasks are posted for it), so without this the next contributor found the cube already on
+        the plate and the coach said "Done" before they had moved. Runs before the claimant can drive or
+        record, so no recording ever sees an object teleport. Real arms: nothing happens here."""
+        try:
+            from .adapters.mujoco_sim import find_sim
+        except ImportError:  # no simulator installed on this robot computer
+            return
+        sim = find_sim(ctx.arm)
+        if sim is None:
+            return
+        try:
+            out = sim.reset_scene()
+        except Exception:  # noqa: BLE001 - a failed reset must not end the session
+            log.exception("sim reset before clean demo failed")
+            return
+        ctx.event("sim.scene_reset", via="start_teleop", sim=True, task_id=task_id,
+                  note="[SIM] a clean demo starts from the reset scene", **out)
+
     def run_teleop_job(self, ctx: JobContext) -> dict[str, Any]:
         p = ctx.payload
         kind = str(p.get("kind") or "clean_teleop")
         ctx.enter(S.TELEOP, f"start_teleop {kind}")
         ctx.arm.hold()
+        if kind == "clean_teleop":
+            self._sim_fresh_scene(ctx, int(p.get("task_id") or 0))
         with self._lock:
             self.mode, self._ctx, self._kind = "teleop", ctx, kind
             self._job_task_id = int(p.get("task_id") or 0)

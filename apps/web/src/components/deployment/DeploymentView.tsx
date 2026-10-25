@@ -129,7 +129,7 @@ export function DeploymentView({ id }: { id: string }) {
   const gpu = Number(sp.gpu_cents ?? 0);
   const target = d.settings?.successThreshold ?? t.targetSuccess;
   const robotName = d.robot?.name ?? `robot #${t.robotId}`;
-  const unit = `YAM-${t.id.toString().padStart(2, '0')}`;
+  const unit = 'YAM'; // the arm family the policy ships for (the ticket number is already in the kicker)
   const runsOn = sim
     ? stub || !endpoint
       ? 'MuJoCo sim (scripted stand-in policy)'

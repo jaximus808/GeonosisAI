@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from .. import llm_retry
+from .. import agent_steps, llm_retry
 from .. import reviewer as rv
 from ..bus import Event, on_enter, on_insert, watch
 from ..log import get_logger
@@ -132,8 +132,12 @@ def _review(bus, ep, source: str) -> None:
         from ..robot_mode import robot_mode  # TDM-107: label the review sim / real from the episode's robot
 
         ep_row = {**dict(ep), "robot_mode": robot_mode(bus.get("robot", ep.get("robot_id")))}
-        decision = rv.review_episode(ep_row, dict(ticket), config=cfg, judge=judge)
-        rv.record_review(stdb, decision)
+        with agent_steps.work(ep.get("ticket_id"), "review", episode_id=eid):
+            agent_steps.step(f"Checking episode #{eid} ({str(ep.get('kind') or 'episode').replace('_', ' ')})")
+            decision = rv.review_episode(ep_row, dict(ticket), config=cfg, judge=judge)
+            rv.record_review(stdb, decision)
+            agent_steps.step(f"{'Accepted' if decision.accepted else 'Rejected'} #{eid}: {decision.reason}",
+                             decision=True, error=not decision.accepted)
         _attempts.clear(eid)
         log.info("review.done", extra={"fields": {
             "episode_id": eid, "accepted": decision.accepted, "decided_by": decision.decided_by,

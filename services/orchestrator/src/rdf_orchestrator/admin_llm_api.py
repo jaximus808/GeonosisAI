@@ -85,7 +85,8 @@ async def put_llm_backend(
 class CallEventWriter:
     """An ``rdf_common.llm`` call sink: each ``llm.call`` record becomes one event_log row (actor
     ``orchestrator:llm``), written from a background thread so an LLM call never waits on SpacetimeDB.
-    Off with ``RDF_LLM_CALL_EVENTS=0``."""
+    Off with ``RDF_LLM_CALL_EVENTS=0``. Also the agent sink: ``agent.step`` / ``agent.thought`` records
+    (actor ``orchestrator:agents``) for the cockpit's AgentWorkbench; off with ``RDF_AGENT_THOUGHTS=0``."""
 
     def __init__(self, stdb: Any) -> None:
         import queue
@@ -106,8 +107,11 @@ class CallEventWriter:
             rec = self.q.get()
             if rec is None:
                 return
+            # agent.step / agent.thought records (the cockpit's AgentWorkbench) carry their own type.
+            typ = str(rec.pop("type", "") or "") if str(rec.get("type", "")).startswith("agent.") else "llm.call"
+            actor = "orchestrator:agents" if typ != "llm.call" else "orchestrator:llm"
             try:
-                self.stdb.call_reducer("append_event", "orchestrator:llm", "llm.call", json.dumps(rec, default=str))
+                self.stdb.call_reducer("append_event", actor, typ, json.dumps(rec, default=str))
             except Exception as e:  # noqa: BLE001
                 log.warning("llm.call_event_failed", extra={"fields": {"error": str(e)[:200]}})
 
@@ -120,7 +124,8 @@ def start_call_events() -> CallEventWriter | None:
 
     from rdf_common import llm
 
-    if os.environ.get("RDF_LLM_CALL_EVENTS", "1") == "0":
+    calls = os.environ.get("RDF_LLM_CALL_EVENTS", "1") != "0"
+    if not calls and not llm.agent_thoughts_on():
         return None
     try:
         from rdf_common.settings import SpacetimeSettings, load_settings
@@ -130,5 +135,7 @@ def start_call_events() -> CallEventWriter | None:
     except BaseException as e:  # noqa: BLE001 - optional evidence; the log line is the fallback
         log.warning("llm.call_events_off", extra={"fields": {"error": str(e)[:200]}})
         return None
-    llm.add_call_sink(w)
+    if calls:
+        llm.add_call_sink(w)
+    llm.add_agent_sink(w)  # agent.step / agent.thought (off with RDF_AGENT_THOUGHTS=0, checked per event)
     return w

@@ -328,6 +328,262 @@ def _emit(rec: dict) -> None:
             log.debug("llm.sink_error", exc_info=True)
 
 
+# --------------------------------------------------------------------------- agent thoughts (workbench)
+#
+# The ticket cockpit's AgentWorkbench shows a droid per station and a Claude-Code-style transcript. The
+# lines come from event_log rows ``agent.step`` / ``agent.thought`` {ticket_id, station, agent, text, ...}.
+# The orchestrator registers a sink (``add_agent_sink``) that appends each record to event_log. With no
+# sink registered every call below is a cheap no-op. ``RDF_AGENT_THOUGHTS=0`` turns them all off.
+#
+#   with agent_context(ticket_id=4, station="diagnose", agent="clusterer"):
+#       agent_event("step", "Reading 10 baseline trials")
+#       default_llm.complete_structured(step="diagnose", ...)   # start / heartbeat / thought snippets
+#
+# Pacing: at most one record per AGENT_GAP_S (1.5 s) per (ticket, agent). Records that come faster wait
+# in a short per-agent queue and go out in order; when more than AGENT_QUEUE_MAX wait, the oldest
+# thought (then the oldest record) is dropped. Nothing ever blocks the caller.
+
+import collections
+import contextlib
+import contextvars
+
+AGENT_GAP_S = 1.5
+AGENT_QUEUE_MAX = 6
+AGENT_TEXT_MAX = 280
+AGENT_HEARTBEAT_S = 10.0
+# llm.call step -> (station, agent) when the caller set no agent_context station/agent.
+STEP_AGENT: dict[str, tuple[str, str]] = {
+    "diagnose": ("diagnose", "clusterer"),
+    "planner": ("plan_data", "planner"),
+    "review": ("review", "reviewer"),
+    "reviewer": ("review", "reviewer"),
+    "llm_qa": ("review", "dataset_qa"),
+}
+
+_agent_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar("rdf_agent_ctx", default=None)
+_agent_sinks: list[Callable[[dict], None]] = []
+
+
+def agent_thoughts_on() -> bool:
+    return os.environ.get("RDF_AGENT_THOUGHTS", "1").strip().lower() not in ("0", "false", "off", "no")
+
+
+def add_agent_sink(fn: Callable[[dict], None]) -> None:
+    if fn not in _agent_sinks:
+        _agent_sinks.append(fn)
+
+
+def remove_agent_sink(fn: Callable[[dict], None]) -> None:
+    if fn in _agent_sinks:
+        _agent_sinks.remove(fn)
+
+
+@contextlib.contextmanager
+def agent_context(*, ticket_id: Any = None, station: str | None = None, agent: str | None = None, **extra: Any):
+    """Tag every agent event (and every LLM call's start / heartbeat / thoughts) made inside the block."""
+    cur = dict(_agent_ctx.get() or {})
+    cur.update({k: v for k, v in {"ticket_id": ticket_id, "station": station, "agent": agent, **extra}.items()
+                if v is not None})
+    token = _agent_ctx.set(cur)
+    try:
+        yield cur
+    finally:
+        _agent_ctx.reset(token)
+
+
+def current_agent() -> dict:
+    return dict(_agent_ctx.get() or {})
+
+
+def _clip(text: Any, n: int = AGENT_TEXT_MAX) -> str:
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    return t if len(t) <= n else t[: n - 1].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+class _Pacer:
+    """Per-key spacing of at least ``gap`` seconds; a short ordered queue for bursts (see above)."""
+
+    def __init__(self, gap: float = AGENT_GAP_S, max_queue: int = AGENT_QUEUE_MAX) -> None:
+        self.gap, self.max_queue = gap, max_queue
+        self._lock = threading.Lock()
+        self._q: dict[Any, collections.deque] = {}
+        self._next: dict[Any, float] = {}
+        self._timer: dict[Any, threading.Timer] = {}
+
+    def push(self, key: Any, rec: dict, deliver: Callable[[dict], None]) -> None:
+        send = False
+        with self._lock:
+            now = time.monotonic()
+            dq = self._q.setdefault(key, collections.deque())
+            if not dq and now >= self._next.get(key, 0.0):
+                self._next[key] = now + self.gap
+                send = True
+            else:
+                dq.append(rec)
+                while len(dq) > self.max_queue:
+                    old = next((r for r in dq if r.get("type") == "agent.thought"), dq[0])
+                    dq.remove(old)
+                self._arm(key, now)
+        if send:
+            deliver(rec)
+
+    def _arm(self, key: Any, now: float) -> None:  # under self._lock
+        if key in self._timer:
+            return
+        t = threading.Timer(max(0.0, self._next.get(key, now) - now), self._fire, args=(key,))
+        t.daemon = True
+        self._timer[key] = t
+        t.start()
+
+    def _fire(self, key: Any) -> None:
+        with self._lock:
+            self._timer.pop(key, None)
+            dq = self._q.get(key)
+            rec = dq.popleft() if dq else None
+            now = time.monotonic()
+            self._next[key] = now + self.gap
+            if dq:
+                self._arm(key, now)
+        if rec is not None:
+            _deliver_agent(rec)
+
+    def pending(self) -> int:
+        with self._lock:
+            return sum(len(d) for d in self._q.values())
+
+
+_pacer = _Pacer()
+
+
+def _deliver_agent(rec: dict) -> None:
+    for fn in list(_agent_sinks):
+        try:
+            fn(dict(rec))
+        except Exception:  # noqa: BLE001 - a sink never breaks the caller
+            log.debug("llm.agent_sink_error", exc_info=True)
+
+
+def agent_event(kind: str, text: str, *, ticket_id: Any = None, station: str | None = None,
+                agent: str | None = None, **extra: Any) -> bool:
+    """Queue one ``agent.<kind>`` record (kind = step | thought). Returns False when it was not sent
+    (thoughts off, no sink, or no ticket to attach it to)."""
+    if not _agent_sinks or not agent_thoughts_on():
+        return False
+    ctx = current_agent()
+    tid = ticket_id if ticket_id is not None else ctx.get("ticket_id")
+    try:
+        tid = int(tid) if tid is not None else None
+    except (TypeError, ValueError):
+        tid = None
+    if not tid:
+        return False
+    rec = {k: v for k, v in ctx.items() if k not in ("ticket_id", "station", "agent")}
+    rec.update({"type": f"agent.{kind}", "ticket_id": tid, "station": station or ctx.get("station") or "",
+                "agent": agent or ctx.get("agent") or "", "text": _clip(text)})
+    rec.update({k: v for k, v in extra.items() if v is not None})
+    rec["at"] = round(time.time(), 3)
+    _pacer.push((tid, rec["agent"]), rec, _deliver_agent)
+    return True
+
+
+def _sentences(text: str, k: int = 3) -> list[str]:
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])", re.sub(r"\s+", " ", text or "")) if p.strip()]
+    out: list[str] = []
+    for p in parts:
+        if len(p) < 12 and out:
+            out[-1] = f"{out[-1]} {p}"
+            continue
+        out.append(p)
+        if len(out) >= k:
+            break
+    return out
+
+
+_GIST_KEYS = ("reasoning", "reason", "observations", "summary", "rationale", "diagnosis", "explanation", "notes")
+
+
+def _gist(parsed: Any) -> str:
+    """The model's own words to quote as its thought: the first reasoning-like string field."""
+    if hasattr(parsed, "model_dump"):
+        try:
+            parsed = parsed.model_dump()
+        except Exception:  # noqa: BLE001
+            return ""
+    if not isinstance(parsed, dict):
+        return ""
+    for k in _GIST_KEYS:
+        v = parsed.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+        if isinstance(v, list) and v and all(isinstance(x, str) for x in v):
+            return " ".join(v)
+    return ""
+
+
+def _thinking_text(r: LLMResult | None) -> str:
+    if r is None:
+        return ""
+    ex = r.meta.get("thinking_excerpt")
+    if isinstance(ex, str) and ex.strip():
+        return ex
+    for b in r.content or []:
+        t = b.get("type") if isinstance(b, dict) else getattr(b, "type", None)
+        if t == "thinking":
+            txt = b.get("thinking") if isinstance(b, dict) else getattr(b, "thinking", "")
+            if isinstance(txt, str) and txt.strip():
+                return txt
+    return ""
+
+
+class _Think:
+    """One LLM call's agent events: start, a heartbeat while it runs, then what it concluded."""
+
+    def __init__(self, req: LLMRequest, sel: Selection, model: str) -> None:
+        self.on = bool(_agent_sinks) and agent_thoughts_on() and bool(current_agent().get("ticket_id"))
+        if not self.on:
+            return
+        ctx = current_agent()
+        station, agent = STEP_AGENT.get(req.step, ("", req.step))
+        self.where = {"ticket_id": ctx.get("ticket_id"), "station": ctx.get("station") or station,
+                      "agent": ctx.get("agent") or agent}
+        self.ctx = contextvars.copy_context()
+        self.step, self.t0, self.n = req.step, time.monotonic(), 0
+        self.label = f"{LABELS.get(sel.backend, sel.backend)} · {model}"
+        agent_event("step", f"Asking Claude ({self.label})", **self.where, phase="llm_start", llm_step=req.step,
+                    backend=sel.backend, model=model)
+        self._stop = threading.Event()
+        try:
+            hb = float(os.environ.get("RDF_AGENT_HEARTBEAT_S", AGENT_HEARTBEAT_S))
+        except ValueError:
+            hb = AGENT_HEARTBEAT_S
+        self._t = threading.Thread(target=self.ctx.run, args=(self._beat, hb), daemon=True, name="agent-heartbeat")
+        self._t.start()
+
+    def _beat(self, every: float) -> None:
+        while not self._stop.wait(every):
+            s = int(time.monotonic() - self.t0)
+            agent_event("thought", f"Still thinking… {s}s", **self.where, phase="llm_wait", llm_step=self.step,
+                        elapsed_s=s)
+
+    def end(self, r: LLMResult | None, err: BaseException | None) -> None:
+        if not self.on:
+            return
+        self._stop.set()
+        secs = round(time.monotonic() - self.t0, 1)
+        if err is not None:
+            agent_event("step", f"Claude call failed after {secs:g}s: {_clip(err, 160)}", **self.where,
+                        phase="llm_error", llm_step=self.step, elapsed_s=secs, is_error=True)
+            return
+        agent_event("step", f"Claude answered in {secs:g}s", **self.where, phase="llm_end", llm_step=self.step,
+                    elapsed_s=secs, output_tokens=(r.usage or {}).get("output_tokens") if r else None)
+        said = 0
+        for snip in _sentences(_thinking_text(r), 2):
+            agent_event("thought", snip, **self.where, phase="thinking", llm_step=self.step)
+            said += 1
+        for snip in _sentences(_gist(r.parsed if r else None), 4 - said):
+            agent_event("thought", snip, **self.where, phase="reasoning", llm_step=self.step)
+
+
 def cost_estimate(model: str | None, usage: dict) -> float | None:
     p = PRICES.get((model or "").split("[")[0])
     if not p or usage.get("input_tokens") is None:
@@ -736,6 +992,11 @@ class ClaudeCodeBackend(_CliBackend):
             usage["cost_basis"] = "claude_code total_cost_usd (list-price estimate; billed to the local Claude Code login)"
         meta = {"message_id": res.get("session_id"), "served_model": served, "num_turns": res.get("num_turns"),
                 "duration_api_ms": res.get("duration_api_ms"), "stop_reason": res.get("stop_reason")}
+        thinking = [b.get("thinking") for e in events if e.get("type") == "assistant"
+                    for b in ((e.get("message") or {}).get("content") or []) if isinstance(b, dict)
+                    and b.get("type") == "thinking" and isinstance(b.get("thinking"), str)]
+        if thinking:
+            meta["thinking_excerpt"] = " ".join(thinking)[:1200]
         stop = res.get("stop_reason")
         cat = None
         for e in events:  # a refusal shows on the assistant message
@@ -879,12 +1140,15 @@ class LLM:
                                     model=model, effort=effort, max_tokens=max_tokens, thinking=thinking,
                                     timeout_s=timeout_s)
         t0 = time.monotonic()
+        think = _Think(req, sel, m)
         try:
             r = self._backend(sel.backend).complete(req, m)
         except BaseException as e:
             self._record(req, sel, m, t0, None, e)
+            think.end(None, e)
             raise
         self._record(req, sel, m, t0, r, None)
+        think.end(r, None)
         return r
 
     async def acomplete_structured(self, *, step: str, system: str, messages: list[dict] | None = None,
@@ -896,12 +1160,15 @@ class LLM:
                                     model=model, effort=effort, max_tokens=max_tokens, thinking=thinking,
                                     timeout_s=timeout_s)
         t0 = time.monotonic()
+        think = _Think(req, sel, m)
         try:
             r = await self._backend(sel.backend).acomplete(req, m)
         except BaseException as e:
             self._record(req, sel, m, t0, None, e)
+            think.end(None, e)
             raise
         self._record(req, sel, m, t0, r, None)
+        think.end(r, None)
         return r
 
 

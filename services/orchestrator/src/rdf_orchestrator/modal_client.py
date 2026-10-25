@@ -205,6 +205,28 @@ class RealModal:
 
 # --------------------------------------------------------------------------- manifest
 
+_pending_every = None
+
+
+def _narrate_pending(run: dict, phase: str, m: dict) -> None:
+    """AgentWorkbench heartbeat while Modal works: one ``agent.step`` per run every 20 s."""
+    global _pending_every
+    try:
+        from . import agent_steps as ag
+
+        if _pending_every is None:
+            _pending_every = ag.Every(20.0)
+        if not _pending_every.due(run.get("id")):
+            return
+        since = float(m.get(f"{phase}_spawned_at") or 0)
+        took = f" · {ag.clock(time.time() - since)}" if since else ""
+        words = "Converting episodes to a LeRobot dataset on Modal" if phase == "convert" else "Fine-tune running on Modal"
+        ag.step(words + took, ticket_id=run.get("ticket_id"), station="train", training_run_id=run.get("id"),
+                phase=phase)
+    except Exception:  # noqa: BLE001 - narration never breaks the poller
+        pass
+
+
 def build_manifest(run: dict, ticket: dict | None, episodes: dict[int, dict], robots: dict[int, dict] | None = None) -> dict:
     """TDM-39 ``ConvertManifest`` (as a dict) for a run: its accepted episodes, the ticket's prompt.
 
@@ -466,6 +488,7 @@ class TrainingRunner:
             with self._lock:
                 if rid in self._tracked:
                     self._tracked[rid] = 0
+            _narrate_pending(run, phase, m)
             return "pending"
         if res.state == "transient":
             with self._lock:

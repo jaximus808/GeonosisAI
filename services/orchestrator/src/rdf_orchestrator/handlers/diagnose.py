@@ -30,6 +30,7 @@ import json
 import threading
 from typing import Any, Callable
 
+from .. import agent_steps
 from .. import diagnose as dx
 from .. import llm_retry
 from ..bus import Event, on_enter, watch
@@ -166,9 +167,24 @@ def _diagnose(bus, run, source: str) -> None:
             "eval_run_id": rid, "trials": len(inputs.trials), "failures": len(inputs.failed),
             "attempt": len(kinds) + 1, "reduced_prompt": reduced, "source": source}})
         _log_started(stdb, inputs, rid, len(kinds) + 1)
-        diag = dx.diagnose_eval_run(inputs, claude=make_clusterer(), frames=None if reduced else make_frames(),
-                                    reduced=reduced)
-        payload = dx.record_diagnosis(diag, stdb)
+        with agent_steps.work(run.get("ticket_id"), "diagnose"):
+            kind = "baseline" if run.get("kind") == "baseline" else "eval"
+            agent_steps.step(f"Reading {agent_steps.plural(len(inputs.trials), kind + ' trial')}: "
+                             f"{len(inputs.failed)} failed" + (f" (attempt {len(kinds) + 1})" if kinds else ""),
+                             eval_run_id=rid)
+            if inputs.failed:
+                agent_steps.step("Pulling the failure notes" + ("" if reduced else " and camera frames")
+                                 + f" for {agent_steps.plural(len(inputs.failed), 'failed trial')}")
+            diag = dx.diagnose_eval_run(inputs, claude=make_clusterer(), frames=None if reduced else make_frames(),
+                                        reduced=reduced)
+            payload = dx.record_diagnosis(diag, stdb)
+            cl = sorted(payload.get("clusters") or [], key=lambda c: -int(c.get("count") or 0))
+            if cl:
+                tops = ", ".join(f"{c.get('label')} ×{c.get('count')}" for c in cl[:3])
+                agent_steps.step(f"Grouped {agent_steps.plural(sum(int(c.get('count') or 0) for c in cl), 'failure')} "
+                                 f"into {agent_steps.plural(len(cl), 'cause')}: {tops}", decision=True)
+            else:
+                agent_steps.step("No failed trials to cluster", decision=True)
         _attempts.clear(rid)
         log.info("diagnose.done", extra={"fields": {
             "eval_run_id": rid, "clusters": [(c["label"], c["count"]) for c in payload["clusters"]],
@@ -184,6 +200,8 @@ def _diagnose(bus, run, source: str) -> None:
         if RETRY.exhausted(len(kinds)):
             _give_up(stdb, bus, run, kinds, f"{type(e).__name__}: {e}")  # rid stays claimed: no more tries
         else:
+            agent_steps.step(f"Retrying in {fields['retry_in_s']}s (attempt {len(kinds)} failed: {kinds[-1]})",
+                             ticket_id=run.get("ticket_id"), station="diagnose", error=True)
             log.warning("diagnose.retry_scheduled", extra={"fields": {
                 "eval_run_id": rid, "attempt": len(kinds), "kind": kinds[-1], "retry_in_s": fields["retry_in_s"]}})
             llm_retry.schedule(fields["retry_in_s"], lambda: _retry(bus, rid), name=f"diagnose-{rid}")

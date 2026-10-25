@@ -56,9 +56,10 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
                 text_offers.stop()
             await bus.stop()
             if call_events is not None:
-                from rdf_common.llm import remove_call_sink
+                from rdf_common.llm import remove_agent_sink, remove_call_sink
 
                 remove_call_sink(call_events)
+                remove_agent_sink(call_events)
                 call_events.stop()
             log.info("app.stopped")
 

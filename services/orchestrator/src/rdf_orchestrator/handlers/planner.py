@@ -25,7 +25,7 @@ import json
 import threading
 from typing import Any, Callable
 
-from .. import llm_retry, planner
+from .. import agent_steps, llm_retry, planner
 from ..bus import Event, on_enter, watch
 from ..log import get_logger
 
@@ -98,9 +98,24 @@ def _plan(bus, t, source: str) -> None:
         return
     reduced = llm_retry.REFUSAL in kinds
     try:
-        inputs = planner.gather_inputs(bus.rows, t)
-        outcome = planner.plan(inputs, _anthropic(), reduced=reduced,
-                               log=lambda msg, f: log.warning(msg, extra={"fields": f}))
+        with agent_steps.work(tid, "plan_data", iteration=it):
+            inputs = planner.gather_inputs(bus.rows, t)
+            fails = sum(c.count for c in inputs.clusters)
+            agent_steps.step(f"Reading {agent_steps.plural(len(inputs.clusters), 'failure cluster')} "
+                             f"({agent_steps.plural(fails, 'failed trial')}), budget "
+                             f"${max(0, inputs.budget_cents - inputs.spent_cents) / 100:.2f} left")
+            if inputs.dataset_offers:
+                agent_steps.step(f"Comparing against {agent_steps.plural(len(inputs.dataset_offers), 'dataset offer')}")
+            outcome = planner.plan(inputs, _anthropic(), reduced=reduced,
+                                   log=lambda msg, f: log.warning(msg, extra={"fields": f}))
+            if outcome.blocked:
+                agent_steps.step(f"Blocked: {outcome.blocked}", decision=True, error=True)
+            else:
+                unit = (outcome.data_type or "").replace("_", " ")
+                cost = outcome.amount * outcome.unit_price_cents
+                agent_steps.step(f"Proposing {outcome.amount} {unit}{'' if outcome.amount == 1 else 's'}"
+                                 + (f" at ${cost / 100:.2f}" if cost else "") + "; waiting for approval",
+                                 decision=True)
     except Exception as e:  # noqa: BLE001 - logged to event_log; retried after a backoff, bounded
         kinds = kinds + [llm_retry.classify(e)]
         _attempts.record((tid, it), kinds)

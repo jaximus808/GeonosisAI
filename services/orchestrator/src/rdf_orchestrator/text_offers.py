@@ -15,6 +15,11 @@ Flow (hooked in next to TDM-65's web push and TDM-108's job drops)::
               cookie and lands on /teleop/<task> (or /reset/<task>). Later YESes: "Taken, we'll text you the next one."
         -> STOP / START / HELP are handled here whether or not Inkbox handles them.
 
+Real-arm reset asks (``RDF_RESET_TEXT_CONTRIBUTOR``, reset_done.py): a reset task on a REAL robot is also texted to
+that contributor (the operator) as "Reset the scene for TKT-0042 after trial 2/3: put the cube back, then reply
+DONE or tap <link>", whatever their in_person flag and the offer rate limit. DONE claims + completes the reset
+(the dispatcher then pays it and resumes the robot); YES still claims it and sends the /reset/<task> link.
+
 Lease: arm-control claims last 60 s (TDM-10). A text claim is made before the phone opens the link, so the
 orchestrator heartbeats it for up to RDF_TEXT_HOLD_S (180 s) while the claimant opens the page; the teleop page
 then heartbeats it itself (useTdm61ClaimHeartbeat).
@@ -99,6 +104,11 @@ STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT
 START_WORDS = {"START", "UNSTOP", "RESUME"}
 HELP_WORDS = {"HELP", "INFO"}
 YES_WORDS = {"YES", "Y", "YEA", "YEAH", "YEP", "YUP", "CLAIM", "OK", "SURE"}
+DONE_WORDS = {"DONE", "RESET", "FINISHED", "READY"}
+RESET_ASK_FMT = "Reset the scene for {ticket}{trial}: put the cube back, then reply DONE or tap {link}"
+RESET_THANKS = "Thanks, scene reset. The robot carries on."
+RESET_NONE = "No reset is waiting on you right now."
+EV_RESET_ASK, EV_RESET_DONE = "text.reset_ask", "text.reset_done"
 
 
 class TextSettings(RdfSettings):
@@ -117,6 +127,7 @@ class TextSettings(RdfSettings):
     rdf_text_login_hourly: int = 5  # and 5 per number per hour
     rdf_text_login_global_10m: int = 30  # and 30 for everyone per 10 min
     rdf_text_login_attempts: int = 5  # wrong guesses before a code is burned
+    rdf_reset_text_contributor: int = 0  # >0: real-robot resets are texted to this contributor (the operator)
     rdf_text_webhook_secret: SecretStr | None = None  # override the stored Inkbox signing key (tests / sign-test)
     inkbox_api_key: SecretStr | None = None
     inkbox_base_url: str | None = None
@@ -704,7 +715,8 @@ class TextOffers:
                  append: Append | None = None, claim: Claim | None = None, heartbeat: Heartbeat | None = None,
                  rows: Rows | None = None, clock: Callable[[], float] = time.time, inline: bool = False,
                  drop_settings: Any = None, record_claim: Callable[[int, int, str], Any] | None = None,
-                 release: Callable[[int], None] | None = None) -> None:
+                 release: Callable[[int], None] | None = None,
+                 reset_call: Callable[..., Any] | None = None) -> None:
         self.s = settings or TextSettings()
         self.store = store or TextStore(self.s.rdf_text_store or DEFAULT_STORE)
         self.link = link or InkboxLink(self.s)
@@ -720,6 +732,7 @@ class TextOffers:
         self._drop_settings = drop_settings
         self._record_claim = record_claim
         self._release = release
+        self._reset_call = reset_call  # reducer caller for DONE (tests); default: the bus writer
         self._lock = threading.Lock()
         self._claim_lock = threading.Lock()
         self._claimed_texted: dict[str, float] = {}  # phone -> when the last "It's yours" text went out
@@ -928,7 +941,12 @@ class TextOffers:
         if f is None:
             self.event(EV_SKIPPED, {"task_ids": ids, "reasons": {str(k): v for k, v in skipped_tasks.items()}})
             return {"text": "skipped", "reasons": {str(k): v for k, v in skipped_tasks.items()}}
+        ask = self.reset_ask(f, rows) if f.task_type == "reset" and not f.sim else None
         targets, skipped = self.pick(f.task_type, rows)
+        if ask and ask.get("contributor_id"):
+            targets = [o for o in targets if o.contributor_id != ask["contributor_id"]]
+        if not targets and ask and ask.get("state") in ("sent", "dry_run"):
+            return {"text": "reset_ask", **ask}
         if not targets:
             self.event(EV_SKIPPED, {"task_ids": f.task_ids, "ticket_id": f.ticket_id, "reason": "no_recipient", **skipped})
             return {"text": "none", "task_ids": f.task_ids, **skipped}
@@ -947,6 +965,66 @@ class TextOffers:
                "states": states, "skipped": skipped, "src": SRC}
         self.event(EV_OFFER, out)
         return {"text": "sent" if sent else "failed", **out}
+
+    def reset_ask(self, f: Any, rows: Rows) -> dict | None:
+        """A real robot's reset task: text the operator (RDF_RESET_TEXT_CONTRIBUTOR) a direct ask with DONE."""
+        cid = int(self.s.rdf_reset_text_contributor or 0)
+        if cid <= 0:
+            return None
+        row = self.store.optin_for(cid)
+        if row is None or row.status != "opted_in":
+            self.event(EV_SKIPPED, {"task_ids": f.task_ids, "ticket_id": f.ticket_id, "reason": "operator_not_opted_in",
+                                    "contributor_id": cid})
+            return {"contributor_id": cid, "state": "not_opted_in"}
+        from . import reset_done as rdone
+
+        task = next((dict(t) for t in rows("task") if _i(t.get("id")) == f.task_ids[0]), {})
+        words = rdone.trial_words(rdone.trial_of(task, rows))
+        body = RESET_ASK_FMT.format(ticket=rdone.tkt(f.ticket_id), trial=f" {words}" if words else "",
+                                    link=self.task_link(f.task_ids[0]))
+        self.store.add_offer(f.task_ids, row.phone, cid, "reset", f.ticket_id, self.clock())
+        res = self._text(row.phone, body, "reset_ask")
+        out = {"task_id": f.task_ids[0], "ticket_id": f.ticket_id, "contributor_id": cid, "state": res.state,
+               "mode": self.mode, "trial": words}
+        self.event(EV_RESET_ASK, out)
+        return out
+
+    def reset_done_from_text(self, row: OptIn, rows: Rows) -> dict:
+        """DONE: finish the newest reset this number was asked to do (claim + complete as them)."""
+        from . import reset_done as rdone
+
+        now = self.clock()
+        status = {_i(t.get("id")): dict(t) for t in rows("task")}
+        for o in self.store.latest_offers(row.phone, now - self.s.rdf_text_offer_ttl_s):
+            if o.task_type != "reset" or o.state not in ("sent", "claimed"):
+                continue
+            for tid in o.task_ids:
+                t = status.get(tid)
+                if t is None or t.get("status") not in ("open", "claimed"):
+                    continue
+                holder = _i(t.get("assignee_id"))
+                if t.get("status") == "claimed" and not (holder == row.contributor_id
+                                                         or self.same_person(holder, row.contributor_id)):
+                    continue  # someone else is resetting it
+                try:
+                    out = rdone.run_sync(self._reducer, t, row.contributor_id, via="text")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("text.reset_done_failed", extra={"fields": {"task_id": tid, "error": type(e).__name__}})
+                    continue
+                self.store.set_offer(o.id, "claimed", tid)
+                self.event(EV_RESET_DONE, {"task_id": tid, "ticket_id": o.ticket_id, "contributor_id": row.contributor_id,
+                                           "mode": out.get("mode"), "src": SRC})
+                self._text(row.phone, RESET_THANKS, "reset_done")
+                return {"action": "reset_done", "task_id": tid, "mode": out.get("mode")}
+        self._text(row.phone, RESET_NONE, "reset_none")
+        return {"action": "no_reset"}
+
+    def _reducer(self, name: str, *args: Any) -> Any:
+        if name == "claim_task" and self._claim is not None:
+            return self._claim(*args)
+        if self._reset_call is not None:
+            return self._reset_call(name, *args)
+        return self.w().call_reducer(name, *args)
 
     def task_changed(self, task_id: int, rows: Rows) -> None:
         """A task left 'open': unanswered offers whose tasks are all gone expire (a later YES gets TAKEN)."""
@@ -984,6 +1062,8 @@ class TextOffers:
             return {"action": "help"}
         if kw in YES_WORDS:
             return self.claim_from_text(row, rows or self.rows)
+        if kw in DONE_WORDS:
+            return self.reset_done_from_text(row, rows or self.rows)
         if self.store.latest_offers(row.phone, now - self.s.rdf_text_offer_ttl_s):
             self._text(row.phone, NUDGE, "nudge")
             return {"action": "nudged"}

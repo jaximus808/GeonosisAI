@@ -3,6 +3,8 @@
   GET  /resets/{task_id}         public: the robot's reset routine (steps + signed start-state photo
                                  URL; stored > TDM-32 onboarding > default, ``reset_routine``) and the
                                  scene photos attached to this task
+  POST /resets/{task_id}/done    operator only (X-RDF-Operator-Key): the cockpit's "Done, scene reset" button
+                                 finishes a real robot's reset task (reset_done.py), so the eval resumes
   POST /resets/{task_id}/photo   claimant only: attach a photo of the reset scene as task evidence
         {identity, spacetime_token, source: "camera" | "upload", image_b64?}
         camera: the orchestrator mints a short TDM-55 stream token and fetches
@@ -24,15 +26,18 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import os
 import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from . import reset_done as rdone
 from . import reset_routine as rr
+from .robot_commands_api import Tdm78Stdb, _check_key, get_operator_key, get_robot_commands_stdb
 from .log import get_logger
 from .stream_api import (_HEX, LEASE_GRACE_S, IdentityVerifier, Tdm55Stdb, _norm_identity, get_identity_verifier,
                          get_stream_secret, get_stream_stdb, stream_url_of)
@@ -180,6 +185,42 @@ async def reset_photo(task_id: int, body: ResetPhotoRequest, stdb: Tdm55Stdb = D
                                                      "source": body.source, "cam": cam, "bytes": len(data),
                                                      "storage_uri": uri}})
     return {"storage_uri": uri, "url": url, "source": body.source, "cam": cam, "bytes": len(data)}
+
+
+def get_reset_contributor() -> int:
+    """The operator's contributor id for resets (RDF_RESET_TEXT_CONTRIBUTOR; tests override)."""
+    return rdone.reset_contributor()
+
+
+@reset_router.post("/resets/{task_id}/done")
+async def reset_done(task_id: int, x_rdf_operator_key: str | None = Header(default=None),
+                     stdb: Tdm78Stdb = Depends(get_robot_commands_stdb),
+                     operator_key: str | None = Depends(get_operator_key),
+                     contributor_id: int = Depends(get_reset_contributor)) -> dict:
+    _check_key("reset_done", x_rdf_operator_key, operator_key)
+    try:
+        task = await _one(stdb, f"SELECT * FROM task WHERE id = {int(task_id)}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"SpacetimeDB request failed: {type(e).__name__}") from None
+    if task is None:
+        raise HTTPException(404, f"No task {task_id}.")
+    if task.get("type") != "reset":
+        raise HTTPException(409, f"Task {task_id} is a {task.get('type')} task, not a reset.")
+    try:
+        out = await rdone.run_async(stdb.call_reducer, task, contributor_id, via="cockpit")
+    except Exception as e:  # noqa: BLE001 - the reducer said no (e.g. it was completed a moment ago)
+        raise HTTPException(409, f"Could not finish the reset: {str(e)[:200]}") from None
+    if not out.get("already"):
+        try:
+            await stdb.call_reducer("append_event", rdone.ACTOR, rdone.EV_DONE, json.dumps(
+                {"ticket_id": int(task.get("ticket_id") or 0), "robot_id": int(task.get("robot_id") or 0),
+                 "task_id": int(task_id), "via": "cockpit", "mode": out.get("mode"),
+                 "contributor_id": contributor_id or None}, separators=(",", ":")))
+        except Exception:  # noqa: BLE001 - the audit row is best effort
+            pass
+    log.info("reset.operator_done", extra={"fields": {"task_id": int(task_id), "mode": out.get("mode"),
+                                                      "already": out.get("already")}})
+    return out
 
 
 @reset_router.get("/resets/{task_id}")

@@ -3,19 +3,15 @@
  * only (src/app/globals.css). Plates, square rivets, 1px lines; melt only on the running station and the
  * one primary button. Motion: one 200 ms shutter when the stage changes; off under reduced motion.
  *
- * At 900 px and up the document itself never scrolls: the shell fills the space under the global header
- * and panels scroll inside themselves. Below 900 px: top line, stage, bottom tab bar. */
+ * At 900 px and up the page scrolls like a normal document and the left columns (the tab rail, the
+ * dashboard's ticket list) stay pinned with position: sticky. Below 900 px: top line, stage, bottom tab bar. */
 
 /* ---------------------------------------------------------------- page frame
  * Unlayered on purpose: it has to beat the layout's own utility classes on <main>. Everything else sits in
  * @layer components, so Tailwind utilities on cockpit markup (mt-3, gap-2, ...) still apply. */
 @media (min-width: 900px) {
-  html:has(.tdm116-fill),
-  html:has(.tdm116-fill) body { height: 100%; overflow: hidden; }
-  body:has(.tdm116-fill) { display: flex; flex-direction: column; }
-  body:has(.tdm116-fill) > header { flex: none; }
   body:has(.tdm116-fill) > header > div { max-width: none; }
-  body:has(.tdm116-fill) > main { flex: 1 1 auto; min-height: 0; width: 100%; max-width: none; padding: 0; }
+  body:has(.tdm116-fill) > main { width: 100%; max-width: none; padding: 0; }
 }
 @media (max-width: 899.98px) {
   body:has(.tdm116-fill) > main { max-width: none; padding: 0; }
@@ -382,5 +378,20 @@
   .tdm116-tickets { max-height: 40dvh; border-right: 0; border-bottom: 1px solid var(--line); }
   .tdm116-collapse { display: none; }
   .tdm116-dash-main .tdm116-shell { min-height: 0; }
+}
+
+/* ---------------------------------------------------------------- 900 px and up: the page scrolls, left columns stay put */
+@media (min-width: 900px) {
+  .tdm116-shell, .tdm116-dash { height: auto; min-height: calc(100dvh - 56px); grid-template-rows: auto 1fr; }
+  .tdm116-dash-main .tdm116-shell { min-height: 0; }
+  .tdm116-rail, .tdm116-tickets { position: sticky; top: 0; align-self: start; height: 100dvh; }
+  .tdm116-rail { z-index: 5; }
+  .tdm116-tickets { z-index: 6; }
+  .tdm116-stage, .tdm116-stage.is-factory { overflow: visible; }
+  .tdm116-stage > * { height: auto; }
+  .tdm116-cols, .tdm116-decision { height: auto; }
+  .tdm116-decision > * { max-height: none; }
+  .tdm116-scroll, .tdm116-robot { overflow: visible; }
+  .tdm116-scroll { overflow-x: auto; }
 }
 }

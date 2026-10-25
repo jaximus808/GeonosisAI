@@ -17,6 +17,7 @@
 import './kit/iso.css';
 import './factory-iso.css';
 import Link from 'next/link';
+import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Tag } from '@/components/brand/StatusTag';
 import { gxCx } from '@/components/brand/cx';
@@ -176,6 +177,7 @@ export function IsoCell({ ticketId, compact, onStationClick, onPickTicket, class
         </span>
         <Link href={`/dashboard?ticket=${cell.ticketId}`} className="fiso-ticket" title={taskDescription}>
           <span className="gx-id">{tdm115Tkt(cell.ticketId)}</span>
+          <SampleBadgeFor description={taskDescription} />
           {!compact && taskDescription && <span className="fiso-task">{taskDescription}</span>}
         </Link>
         <span className="fiso-readout" data-st={cell.machines[cell.active ?? 'eval']?.state} aria-live="polite">

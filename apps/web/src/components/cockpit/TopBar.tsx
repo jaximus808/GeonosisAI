@@ -12,6 +12,7 @@ import { fmtCents } from '@/lib/format';
 import type { Tdm112Floor } from '@/lib/tdm112/floor';
 import { TDM116_TERMINAL, type Tdm116Action, type Tdm116StageKey } from '@/lib/tdm116/cockpit';
 import { FakeBadge, SimBadge } from '@/components/ticket/Badges';
+import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import { Button } from '@/components/brand/Button';
 import { Tdm116PrimaryButton } from './Actions';
 import { Tdm116CancelDialog, Tdm116RobotReleased } from './CancelTicket';
@@ -57,6 +58,7 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false,
           {d.mode === 'sim' && <SimBadge title="This ticket runs on the SIM robot (MuJoCo YAM). Its numbers are sim results, never real-arm success rates." />}
           {d.mode === 'real' && <Tag tone="cancelled">Real robot</Tag>}
           {d.robotFake && <FakeBadge />}
+          <SampleBadgeFor description={t.taskDescription} />
           {d.robot ? (
             <Link href={`/robots/${d.robot.id}`} className="gx-id hover:text-ink" title={`${d.robot.embodiment}, ${d.robot.status}`}>
               {d.robot.name}

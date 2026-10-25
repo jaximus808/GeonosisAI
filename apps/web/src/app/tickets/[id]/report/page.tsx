@@ -7,6 +7,7 @@
 import type { Metadata } from 'next';
 import { Newsreader, Public_Sans } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import {
   DATA_TYPE_LABEL,
   clock,
@@ -115,7 +116,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       <article className="r-sheet">
         <header className="r-head">
           <p className="r-kicker">
-            Deployment report for ticket {r.ticket_id}
+            Deployment report for ticket {r.ticket_id} <SampleBadgeFor description={r.task.description} />
             <span className="r-kicker-right">
               Generated {utc(r.generated_at)}, {r.report_version}
             </span>

@@ -16,6 +16,7 @@ import { TDM101_ENDED, tdm101ParseTicketParam, tdm101PickTicket } from '@/lib/td
 import { tdm107IsSimRobot } from '@/lib/tdm107/robotMode';
 import { TDM116_PREF_KEYS, tdm116IsListToggleKey, tdm116ListTickets, tdm116ParseFlag } from '@/lib/tdm116/cockpit';
 import { useTdm116Stored } from './hooks';
+import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import { TicketCockpit } from './TicketCockpit';
 import './cockpit.css';
 
@@ -148,6 +149,7 @@ export function Tdm116DashboardShell({ ticketParam }: { ticketParam?: string | n
                     <span className="flex items-center gap-2">
                       <span className="gx-id shrink-0 whitespace-nowrap text-ink">TKT-{t.id.toString().padStart(4, '0')}</span>
                       <StatusTag status={t.status} />
+                      <SampleBadgeFor description={t.taskDescription} />
                       <span className="tdm116-money ml-auto whitespace-nowrap text-xs">
                         {fmtCents(t.spentCents)}
                         <span className="text-ink-muted"> / {fmtCents(budget)}</span>

@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Rivet, StatusTag, Tag } from '@/components/brand/StatusTag';
 import { useConnectionStatus, useRows } from '@/lib/spacetime/hooks';
 import { fmtCents } from '@/lib/format';
-import { tdm111Stats } from '@/lib/tdm111/landing';
+import { tdm111FiledCount, tdm111Stats } from '@/lib/tdm111/landing';
 
 /**
  * TDM-111: the landing page's live numbers, read-only from the anonymous SpacetimeDB subscription (the same
@@ -63,7 +63,7 @@ export function LandingLiveStrip() {
             <div data-testid="tdm111-shipped">
               <dt className="gx-label">Tickets shipped</dt>
               <dd className="gx-readout-num">{s.shipped}</dd>
-              <dd className="gx-id mt-1">{tickets.length} filed</dd>
+              <dd className="gx-id mt-1">{tdm111FiledCount(tickets)} filed</dd>
             </div>
           )}
           {s.latest && (

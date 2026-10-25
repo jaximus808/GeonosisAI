@@ -3,6 +3,7 @@
 // TDM-112: /factory. Every active ticket as its own lane of agent stations, all lanes on one column
 // grid, and the shared Factory Droids on one overhead rail above them (each names its ticket).
 
+import { SampleBadgeFor } from '@/components/sample/SampleBadge';
 import './factory.css';
 import Link from 'next/link';
 import { useMemo, type CSSProperties } from 'react';
@@ -105,6 +106,7 @@ export function FactoryLanes() {
           <div className="tdm112-lane-title">
             <span className="gx-id">TKT-{String(t.id).padStart(4, '0')}</span>
             <StatusTag status={t.status} />
+            <SampleBadgeFor description={t.taskDescription} />
             {!active.length && <span className="gx-small">Last ticket, nothing in flight</span>}
             <Link href={`/tickets/${t.id}`} className="min-w-0 truncate">
               {t.taskDescription || 'Untitled ticket'}

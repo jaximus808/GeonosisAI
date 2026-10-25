@@ -3,13 +3,14 @@
 // A number the page cannot back with rows is null, and the page hides it (never a placeholder value).
 
 import { tdm107IsSimRobot } from '@/lib/tdm107/robotMode';
+import { isSampleRobot, isSampleTicket } from '@/lib/sample/sample';
 
 /** Robot statuses that count as online (same list as the new-ticket form, TDM74_ROBOT_ONLINE). */
 export const TDM111_ROBOT_ONLINE = ['online', 'busy', 'paused'];
 
 type RobotRow = { name: string; status: string; cameraConfigJson: string };
 type TaskRow = { status: string; priceCents: bigint | number };
-type TicketRow = { id: bigint | number; status: string };
+type TicketRow = { id: bigint | number; status: string; taskDescription?: string; robotId?: bigint | number };
 
 export type Tdm111Stats = {
   robotsOnline: { total: number; sim: number; real: number } | null;
@@ -17,6 +18,11 @@ export type Tdm111Stats = {
   shipped: number | null;
   latest: { id: number; status: string } | null;
 };
+
+/** Tickets the landing page counts as filed: every ticket except the seeded [Sample] ones. */
+export function tdm111FiledCount(tickets: readonly TicketRow[]): number {
+  return tickets.filter((t) => !isSampleTicket(t)).length;
+}
 
 export function tdm111Stats(
   robots: readonly RobotRow[] | null,
@@ -26,7 +32,8 @@ export function tdm111Stats(
   let robotsOnline: Tdm111Stats['robotsOnline'] = null;
   if (robots) {
     // test.* robots are fixtures (ignored by robot auto-selection too)
-    const on = robots.filter((r) => !r.name.startsWith('test.') && TDM111_ROBOT_ONLINE.includes(r.status));
+    // sample-* robots belong to the seeded [Sample] tickets, never a live robot
+    const on = robots.filter((r) => !r.name.startsWith('test.') && !isSampleRobot(r) && TDM111_ROBOT_ONLINE.includes(r.status));
     const sim = on.filter((r) => tdm107IsSimRobot(r)).length;
     robotsOnline = { total: on.length, sim, real: on.length - sim };
   }
@@ -38,6 +45,8 @@ export function tdm111Stats(
   let shipped: number | null = null;
   let latest: Tdm111Stats['latest'] = null;
   if (tickets) {
+    // [Sample] tickets are seeded examples (scripts/demo/seed_samples.py), not real runs: left out of every number
+    tickets = tickets.filter((t) => !isSampleTicket(t));
     shipped = tickets.filter((t) => t.status === 'shipped').length;
     for (const t of tickets) {
       const id = Number(t.id);

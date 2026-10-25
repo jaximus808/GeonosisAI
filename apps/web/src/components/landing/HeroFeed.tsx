@@ -52,7 +52,7 @@ const GLYPH: Record<FeedKey, ReactNode> = {
 
 const NODES: Array<{ key: FeedKey; label: string; sub: string; side: 'left' | 'right' | 'top'; pos: string; phone: boolean }> = [
   { key: 'train', label: 'Train', sub: 'π0.5 · LoRA', side: 'top', pos: 'left-[25%] top-[2.5%]', phone: false },
-  { key: 'eval', label: 'Eval', sub: '10 TRIALS', side: 'right', pos: 'right-[1.5%] top-[8%]', phone: true },
+  { key: 'eval', label: 'Eval', sub: '3 TRIALS', side: 'right', pos: 'right-[1.5%] top-[8%]', phone: true },
   { key: 'review', label: 'Review', sub: 'GAPS · JERK', side: 'right', pos: 'right-[1.5%] top-[42%]', phone: false },
   { key: 'data', label: 'Data', sub: 'PHONE DEMOS', side: 'left', pos: 'left-[1.5%] top-[68%]', phone: true },
 ];

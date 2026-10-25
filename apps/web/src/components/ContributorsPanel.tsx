@@ -14,7 +14,8 @@ function ago(ms: number): string {
 
 /** TDM-60: live contributor list with online presence (dashboard). */
 export function ContributorsPanel({ limit = 20 }: { limit?: number }) {
-  const [rows, ready] = useRows('contributor');
+  const [allRows, ready] = useRows('contributor');
+  const rows = allRows.filter((c) => c.kind !== 'merged'); // a duplicate account folded into another (merge_contributor)
   const [presence] = usePresenceById();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

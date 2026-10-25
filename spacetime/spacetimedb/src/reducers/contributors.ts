@@ -22,7 +22,7 @@
 import { t, SenderError } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { contributorPresenceSweep, type RdfCtx } from '../schema';
-import { serviceRole } from '../auth';
+import { requireOwner, serviceRole } from '../auth';
 import { CONTRIBUTOR_KINDS, oneOf } from '../enums';
 import { logEvent } from '../event_log'; // TDM-15: the only event_log write path
 
@@ -223,5 +223,88 @@ export const sweep_contributor_presence = spacetimedb.reducer(
       const p = ctx.db.contributorPresence.contributor_id.find(c.id);
       if (!p || p.last_seen.microsSinceUnixEpoch < cutoff) tdm60SetOnline(ctx, c, false, 'stale');
     }
+  }
+);
+
+/**
+ * Owner only (scripts/demo/merge_contributors.py): one person ended up with two contributor rows (laptop and
+ * phone signed up separately). Everything of `from_id` moves to `into_id`: tasks it was assigned (assignee_id,
+ * live claims included), episodes, payments, its contact email when the survivor has none, paid totals and the
+ * Stripe account when the survivor has none. `from_id` stays as a hidden record: kind 'merged' (claim_task and
+ * the marketplace only take kind 'contributor'), name prefixed "[merged into #N]", offline, presence removed.
+ * take_identity = true also moves from_id's browser identity onto the survivor (the device that is actually in
+ * use keeps working, now as into_id); the survivor's old identity is dropped. Idempotent on an already merged
+ * row only in the sense that it refuses: a merged row can't be merged again.
+ */
+export const merge_contributor = spacetimedb.reducer(
+  { from_id: t.u64(), into_id: t.u64(), take_identity: t.bool() },
+  (ctx, { from_id, into_id, take_identity }) => {
+    requireOwner(ctx);
+    if (from_id === into_id) throw new SenderError('from_id and into_id are the same contributor');
+    const from = ctx.db.contributor.id.find(from_id);
+    const into = ctx.db.contributor.id.find(into_id);
+    if (!from) throw new SenderError(`contributor ${from_id} not found`);
+    if (!into) throw new SenderError(`contributor ${into_id} not found`);
+    if (from.kind !== 'contributor' || into.kind !== 'contributor') {
+      throw new SenderError(`only contributors merge (${from_id} is ${from.kind}, ${into_id} is ${into.kind})`);
+    }
+
+    let tasks = 0;
+    for (const task of [...ctx.db.task.assignee_id.filter(from_id)]) {
+      ctx.db.task.id.update({ ...task, assignee_id: into_id });
+      tasks++;
+    }
+    let episodes = 0;
+    for (const ep of [...ctx.db.episode.iter()]) {
+      if (ep.contributor_id !== from_id) continue;
+      ctx.db.episode.id.update({ ...ep, contributor_id: into_id });
+      episodes++;
+    }
+    let payments = 0;
+    for (const pay of [...ctx.db.payment.contributor_id.filter(from_id)]) {
+      ctx.db.payment.id.update({ ...pay, contributor_id: into_id });
+      payments++;
+    }
+    const contact = ctx.db.contributorContact.contributor_id.find(from_id);
+    let contactMoved = false;
+    if (contact) {
+      if (!ctx.db.contributorContact.contributor_id.find(into_id)) {
+        ctx.db.contributorContact.insert({ ...contact, contributor_id: into_id, updated_at: ctx.timestamp });
+        contactMoved = true;
+      }
+      ctx.db.contributorContact.contributor_id.delete(from_id);
+    }
+    if (ctx.db.contributorPresence.contributor_id.find(from_id)) {
+      ctx.db.contributorPresence.contributor_id.delete(from_id);
+    }
+
+    const movedIdentity = take_identity && from.identity != null;
+    ctx.db.contributor.id.update({
+      ...from,
+      kind: 'merged',
+      name: `[merged into #${into_id}] ${from.name}`.slice(0, 96),
+      online: false,
+      identity: movedIdentity ? undefined : from.identity,
+      total_paid_cents: 0n,
+    });
+    ctx.db.contributor.id.update({
+      ...into,
+      identity: movedIdentity ? from.identity : into.identity,
+      online: into.online || (movedIdentity && from.online),
+      stripe_account_id: into.stripe_account_id ?? from.stripe_account_id,
+      payouts_enabled: into.payouts_enabled || from.payouts_enabled,
+      total_paid_cents: into.total_paid_cents + from.total_paid_cents,
+      devices: [...new Set([...into.devices, ...from.devices])],
+    });
+    tdm60Log(ctx, 'owner', 'contributor.merged', {
+      from_id,
+      into_id,
+      tasks,
+      episodes,
+      payments,
+      contact_moved: contactMoved,
+      identity_moved: movedIdentity,
+      paid_cents_moved: from.total_paid_cents,
+    });
   }
 );

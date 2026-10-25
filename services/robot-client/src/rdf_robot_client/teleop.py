@@ -22,6 +22,10 @@ Protocol ``rdf-control/1`` (JSON text frames; the type key is ``t``, and ``type`
                                          rollout writes it as the recovery episode's success). Clean
                                          teleop: ends the start_teleop session
     {t:"record_start"} / {t:"record_stop", success:bool}   a clean demo's recording
+    {t:"reset_arm", req}                 slow joint-space ramp back to the rest pose (LARP's 'z' home: all joints
+                                         0, ``yam_operator.py``), gripper opened gently. Lease holder only, not
+                                         while recording or clutched; {t:"stop"} aborts it. The ack comes when it
+                                         ends; progress is in the state message (``resetting``, ``reset``)
     {t:"ping", ts_ms}
   robot -> browser
     {t:"hello", protocol, robot_id, task_id, exp, rate_hz, cmd_timeout_ms, state_hz}
@@ -109,10 +113,24 @@ CONTROL_PATH = "/ws/control"
 CONTROL_PATHS = (CONTROL_PATH, "/control")  # the contract's name + the path the TDM-56 page derives
 CLOSE_EXPIRED, CLOSE_FORBIDDEN, CLOSE_LEASE_LOST, CLOSE_REPLACED = 4001, 4003, 4004, 4009
 AUTH_TIMEOUT_S = 5.0
-OPS = ("takeover", "handback", "record_start", "record_stop", "record_discard", "reset_scene")
+OPS = ("takeover", "handback", "record_start", "record_stop", "record_discard", "reset_scene", "reset_arm")
 PRACTICE_SUB = "practice:"  # [SIM] practice tokens (orchestrator practice_api): no task, no lease, no recording
 SAFETY_KEYS = ("clamped_joint_limit", "clamped_speed", "clamped_workspace", "clamped_gripper",
                "rejected_nonfinite", "rejected_jump", "rejected_stopped", "watchdog_holds", "estops")
+
+
+# reset_arm: LARP's home ('z' key in ~/northstar/LARP/examples/yam_teleop/yam_operator.py:561-567 and 591-598):
+# every arm joint ramps to 0.0 (the zeroed, folded rest pose; J2/J3 rest at 0) over HOME_DURATION_S = 5 s
+# (yam_operator.py:169). Ours is the same target and at least as slow: smoothstep over
+# max(5 s, 1.5 * distance / RESET_MAX_JOINT_SPEED), streamed through the SafetyLayer (clamps the goal inside its
+# margin, so J2/J3 stop at +margin) and LarpSafeYamArm (<= 0.3 rad/s on every setpoint).
+LARP_HOME_JOINTS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+LARP_HOME_DURATION_S = 5.0
+RESET_MAX_JOINT_SPEED = 0.2   # rad/s peak per joint (smoothstep peaks at 1.5x the mean); below the 0.3 ceiling
+RESET_GRIPPER_OPEN = 1.0      # adapter units: 0 closed .. 1 open
+RESET_LIMIT_TOL = 0.05        # rad past the joint limits that still counts as inside (LarpSafeYamArm START_LIMIT_TOL)
+RESET_ARRIVED_RAD = 0.05      # residual that counts as arrived
+RESET_SETTLE_S = 3.0
 
 
 def _jlog(msg: str, **fields: Any) -> None:
@@ -403,6 +421,15 @@ class ControlSession:
 
 # ------------------------------------------------------------------------------------ the hub
 
+def _find_sim(arm: Any) -> Any:
+    """The MuJoCo sim under the wrappers, or None (real arm, or no simulator installed on this computer)."""
+    try:
+        from .adapters.mujoco_sim import find_sim
+    except ImportError:
+        return None
+    return find_sim(arm)
+
+
 def _rec_marks(rec: Any) -> tuple[int | None, int | None]:
     """(takeover_ns, handback_ns) of the running recording (TDM-48 keeps them on its session)."""
     s = getattr(rec, "_s", None)
@@ -444,6 +471,12 @@ class TeleopHub:
         self._clamp_seen: dict[str, tuple[int, float]] = {}  # kind -> (last count, monotonic t of last increase)
         self._drive_status: dict[str, Any] = {"engaged": False, "hold_reason": "no_session", "seq": None,
                                               "target": None, "gripper_cmd": None, "speed_scale": None}
+        # reset_arm: the pose measured when the robot client started (the folded rest it booted in), the
+        # fallback target for arms with no LARP home; and the progress the state message shows
+        self.boot_joints: tuple[float, ...] | None = None
+        self._resetting = False
+        self._reset_abort = threading.Event()
+        self._reset_status: dict[str, Any] = {"active": False}
 
     # ---------------------------------------------------------------- guards
     def make_guard(self, claims: StreamClaims) -> Any:
@@ -461,7 +494,17 @@ class TeleopHub:
         return ControlLeaseGuard(claims, spacetime_task_fetcher(http), robot_id=getattr(self.client, "robot_id", None))
 
     # ---------------------------------------------------------------- sessions (asyncio thread)
+    def record_boot_pose(self) -> tuple[float, ...] | None:
+        """Remember the measured joints once (tdm119_teleop calls this right after the arm connects)."""
+        if self.boot_joints is None:
+            try:
+                self.boot_joints = tuple(float(v) for v in self.client.arm.joint_positions())
+            except Exception:  # noqa: BLE001 - not connected yet: the next caller records it
+                return None
+        return self.boot_joints
+
     def attach(self, sess: ControlSession) -> ControlSession | None:
+        self.record_boot_pose()
         with self._lock:
             old, self._session, self._cmd = self._session, sess, None
             self.counters["sessions"] += 1
@@ -474,6 +517,7 @@ class TeleopHub:
             if self._session is not sess:
                 return
             self._session, self._cmd = None, None
+            self._reset_abort.set()  # a reset in flight stops and holds: never move for a gone operator
         self.client.event("robot.teleop_disconnected", sub=sess.claims.sub, task_id=sess.claims.task_id, reason=reason)
 
     def revoke(self, sess: ControlSession, code: str) -> None:
@@ -482,6 +526,7 @@ class TeleopHub:
         with self._lock:
             if self._session is sess:
                 self._cmd = None
+                self._reset_abort.set()
             self.counters["lease_lost"] += 1
         self.client.event("robot.teleop_lease_lost", sub=sess.claims.sub, task_id=sess.claims.task_id, code=code)
 
@@ -521,6 +566,7 @@ class TeleopHub:
 
     def stop(self, sess: ControlSession | None, reason: str = "browser stop") -> None:
         """Soft e-stop from the browser: latch the safety layer + the state machine. Never refused."""
+        self._reset_abort.set()  # a reset_arm ramp stops at once (the latch below also refuses its next setpoint)
         try:
             self.client.arm.stop()
         finally:
@@ -694,6 +740,168 @@ class TeleopHub:
                           note="[SIM] practice: the simulator re-placed the objects", **out)
         return {"ok": True, **out}
 
+    # ---------------------------------------------------------------- reset_arm (its own worker thread)
+    def _reset_target(self) -> tuple[tuple[float, ...], str, tuple[tuple[float, ...], tuple[float, ...]]]:
+        """(goal, source, raw joint limits it must sit inside). Real/sim YAM: LARP's home. MuJoCo sim: its
+        home. Anything else: the pose measured when the client started, else the adapter's home."""
+        arm = self.client.arm
+        inner = arm
+        while getattr(inner, "inner", None) is not None:
+            inner = inner.inner
+        lim = getattr(inner, "limits", None) or arm.limits
+        if _find_sim(arm) is not None:
+            return tuple(arm.home_joints), "sim_home", (tuple(lim.lower), tuple(lim.upper))
+        if getattr(inner, "name", "") == "yam" and arm.dof == len(LARP_HOME_JOINTS):
+            from .adapters.yam_larp import LARP_YAM_LOWER, LARP_YAM_UPPER
+
+            return LARP_HOME_JOINTS, "larp_home", (LARP_YAM_LOWER, LARP_YAM_UPPER)
+        boot = self.boot_joints
+        if boot is not None and len(boot) == arm.dof:
+            return boot, "boot_pose", (tuple(lim.lower), tuple(lim.upper))
+        return tuple(arm.home_joints), "home_joints", (tuple(lim.lower), tuple(lim.upper))
+
+    def reset_arm_op(self, sess: ControlSession, m: dict[str, Any]) -> dict[str, Any]:
+        """``{t:"reset_arm"}``: refuse, or ramp to the rest pose and return when it ends (blocking)."""
+        why = self._authorized(sess)
+        if why:
+            return {"ok": False, "code": why, "detail": "only the current lease holder can reset the arm"}
+        sm = self.client.sm
+        rec = self.client.services.get("recorder")
+        with self._lock:
+            if self._resetting:
+                return {"ok": False, "code": "already_resetting"}
+            if sm.locked:
+                return {"ok": False, "code": "stopped", "detail": "the stop is latched; a human at the arm clears it"}
+            if rec is not None and getattr(rec, "recording", False):
+                return {"ok": False, "code": "recording", "detail": "finish or discard the recording first"}
+            cmd = self._cmd
+            clutched = bool(self._drive_status.get("engaged")) or (
+                cmd is not None and cmd.clutch and time.monotonic() - cmd.rx <= self.cfg.cmd_timeout_s)
+            if clutched:
+                return {"ok": False, "code": "clutched", "detail": "let go of the arm control first"}
+            if self.mode == "takeover":
+                return {"ok": False, "code": "takeover", "detail": "hand back to the policy first"}
+            driving = self.mode == "teleop" and sm.state is S.TELEOP
+            idle = self.mode is None and sm.state is S.IDLE and self._job() is None
+            if not (driving or idle):
+                return {"ok": False, "code": "busy", "detail": f"robot is {sm.state}"}
+            goal, source, (lo, hi) = self._reset_target()
+            bad = [f"j{i + 1}={g:+.3f} (limits {a:+.3f}..{b:+.3f})" for i, (g, a, b) in enumerate(zip(goal, lo, hi))
+                   if not (math.isfinite(g) and a - RESET_LIMIT_TOL <= g <= b + RESET_LIMIT_TOL)]
+            if bad:
+                return {"ok": False, "code": "target_out_of_limits", "detail": ", ".join(bad), "source": source}
+            self._resetting = True
+            self._reset_abort.clear()
+            self._reset_status = {"active": True, "percent": 0, "source": source, "phase": "starting"}
+        self.counters["resets"] = self.counters.get("resets", 0) + 1
+        try:
+            if driving:  # wait for the drive loop to stand down (it holds with reason "resetting")
+                end = time.monotonic() + 1.0
+                while self._drive_status.get("hold_reason") != "resetting" and time.monotonic() < end:
+                    time.sleep(0.01)
+            res = self._reset_ramp(sess, goal, source)
+        except Exception as e:  # noqa: BLE001
+            log.exception("reset_arm failed")
+            res = {"ok": False, "code": "error", "detail": f"{type(e).__name__}: {e}"[:300]}
+        finally:
+            if not sm.locked:
+                try:
+                    self.client.arm.hold()
+                except Exception:  # noqa: BLE001
+                    pass
+            with self._lock:
+                self._resetting = False
+        self._reset_status = {"active": False, "percent": res.get("percent", 0), "last": {
+            k: res.get(k) for k in ("ok", "code", "source", "seconds", "residual_rad")}}
+        self.client.event("robot.arm_reset", sub=sess.claims.sub, task_id=sess.claims.task_id,
+                          **{k: v for k, v in res.items() if k not in ("t",)})
+        _jlog("reset_arm ended", sub=sess.claims.sub, **{k: res.get(k) for k in ("ok", "code", "seconds", "source")})
+        return res
+
+    def _reset_ramp(self, sess: ControlSession, goal: tuple[float, ...], source: str) -> dict[str, Any]:
+        arm = self.client.arm
+        safe = arm.limits  # SafetyLayer: the adapter limits tightened by the profile and its margin
+        goal = tuple(min(max(g, a), b) for g, a, b in zip(goal, safe.lower, safe.upper))
+        start = tuple(arm.joint_positions())
+        dist = max((abs(g - s) for g, s in zip(goal, start)), default=0.0)
+        vcap = min(RESET_MAX_JOINT_SPEED, *(v for v in safe.max_velocity if v > 0))
+        duration = max(LARP_HOME_DURATION_S, 1.5 * dist / vcap)
+        g0 = float(arm.read_state().gripper)
+        period = 1.0 / arm.control_rate_hz
+        t0 = time.monotonic()
+        best = 0.0
+        out = {"source": source, "target": [round(v, 4) for v in goal], "planned_s": round(duration, 2)}
+
+        def aborted() -> str | None:
+            if self._reset_abort.is_set() or self.client.sm.locked:
+                return "stopped"
+            if sess.revoked or self._session is not sess:
+                return "operator_gone"
+            return None
+
+        def progress() -> int:
+            nonlocal best
+            if dist <= 1e-6:
+                best = 1.0
+            else:
+                res = max(abs(c - g) for c, g in zip(arm.joint_positions(), goal))
+                best = max(best, min(max(1.0 - res / dist, 0.0), 1.0))
+            pct = int(best * 100)
+            self._reset_status = {**self._reset_status, "percent": pct}
+            return pct
+
+        self._reset_status = {**self._reset_status, "phase": "moving", "planned_s": out["planned_s"]}
+        next_t = t0
+        while True:
+            why = aborted()
+            if why:
+                if not self.client.sm.locked:
+                    arm.hold()
+                return {**out, "ok": False, "code": why, "percent": progress(),
+                        "seconds": round(time.monotonic() - t0, 2)}
+            a = min((time.monotonic() - t0) / duration, 1.0)
+            s = a * a * (3 - 2 * a)  # smoothstep: zero velocity at both ends, peak 1.5x the mean
+            q = tuple(st + (g - st) * s for st, g in zip(start, goal))
+            try:
+                arm.command_joints(q, g0 + (RESET_GRIPPER_OPEN - g0) * s)
+            except ArmStopped:
+                return {**out, "ok": False, "code": "stopped", "percent": progress(),
+                        "seconds": round(time.monotonic() - t0, 2)}
+            progress()
+            if a >= 1.0:
+                break
+            next_t += period
+            time.sleep(max(next_t - time.monotonic(), 0.0))
+        self._reset_status = {**self._reset_status, "phase": "settling"}
+        end = time.monotonic() + RESET_SETTLE_S
+        residual = dist
+        while time.monotonic() < end:
+            if aborted():
+                break
+            arm.command_joints(goal, RESET_GRIPPER_OPEN)  # keep the stream alive (the 200 ms watchdog)
+            residual = max(abs(c - g) for c, g in zip(arm.joint_positions(), goal))
+            progress()
+            if residual <= RESET_ARRIVED_RAD:
+                break
+            time.sleep(period)
+        res = {**out, "seconds": round(time.monotonic() - t0, 2), "residual_rad": round(residual, 4)}
+        why = aborted()
+        if why:
+            return {**res, "ok": False, "code": why, "percent": progress()}
+        if residual > RESET_ARRIVED_RAD:
+            # e.g. the safety layer's workspace box cut the path: the arm holds where it stopped
+            return {**res, "ok": False, "code": "not_arrived", "percent": progress(),
+                    "detail": f"stopped {residual:.3f} rad from the rest pose (a safety limit cut the path?)"}
+        self._reset_status = {**self._reset_status, "percent": 100}
+        sim = _find_sim(arm)
+        if sim is not None:  # [SIM] the scene reset too (refused while recording, so no recording sees it)
+            try:
+                res["scene"] = sim.reset_scene()
+                self.client.event("sim.scene_reset", via="reset_arm", sim=True, **res["scene"])
+            except Exception:  # noqa: BLE001
+                log.exception("sim scene reset after reset_arm failed")
+        return {**res, "ok": True, "percent": 100}
+
     def _op_record_start(self, sess: ControlSession, m: dict[str, Any]) -> dict[str, Any]:
         from .recorder import recorder_for
 
@@ -861,6 +1069,8 @@ class TeleopHub:
             now = time.monotonic()
             if self.client.sm.state is not S.TELEOP or not self.client.link_ok():
                 hold("not_teleop" if self.client.sm.state is not S.TELEOP else "link_down")
+            elif self._resetting:  # reset_arm owns the arm: no clutch motion until it ends
+                hold("resetting")
             else:
                 with self._lock:
                     cmd = self._cmd if self._session is not None and not self._session.revoked else None
@@ -970,6 +1180,7 @@ class TeleopHub:
             "can_takeover": sm.state is S.PAUSED_FOR_TAKEOVER and job is not None and self.mode is None,
             "can_handback": self.mode == "takeover" and sm.state is S.TELEOP,
             "lease": sess.guard.status() if sess is not None and hasattr(sess.guard, "status") else None,
+            "resetting": bool(self._reset_status.get("active")), "reset": dict(self._reset_status),
         }
 
     def close(self) -> None:
@@ -1110,7 +1321,8 @@ async def control_ws(server: Any, ws: Any, hub: TeleopHub) -> None:
                                 else {"t": "ack", "seq": m.get("seq"), "ok": False, "code": why})
             else:
                 async def run_op(op: str = t, mm: dict[str, Any] = m) -> None:
-                    res = await hub.submit_op(sess, op, mm)
+                    res = await (asyncio.to_thread(hub.reset_arm_op, sess, mm) if op == "reset_arm"
+                                 else hub.submit_op(sess, op, mm))
                     await sess.send(res if "t" in res else {"t": "ack", "op": op, "req": mm.get("req"), **res})
                 asyncio.ensure_future(run_op())
 

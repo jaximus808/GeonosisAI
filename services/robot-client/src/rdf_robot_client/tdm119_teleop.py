@@ -155,6 +155,9 @@ def run(argv: list[str] | None = None) -> int:
         if rig is not None:
             rig.stop()
         return 3
+    hub = client.services.get("teleop")
+    if hub is not None:  # reset_arm's fallback target: the folded rest the arm booted in (measured, held)
+        _log("boot pose recorded for reset_arm", joints=hub.record_boot_pose())
     _log("TDM-119 teleop client running on the real arm", robot_id=client.robot_id, name=name,
          speed_scale=arm.speed_scale, teleop_max_lin_speed=tcfg.max_lin_speed)
     if rig is not None:  # teleop recordings upload: ORCHESTRATOR_URL, else TDM-110 discovery (RDF_EDGE_SECRET)

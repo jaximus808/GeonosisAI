@@ -1,0 +1,265 @@
+/* TDM-115: the isometric factory. The vendored Anatomy kit (kit/iso.css) draws with --anatomy-* tokens;
+ * here they are remapped to the GeonosisAI tokens (Foundry dark by default, Dune under data-theme=light).
+ * Melt only on what is running: the running machine's edges, the belt tread, the working droid's visor.
+ * Motion: CSS only, paused offscreen / in a hidden tab (data-paused), off under prefers-reduced-motion. */
+
+.fiso {
+  --anatomy-page: var(--ground); --anatomy-card: var(--surface); --anatomy-text: var(--ink-muted); --anatomy-strong: var(--ink); --anatomy-muted: var(--steel);
+  --anatomy-paper: #1f1b18; --anatomy-face: #26221e; --anatomy-top: #312b26;
+  --anatomy-shade-0: #100e0c; --anatomy-shade-1: #151210; --anatomy-shade-2: #1a1714; --anatomy-shade-3: #201c19;
+  --anatomy-lit-top: #3b1d0a; --anatomy-lit-shade: #2a1609;
+  --anatomy-hi: #e2d7cc; --anatomy-mid: #a08f81; --anatomy-lo: #62564c; --anatomy-faint: #3a322c; --anatomy-lit: var(--melt);
+  --anatomy-halo: #000; --anatomy-halo-opacity: 0.55; --anatomy-dot: var(--ink);
+  --anatomy-red: var(--slag); --anatomy-green: var(--arc); --anatomy-blue: var(--arc);
+  --anatomy-weight: 0.7px;
+  --anatomy-mono: var(--font-mono);
+  --fiso-st: var(--steel);
+  container-type: inline-size;
+  position: relative; display: grid; gap: var(--space-2); min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink);
+}
+:root[data-theme='light'] .fiso {
+  --anatomy-paper: #fbf8f5; --anatomy-face: #ffffff; --anatomy-top: #ffffff;
+  --anatomy-shade-0: #d9cfc6; --anatomy-shade-1: #e3dad2; --anatomy-shade-2: #ece5de; --anatomy-shade-3: #f4efea;
+  --anatomy-lit-top: #fde1cc; --anatomy-lit-shade: #f6cfb3;
+  --anatomy-hi: #2a211c; --anatomy-mid: #8f7f72; --anatomy-lo: #b8aa9e; --anatomy-faint: #d8ccc1;
+  --anatomy-halo: #8f7f72; --anatomy-halo-opacity: 0.28;
+}
+.fiso-empty { padding: var(--space-4); }
+
+/* States: one colour per state, always paired with words. */
+.fiso [data-st='working'] { --fiso-st: var(--melt); }
+.fiso [data-st='waiting_robot'], .fiso [data-st='waiting_person'] { --fiso-st: var(--ochre); }
+.fiso [data-st='idle'], .fiso [data-st='asleep'] { --fiso-st: var(--steel); }
+.fiso [data-st='done'] { --fiso-st: var(--ink-muted); }
+.fiso [data-st='failed'] { --fiso-st: var(--slag); }
+
+/* ---------------------------------------------------------------- header */
+.fiso-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-width: 0; }
+.fiso-robot-name { display: inline-flex; align-items: center; gap: var(--space-2); }
+.fiso-ticket .gx-id { white-space: nowrap; }
+.fiso-ticket { display: inline-flex; align-items: baseline; gap: var(--space-2); min-width: 0; flex: 1 1 200px; color: var(--ink); text-decoration: none; }
+.fiso-ticket:hover .fiso-task { text-decoration: underline; }
+.fiso-task { font-size: 14px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fiso-readout { font-family: var(--font-mono); font-size: 13px; color: var(--fiso-st); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fiso-guide-btn { font: inherit; font-size: 13px; line-height: 18px; color: var(--arc); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.fiso-guide-btn[aria-expanded='true'] { color: var(--ink-muted); }
+.fiso button:focus-visible, .fiso a:focus-visible, .fiso-hits path:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.fiso-queue { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); list-style: none; margin: 0; padding: 0; }
+.fiso-queue li { display: inline-flex; align-items: baseline; gap: var(--space-2); }
+.fiso-queue-when { font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--steel); }
+.fiso-queue li[data-now] .fiso-queue-when { color: var(--ink); }
+.fiso-queue li[data-focus] .gx-id { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.fiso-queue-pick { padding: 0; background: none; border: 0; cursor: pointer; }
+.fiso-queue li[data-focus] .fiso-queue-pick { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.fiso-queue-stage { font-size: 12px; color: var(--ink-muted); }
+.fiso-wait { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: 13px; line-height: 18px; color: var(--ochre); }
+
+/* ---------------------------------------------------------------- stage */
+.fiso-body { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--space-4); }
+.fiso-stage { position: relative; min-width: 0; }
+.fiso-svg { width: 100%; height: auto; user-select: none; }
+.fiso-overlay { position: absolute; inset: 0; pointer-events: none; }
+.fiso-overlay > * { pointer-events: auto; }
+
+/* Machines: the running one gets melt edges (the kit's single lit accent), a waiting one ochre. */
+.fiso-machine[data-st='working'] .iso-edge { stroke: var(--melt); }
+.fiso-machine[data-st='waiting_person'] .iso-edge, .fiso-machine[data-st='waiting_robot'] .iso-edge { stroke: var(--ochre); }
+.fiso-machine[data-st='failed'] .iso-edge { stroke: var(--slag); }
+.fiso-machine[data-st='waiting_robot'] .iso-edge { stroke-dasharray: 2 2; }
+
+.fiso-light { stroke: var(--anatomy-lo); stroke-width: 0.6px; vector-effect: non-scaling-stroke; fill: var(--anatomy-shade-0); }
+.fiso-light[data-mark='off'] { fill: var(--anatomy-shade-1); stroke: var(--anatomy-faint); }
+.fiso-light[data-mark='pass'] { fill: var(--arc); stroke: var(--arc); }
+.fiso-light[data-mark='fail'] { fill: var(--slag); stroke: var(--slag); }
+.fiso-light[data-mark='now'] { fill: var(--melt); stroke: var(--melt); animation: fiso-blink 2s steps(1, end) infinite; }
+
+.fiso-robot[data-running] .fiso-wristband { fill: var(--melt); }
+.fiso-wristband { fill: var(--anatomy-lo); }
+.fiso-cube .iso-fill, .fiso-cube .iso-top { fill: var(--anatomy-top); }
+
+.fiso-slit { fill: var(--anatomy-shade-0); }
+.fiso-machine[data-st='working'] .fiso-slit { fill: var(--melt); animation: fiso-blink 2s steps(1, end) infinite; }
+.fiso-cavity { fill: var(--anatomy-shade-0); }
+.fiso-bin:not([data-full]) { opacity: 0.55; }
+
+.fiso-screen { fill: var(--anatomy-shade-0); }
+.fiso-screen[data-on] { fill: var(--arc-soft); }
+.fiso-sheet[data-waiting] .iso-top { fill: var(--ochre-soft); }
+.fiso-sheet[data-waiting] .iso-edge { stroke: var(--ochre); }
+.fiso-price .iso-top { fill: var(--ochre); }
+
+.fiso-ticketcard[data-mark='open'] .iso-edge { stroke: var(--steel); }
+.fiso-ticketcard[data-mark='claimed'] .iso-edge { stroke: var(--ochre); }
+.fiso-ticketcard[data-mark='claimed'] .iso-shade { fill: var(--ochre-soft); }
+.fiso-ticketcard[data-mark='done'] .iso-shade, .fiso-ticketcard[data-mark='done'] .iso-fill { fill: var(--anatomy-hi); }
+.fiso-beacon .iso-top { fill: var(--anatomy-shade-2); }
+.fiso-machine[data-st='working'] .fiso-beacon .iso-top, .fiso-machine[data-st='waiting_person'] .fiso-beacon .iso-top { fill: var(--fiso-st); }
+
+.fiso-pass .iso-top { fill: var(--arc-soft); }
+.fiso-reject .iso-top { fill: var(--slag-soft); }
+.fiso-lamp .iso-top { fill: var(--anatomy-shade-2); }
+.fiso-machine[data-st='working'] .fiso-lamp .iso-top { fill: var(--melt); }
+
+.fiso-mouth { fill: var(--anatomy-shade-0); stroke: var(--anatomy-lo); stroke-width: 0.6px; vector-effect: non-scaling-stroke; }
+.fiso-machine[data-st='working'] .fiso-mouth { fill: var(--melt); stroke: var(--melt); animation: fiso-glow 2s ease-in-out infinite; }
+.fiso-machine[data-st='done'] .fiso-mouth { fill: var(--melt-soft); }
+
+.fiso-machine[data-shipped] .fiso-shipcrate .iso-top { fill: var(--arc-soft); }
+.fiso-machine[data-shipped] .fiso-shipcrate .iso-edge { stroke: var(--arc); }
+
+.fiso-belt[data-running] .fiso-tread { stroke: var(--melt); }
+.fiso-crate .iso-top { fill: var(--anatomy-top); }
+.fiso-crate, .fiso-handoff { pointer-events: none; }
+
+.fiso-hits path { fill: transparent; stroke: none; cursor: pointer; }
+
+/* Droids: the visor and floor ring carry the state colour; Claude agents wear an ochre chest chip. */
+.fiso-droid { cursor: pointer; transition: transform 1100ms cubic-bezier(0.45, 0, 0.2, 1); }
+.fiso-droid-ring { fill: none; stroke: var(--fiso-st); stroke-width: 1.2px; vector-effect: non-scaling-stroke; }
+.fiso-droid[data-st='waiting_robot'] .fiso-droid-ring { stroke-dasharray: 3 2; }
+.fiso-droid[data-st='idle'] .fiso-droid-ring, .fiso-droid[data-st='done'] .fiso-droid-ring { stroke: var(--anatomy-lo); }
+.fiso-droid-pulse { fill: none; stroke: var(--arc); stroke-width: 1.4px; vector-effect: non-scaling-stroke; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.fiso-droid[data-woke] .fiso-droid-pulse { animation: fiso-wake 2s ease-out infinite; }
+.fiso-visor { fill: var(--fiso-st); }
+.fiso-droid[data-st='idle'] .fiso-visor { fill: var(--anatomy-lo); }
+.fiso-droid[data-st='asleep'] .fiso-visor { fill: var(--anatomy-faint); }
+.fiso-droid-chip { fill: var(--ochre); }
+.fiso-tip { fill: var(--anatomy-mid); }
+.fiso-droid[data-st='working'] .fiso-tip { fill: var(--melt); animation: fiso-blink 2s steps(1, end) infinite; }
+.fiso-droid[data-st='idle'], .fiso-droid[data-st='done'] { opacity: 0.72; }
+.fiso-droid[data-selected] .fiso-droid-ring { stroke: var(--arc); stroke-width: 2px; }
+
+/* ---------------------------------------------------------------- HTML overlays */
+.fiso-plate {
+  position: absolute; transform: translate(-50%, 10px); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 2px 6px; font: inherit; color: var(--ink-muted); background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+.fiso-plate:hover { background: var(--surface-sunken); }
+.fiso-plate .gx-rivet { color: var(--fiso-st); }
+.fiso-plate[data-st='working'] { border-color: var(--melt); color: var(--ink); }
+.fiso-plate[data-st='waiting_person'], .fiso-plate[data-st='waiting_robot'] { border-color: var(--ochre); color: var(--ink); }
+.fiso-plate[data-st='waiting_robot'] { border-style: dashed; }
+.fiso-plate[data-st='failed'] { border-color: var(--slag); }
+.fiso-plate-name { font-family: var(--font-display); font-weight: 700; font-size: 11px; line-height: 14px; letter-spacing: 0.12em; text-transform: uppercase; }
+.fiso-plate-num { font-family: var(--font-mono); font-size: 11px; line-height: 14px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.fiso-bubble {
+  position: absolute; display: grid; gap: 4px; width: max-content; max-width: 210px; text-align: left;
+  padding: 5px 8px 6px; color: var(--ink); background: var(--surface); border: 1px solid var(--fiso-st); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-overlay); transform: translate(-14px, calc(-100% - 10px));
+}
+.fiso-bubble[data-side='l'] { transform: translate(calc(-100% + 14px), calc(-100% - 10px)); }
+.fiso-bubble::after { content: ''; position: absolute; bottom: -6px; left: 10px; width: 10px; height: 10px; background: var(--surface); border-right: 1px solid var(--fiso-st); border-bottom: 1px solid var(--fiso-st); transform: rotate(45deg); }
+.fiso-bubble[data-side='l']::after { left: auto; right: 10px; }
+.fiso-bubble[data-st='waiting_robot'] { border-style: dashed; }
+.fiso-bubble[data-st='asleep'] { color: var(--steel); }
+.fiso-bubble[data-st='asleep'] .fiso-bubble-say { font-family: var(--font-mono); font-size: 11px; }
+.fiso-bubble[data-woke] { border-color: var(--arc); }
+.fiso-bubble-hit { display: grid; gap: 1px; padding: 0; font: inherit; text-align: left; color: inherit; background: none; border: 0; cursor: pointer; }
+.fiso-ask { display: grid; gap: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.fiso-ask-what { font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+.fiso-ask .gx-btn { justify-self: start; }
+.fiso-bubble-name { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-display); font-weight: 700; font-size: 11px; line-height: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fiso-st); }
+.fiso-bubble-say { font-size: 12px; line-height: 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fiso-badge { font-family: var(--font-mono); font-size: 10px; line-height: 13px; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--ochre); padding: 0 4px; border: 1px solid var(--ochre-soft); border-radius: var(--radius-sm); }
+
+.fiso-card { position: absolute; display: grid; gap: 2px; padding: 6px 8px; font-size: 12px; line-height: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.fiso-plancard { transform: translate(-100%, -100%); min-width: 150px; }
+.fiso-plancard[data-waiting] { border-color: var(--ochre); }
+.fiso-card-k { font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); }
+.fiso-card-v { color: var(--ink); }
+.fiso-card-money { font-family: var(--font-mono); color: var(--ochre); font-variant-numeric: tabular-nums; }
+.fiso-test { font-family: var(--font-sans); font-size: 11px; color: var(--ink-muted); }
+.fiso-card-login { font-size: 12px; color: var(--arc); }
+.fiso-card-err { font-size: 11px; color: var(--slag); }
+.fiso-plancard .gx-btn { margin-top: 4px; }
+.fiso-collectcard { grid-auto-flow: column; gap: var(--space-3); transform: translate(10px, -50%); color: var(--ink-muted); white-space: nowrap; }
+.fiso-collectcard b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+
+.fiso-agent { position: absolute; left: 0; bottom: 0; z-index: 2; display: grid; gap: var(--space-2); width: min(340px, 100%); padding: var(--space-3); background: var(--surface); border: 1px solid var(--fiso-st); border-radius: var(--radius-sm); box-shadow: var(--shadow-overlay); }
+.fiso-agent-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-right: 48px; }
+.fiso-agent .fiso-x { position: absolute; top: var(--space-3); right: var(--space-3); }
+.fiso-agent-state { font-size: 12px; color: var(--fiso-st); }
+.fiso-agent-say { margin: 0; font-size: 14px; line-height: 20px; }
+.fiso-agent .gx-btn { justify-self: start; }
+.fiso-kind { font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
+.fiso-x { margin-left: auto; font: inherit; font-size: 12px; color: var(--ink-muted); background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.fiso-dot { display: inline-block; flex: none; width: 6px; height: 6px; background: var(--fiso-st); }
+
+.fiso-guide { position: absolute; top: 0; right: 0; z-index: 3; display: grid; align-content: start; gap: var(--space-3); width: min(320px, 100%); max-height: 100%; overflow: auto; padding: var(--space-3) var(--space-4); background: color-mix(in oklab, var(--surface) 94%, transparent); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-overlay); }
+.fiso-guide-head { display: flex; align-items: baseline; }
+.fiso-guide-lede { margin: 0; font-size: 14px; line-height: 20px; }
+.fiso-guide-list { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.fiso-guide-list li { display: grid; gap: 0; }
+.fiso-guide-list .gx-small { font-size: 12px; line-height: 16px; }
+.fiso-guide-name { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; font-weight: 600; }
+
+.fiso-list { display: none; list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.fiso-list li button { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 var(--space-2); align-items: baseline; width: 100%; padding: var(--space-2) 0; font: inherit; text-align: left; color: inherit; background: none; border: 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.fiso-list .fiso-dot { align-self: center; }
+.fiso-list .fiso-ask { margin: 0 0 var(--space-2) 14px; border-top: 0; padding-top: 0; }
+.fiso-list-name { display: flex; align-items: baseline; gap: 6px; font-size: 13px; font-weight: 600; }
+.fiso-list-say { grid-column: 2; font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+.fiso-list li[data-st='working'] .fiso-list-say, .fiso-list li[data-st^='waiting'] .fiso-list-say { color: var(--ink); }
+
+/* The line under the cell: every machine in order, click to open, hover to find it in the drawing. */
+.fiso-line { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; list-style: none; margin: 0; padding: 0; }
+.fiso-line li { position: relative; min-width: 0; padding-top: 14px; }
+.fiso-line li::before { content: ''; position: absolute; top: 4px; left: 0; right: 0; height: 2px; background: var(--line); }
+.fiso-line li::after { content: ''; position: absolute; top: 0; left: 0; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid var(--fiso-st); background: var(--ground); }
+.fiso-line li[data-st='done']::after { background: var(--ink-muted); border-color: var(--ink-muted); }
+.fiso-line li[data-st='working']::after, .fiso-line li[data-st^='waiting']::after, .fiso-line li[data-st='failed']::after { background: var(--fiso-st); }
+.fiso-line li[data-st='working']::after { box-shadow: 0 0 0 4px var(--melt-soft); }
+.fiso-line button { display: grid; gap: 1px; width: 100%; padding: 2px var(--space-2) 2px 0; font: inherit; text-align: left; color: inherit; background: none; border: 0; cursor: pointer; }
+.fiso-line button:hover .fiso-line-name { color: var(--ink); }
+.fiso-line-name { font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fiso-line li[aria-current] .fiso-line-name, .fiso-line li[data-st^='waiting'] .fiso-line-name { color: var(--ink); }
+.fiso-line-num { font-family: var(--font-mono); font-size: 11px; line-height: 15px; color: var(--fiso-st); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fiso-line li[data-st='idle'] .fiso-line-num, .fiso-line li[data-st='done'] .fiso-line-num { color: var(--ink-muted); }
+.fiso-stage[data-hover='eval'] :is([data-machine='eval'], .fiso-robot) .iso-edge,
+.fiso-stage[data-hover='diagnose'] [data-machine='diagnose'] .iso-edge,
+.fiso-stage[data-hover='plan'] [data-machine='plan'] .iso-edge,
+.fiso-stage[data-hover='collect'] [data-machine='collect'] .iso-edge,
+.fiso-stage[data-hover='review'] [data-machine='review'] .iso-edge,
+.fiso-stage[data-hover='train'] [data-machine='train'] .iso-edge,
+.fiso-stage[data-hover='ship'] [data-machine='ship'] .iso-edge { stroke: var(--arc); }
+
+/* Compact: one line of header, labels only, the acting agent's bubble. */
+.fiso[data-compact] { padding: var(--space-2) var(--space-3) var(--space-3); }
+.fiso[data-compact] .fiso-plate { padding: 1px 4px; }
+
+/* Narrow (phones, side panels): the cell scales, bubbles and cards become the list. */
+@container (max-width: 640px) {
+  .fiso-bubble, .fiso-card, .fiso-plate-num { display: none; }
+  .fiso:not([data-compact]) .fiso-list { display: block; }
+  .fiso-plate { padding: 0 3px; }
+  .fiso-line { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: var(--space-2); }
+  .fiso-plate-name { font-size: 9px; line-height: 12px; letter-spacing: 0.08em; }
+  .fiso-plate .gx-rivet { display: none; }
+  .fiso-stage:has(.fiso-guide) .fiso-svg { opacity: 0.25; }
+  .fiso-guide { width: 100%; }
+  .fiso-task { display: none; }
+  .fiso-agent { position: static; width: 100%; box-shadow: none; }
+}
+
+@keyframes fiso-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes fiso-glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.75; } }
+@keyframes fiso-wake { 0% { opacity: 0.9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.2); } }
+
+.fiso[data-paused] *, .fiso[data-paused] *::after { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .fiso *, .fiso *::after { animation: none !important; transition: none !important; }
+}
+
+/* /factory view switch (Floor view / List view). */
+.fiso-seg { display: inline-flex; align-self: flex-end; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.fiso-seg button { padding: 4px 10px; font: inherit; font-size: 13px; line-height: 18px; color: var(--ink-muted); background: none; border: 0; cursor: pointer; }
+.fiso-seg button + button { border-left: 1px solid var(--line); }
+.fiso-seg button[aria-pressed='true'] { color: var(--ink); background: var(--surface-sunken); }
+.fiso-seg button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.fiso-seg[data-overlap] { margin-bottom: calc(-1 * var(--space-12)); }
+@media (max-width: 640px) { .fiso-seg[data-overlap] { margin-bottom: 0; } }

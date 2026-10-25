@@ -1,0 +1,13 @@
+Vendored from Anatomy (https://github.com/wheresryan22/anatomy), MIT License, Copyright (c) 2026 Ryan.
+Pinned commit: 1482e8469b0a9e0d8cc18ea2740a01423d29ae80 (2026-10-18, "Printable sheets: A4 and Letter PDFs from any figure (#126)").
+Vendored for TDM-115 (GeonosisAI factory isometric view) on 2026-10-24. Files are byte-identical copies:
+
+  iso-kit.ts        <- kit/iso-kit.ts        sha256 e9fc988c61a11bfac1f097e62419915ea86b2130ab091f1b50c0e019c907e253
+  iso.css           <- kit/iso.css           sha256 ef19bac5a42ba9be42b56b2c1cf7fc7e21d332a8060765e9ca1d987b8ab23924
+  react/draw.tsx    <- kit/react/draw.tsx    sha256 d5389bd78aa3d5424a37b1ce6f635bd102eb86faf27d064b10957716278a631c
+  react/live.tsx    <- kit/react/live.tsx    sha256 6d01fa12bca4ec14d1b7d7d5331d18a997dd3ee131d59dd57f83b932a1705f42
+  LICENSE           <- LICENSE               sha256 87c078ab9d90a3044f359e6b563d4e6afea7aa060897cf4f21618687b3856796
+
+Not vendored: the WebGL layer (gl.mjs), the 3D turn mode, lathe/tube, the audit and the Node scripts.
+Do not edit these files in place; brand theming lives in ../factory-iso.css (it remaps the --anatomy-* tokens
+to the GeonosisAI Foundry/Dune tokens). To update, copy the files again from a newer commit and update this note.

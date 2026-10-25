@@ -238,6 +238,9 @@ class EvalOrchestrator:
         status = ticket.get("status")
         if status == "baseline":
             base = getattr(_flywheel, "base_checkpoint_uri", lambda: PI05_BASE_CHECKPOINT)()  # RDF_BASE_CHECKPOINT_URI
+            from .robot_mode import baseline_checkpoint_for  # TDM-126: a real YAM never gets pi05_base
+
+            base = baseline_checkpoint_for(self.m.get("robot", _i(ticket.get("robot_id"))), base)
             return {"kind": "baseline", "checkpoint_uri": base, "training_run_id": 0}
         if status == "eval":
             v = TicketView.from_bus(self.m, _i(ticket["id"]))
@@ -471,6 +474,17 @@ class EvalOrchestrator:
         from .robot_mode import robot_mode  # TDM-107: the robot knows (and labels) a sim eval
 
         payload["robot_mode"] = robot_mode(self.m.get("robot", robot_id))
+        from .robot_mode import is_real_policy_arm, real_checkpoint_ok
+
+        if is_real_policy_arm(self.m.get("robot", robot_id)):  # TDM-126: the YAM; it caps each trial at 30 s, low speed
+
+            if not real_checkpoint_ok(run.get("checkpoint_uri")):
+                self.abort(run, "cancelled", f"refusing {run.get('checkpoint_uri')!r} on the real arm: only YAM-mapped "
+                           "modal-vol://rdf-checkpoints/ checkpoints run there", force=True)
+                return "checkpoint_not_real"
+            # the operator scores each trial (Pass/Fail on /robots/<id>, trial_outcome): give them 2 min, not 30 s
+            payload.update(timeout_s=min(float(payload["timeout_s"]), 30.0), speed_scale=0.25,
+                           outcome_timeout_s=max(float(payload.get("outcome_timeout_s") or 0), 120.0))
         base = {"ticket_id": ticket_id, "robot_id": robot_id, "eval_run_id": run_id, "kind": run.get("kind"),
                 "checkpoint_uri": run.get("checkpoint_uri"), "trials": trials, "solo_mode": self.cfg.solo_mode,
                 "why": why, "interventions": bool(payload.get("interventions"))}

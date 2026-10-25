@@ -360,3 +360,38 @@ def test_sim_auto_reset_off_leaves_sim_reset_open(db):
     e.solo_reset(task)
     time.sleep(0.05)
     assert db.t["task"][task["id"]]["status"] == "open"
+
+
+# --------------------------------------------------------------------------- TDM-126: the real YAM in the eval stage
+
+YAM_POLICY = json.dumps({"sim": False, "teleop": True, "policy": True})  # tdm119_teleop with TDM119_ALLOW_POLICY=1
+
+
+def test_real_yam_baseline_is_the_yam_smoke_checkpoint_capped_and_slow(db):
+    from rdf_orchestrator.robot_mode import REAL_YAM_BASELINE_CHECKPOINT
+
+    db.t["robot"][1]["camera_config_json"] = YAM_POLICY
+    assert make(db).ensure_eval(1, "test") == "dispatched"
+    (run,) = db.rows("eval_run")
+    assert run["checkpoint_uri"] == REAL_YAM_BASELINE_CHECKPOINT != PI05_BASE_CHECKPOINT
+    p = json.loads(run_eval_cmds(db)[0]["payload_json"])
+    assert p["checkpoint_uri"] == REAL_YAM_BASELINE_CHECKPOINT and p["robot_mode"] == "real"
+    assert p["timeout_s"] <= 30 and p["speed_scale"] <= 0.25 and p["outcome_timeout_s"] >= 120
+
+
+def test_real_yam_never_gets_a_fake_or_base_checkpoint(db):
+    db.t["robot"][1]["camera_config_json"] = YAM_POLICY
+    db.t["ticket"][1]["status"] = "eval"
+    db.put("training_run", id=3, ticket_id=1, status="done", iteration=0, checkpoint_uri="fake://stub-no-gpu/t1/r3")
+    assert make(db).ensure_eval(1, "test") == "checkpoint_not_real"
+    assert not run_eval_cmds(db)
+
+
+def test_real_yam_reset_goes_to_a_person(db):
+    db.t["robot"][1]["camera_config_json"] = YAM_POLICY
+    e = make(db, solo_reset_delay_s=0.01)  # sim_auto_reset on (default) applies to sim robots only
+    task = _reset_task(db)
+    e.solo_reset(task)
+    time.sleep(0.05)
+    assert db.t["task"][task["id"]]["status"] == "open"
+    assert not [c for c in db.rows("robot_command") if c["type"] == "resume_policy"]

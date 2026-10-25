@@ -59,10 +59,14 @@ Checker = Callable[[Any, Any, Any], dict[str, Any]]  # (actions, action_space, o
 
 
 class RealRunRefused(RuntimeError):
-    """The run did not start (the arm never moved), or a later chunk was rejected."""
+    """The run did not start: the arm never moved."""
+
+    def __init__(self, code: str, message: str, **extra: Any) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code, self.message, self.extra = code, message, extra
 
 
-def _real_checkpoint(uri: str) -> bool:
+def real_checkpoint(uri: str) -> bool:
     return uri.startswith("modal-vol://rdf-checkpoints/") and "fake" not in uri and "stub-no-gpu" not in uri
 
 
@@ -125,6 +129,112 @@ def _finish(ctx: JobContext, out: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def ensure_active(pc: Any, uri: str) -> dict[str, Any]:
+    """The policy server is up and serves ``uri`` with the 7-dim joint_pos_abs YAM spec (activating it when
+    another checkpoint is active: no motion; a cache hit once both were preloaded). Raises RealRunRefused."""
+    try:
+        health = pc.wait_healthy(timeout=60.0)
+    except Exception as e:  # noqa: BLE001
+        raise RealRunRefused("policy_server_down", f"policy server not healthy: {e}") from e
+    from .tdm122_dryrun import mapping_preflight
+
+    active = str(health.get("active_checkpoint_uri") or "").rstrip("/").removesuffix("/params")
+    if active != uri.rstrip("/").removesuffix("/params") and pc.config.hot_swap:
+        try:
+            pc.activate(uri)
+            health = pc.wait_healthy(timeout=60.0)
+        except Exception as e:  # noqa: BLE001
+            raise RealRunRefused("activate_failed", f"could not activate {uri}: {e}") from e
+    mapping = mapping_preflight(health, uri)
+    if not mapping.get("yam_ok") or not health.get("active_checkpoint_uri"):
+        probs = mapping.get("problems") or [f"active checkpoint is {health.get('active_checkpoint_uri')}"]
+        raise RealRunRefused("checkpoint_not_active", "; ".join(probs)[:300] + " (activate it with policy_ctl.py first)")
+    return mapping
+
+
+def guarded_episode(ctx: JobContext, pc: Any, prompt: str, uri: str, seconds: float, *, checker: Checker | None = None,
+                    speed_scale: float = REAL_RUN_MAX_SPEED_SCALE, success_check: Any = None,
+                    max_steps: int | None = None, mode: str | None = None, cancel_if_held: bool = True,
+                    event_prefix: str = "deployment.real_run") -> tuple[Any, dict[str, Any]]:
+    """ONE real-arm policy episode under every TDM-126 guard (steps 2-6 of the module doc). Returns
+    (RolloutResult, info); raises RealRunRefused (the arm never moved) when the first chunk fails its check.
+
+    ``cancel_if_held``: also cancel the job when a pause still holds the arm 2 s after the cap (the one-off
+    deployment run). Eval trials pass False: their takeover pause is an existing, human-driven state; the cap
+    then ends the rollout as soon as the pause ends."""
+    seconds = min(float(seconds), REAL_RUN_MAX_S)
+    chk = checker or default_checker()
+    arm = ctx.arm
+    prev_scale = getattr(arm, "speed_scale", None)
+    want = min(float(speed_scale or REAL_RUN_MAX_SPEED_SCALE), REAL_RUN_MAX_SPEED_SCALE)
+    if hasattr(arm, "set_speed_scale") and prev_scale is not None:
+        arm.set_speed_scale(min(float(prev_scale), want))
+    info: dict[str, Any] = {"capped": False, "rejected": None, "time_cap_s": seconds,
+                            "speed_scale": getattr(arm, "speed_scale", None)}
+    done = threading.Event()
+    try:
+        if ctx.state is not RobotState.ROLLOUT:
+            ctx.enter(RobotState.ROLLOUT, f"real-arm policy run (max {seconds:.0f}s): {prompt[:50]}")
+        # the first chunk, from the measured pose, before anything moves (also warms the server)
+        sim = bool(arm.describe().get("sim")) or "sim" in str(arm.describe().get("adapter", ""))
+        observer = Observer(ctx.services.get("cameras"), prompt, uri if pc.config.hot_swap else None, allow_blank=sim)
+        st = arm.read_state()
+        try:
+            obs = observer(0, time.monotonic(), st)
+        except PolicyClientError as e:
+            raise RealRunRefused("no_cameras", str(e)) from e
+        obs.timeout_s = 60.0
+        r = pc.infer_blocking(obs, timeout=65.0)
+        if not r.ok:
+            raise RealRunRefused("first_chunk_failed", f"{r.code}: {r.error}")
+        first = chk(r.actions, r.action_space, list(obs.state))
+        verdict = str(first.get("verdict"))
+        info["first_chunk_verdict"] = verdict
+        ctx.event(f"{event_prefix}_first_chunk", verdict=verdict, problems=list(first.get("problems") or [])[:5],
+                  checkpoint_uri=uri)
+        if verdict not in PASS_VERDICTS:
+            raise RealRunRefused("first_chunk_rejected", f"first chunk verdict {verdict}: "
+                                 + "; ".join(first.get("problems") or [])[:250], verdict=verdict)
+        ctx.check()
+
+        def on_reject(rej: dict[str, Any]) -> None:
+            info["rejected"] = rej
+            ctx.finish_requested.set()
+
+        guarded = CheckedPolicy(pc, chk, on_reject)
+
+        def cap() -> None:
+            if done.wait(seconds):
+                return
+            info["capped"] = True
+            ctx.finish_requested.set()
+            if cancel_if_held and not done.wait(CANCEL_GRACE_S):
+                ctx.cancel.cancel("time_cap", f"real-arm run passed its {seconds:.0f}s cap while held")
+
+        ctx.finish_requested.clear()
+        threading.Thread(target=cap, name="tdm126-time-cap", daemon=True).start()
+        res = run_episode(ctx, prompt, max_steps=max_steps, success_check=success_check, timeout_s=seconds,
+                          checkpoint_uri=uri, policy=guarded, warm=False, mode=mode)
+        info.update(chunks_checked=guarded.checked + 1, verdicts=guarded.verdicts)
+        if info["rejected"]:
+            info["ended"] = "chunk_rejected"
+        elif info["capped"]:
+            info["ended"] = "time_cap"
+        else:
+            info["ended"] = res.ended
+        return res, info
+    finally:
+        done.set()
+        ctx.finish_requested.clear()
+        try:
+            arm.hold()  # hold, never disable
+        except Exception:  # noqa: BLE001 - latched by an e-stop: the layer already holds
+            pass
+        finally:
+            if prev_scale is not None and hasattr(arm, "set_speed_scale"):
+                arm.set_speed_scale(float(prev_scale))
+
+
 def real_arm_run(ctx: JobContext, *, checker: Checker | None = None, policy: Any = None,
                  require_production: bool = True) -> dict[str, Any]:
     p = ctx.payload
@@ -136,109 +246,36 @@ def real_arm_run(ctx: JobContext, *, checker: Checker | None = None, policy: Any
             "checkpoint_choice": str(p.get("checkpoint_choice") or "after")}  # before = YAM smoke, after = shipped
     ctx.result.update(base)
 
-    def refuse(code: str, msg: str, **extra: Any) -> RealRunRefused:
-        _finish(ctx, {**base, "ok": False, "moved": False, "refused": code, "error": msg[:300], **extra})
-        return RealRunRefused(f"{code}: {msg}")
+    def refused(e: RealRunRefused) -> RealRunRefused:
+        _finish(ctx, {**base, "ok": False, "moved": False, "refused": e.code, "error": e.message[:300], **e.extra})
+        return e
 
-    if os.environ.get("TDM119_ALLOW_POLICY") != "1":
-        raise refuse("policy_not_allowed", "TDM119_ALLOW_POLICY=1 is not set on this robot")
-    if p.get("real_arm") is not True or p.get("confirm") != REAL_RUN_CONFIRM:
-        raise refuse("not_confirmed", f"payload needs real_arm: true and confirm: {REAL_RUN_CONFIRM}")
-    if not _real_checkpoint(uri):
-        raise refuse("checkpoint_not_real", f"not a real modal-vol://rdf-checkpoints/ checkpoint: {uri!r}")
-    if not prompt:
-        raise refuse("no_prompt", "the run needs the exact training prompt in payload.prompt")
-    pc = policy or get_policy(ctx)
-    if require_production and pc.config.backend != "production":
-        raise refuse("backend_not_production", f"POLICY_BACKEND is {pc.config.backend!r}; the real arm needs production")
     try:
-        health = pc.wait_healthy(timeout=60.0)
-    except Exception as e:  # noqa: BLE001
-        raise refuse("policy_server_down", f"policy server not healthy: {e}") from e
-    from .tdm122_dryrun import mapping_preflight
-
-    active = str(health.get("active_checkpoint_uri") or "").rstrip("/").removesuffix("/params")
-    if active != uri.rstrip("/").removesuffix("/params") and pc.config.hot_swap:
-        try:  # a cache hit after policy_ctl.py activate --preload (both before/after preloaded): milliseconds
-            pc.activate(uri)
-            health = pc.wait_healthy(timeout=60.0)
-        except Exception as e:  # noqa: BLE001
-            raise refuse("activate_failed", f"could not activate {uri}: {e}") from e
-    mapping = mapping_preflight(health, uri)
-    if not mapping.get("yam_ok") or not health.get("active_checkpoint_uri"):
-        probs = mapping.get("problems") or [f"active checkpoint is {health.get('active_checkpoint_uri')}"]
-        raise refuse("checkpoint_not_active", "; ".join(probs)[:300] + " (activate it with policy_ctl.py first)")
-
-    chk = checker or default_checker()
-    arm = ctx.arm
-    prev_scale = getattr(arm, "speed_scale", None)
-    want = min(float(p.get("speed_scale") or REAL_RUN_MAX_SPEED_SCALE), REAL_RUN_MAX_SPEED_SCALE)
-    if hasattr(arm, "set_speed_scale") and prev_scale is not None:
-        arm.set_speed_scale(min(float(prev_scale), want))
-    base["speed_scale"] = getattr(arm, "speed_scale", None)
-    done = threading.Event()
-    state: dict[str, Any] = {"capped": False}
-    try:
-        ctx.enter(RobotState.ROLLOUT, f"real-arm policy run (max {seconds:.0f}s): {prompt[:50]}")
-        # 3. the first chunk, from the measured pose, before anything moves (also warms the server)
-        sim = bool(arm.describe().get("sim")) or "sim" in str(arm.describe().get("adapter", ""))
-        observer = Observer(ctx.services.get("cameras"), prompt, uri if pc.config.hot_swap else None, allow_blank=sim)
-        st = arm.read_state()
-        try:
-            obs = observer(0, time.monotonic(), st)
-        except PolicyClientError as e:
-            raise refuse("no_cameras", str(e)) from e
-        obs.timeout_s = 60.0
-        r = pc.infer_blocking(obs, timeout=65.0)
-        if not r.ok:
-            raise refuse("first_chunk_failed", f"{r.code}: {r.error}")
-        first = chk(r.actions, r.action_space, list(obs.state))
-        verdict = str(first.get("verdict"))
-        ctx.event("deployment.real_run_first_chunk", verdict=verdict, problems=list(first.get("problems") or [])[:5],
-                  checkpoint_uri=uri)
-        if verdict not in PASS_VERDICTS:
-            raise refuse("first_chunk_rejected", f"first chunk verdict {verdict}: "
-                         + "; ".join(first.get("problems") or [])[:250], verdict=verdict)
-        ctx.check()
-
-        # 4 + 5. the ramped executor under a wall-clock cap
-        def on_reject(info: dict[str, Any]) -> None:
-            state["rejected"] = info
-            ctx.finish_requested.set()
-
-        guarded = CheckedPolicy(pc, chk, on_reject)
-
-        def cap() -> None:
-            if done.wait(seconds):
-                return
-            state["capped"] = True
-            ctx.finish_requested.set()
-            if not done.wait(CANCEL_GRACE_S):
-                ctx.cancel.cancel("time_cap", f"real-arm run passed its {seconds:.0f}s cap while held")
-
-        ctx.finish_requested.clear()
-        threading.Thread(target=cap, name="tdm126-time-cap", daemon=True).start()
-        res = run_episode(ctx, prompt, timeout_s=seconds, checkpoint_uri=uri, policy=guarded, warm=False)
-    except RealRunRefused:
-        raise
+        if os.environ.get("TDM119_ALLOW_POLICY") != "1":
+            raise RealRunRefused("policy_not_allowed", "TDM119_ALLOW_POLICY=1 is not set on this robot")
+        if p.get("real_arm") is not True or p.get("confirm") != REAL_RUN_CONFIRM:
+            raise RealRunRefused("not_confirmed", f"payload needs real_arm: true and confirm: {REAL_RUN_CONFIRM}")
+        if not real_checkpoint(uri):
+            raise RealRunRefused("checkpoint_not_real", f"not a real modal-vol://rdf-checkpoints/ checkpoint: {uri!r}")
+        if not prompt:
+            raise RealRunRefused("no_prompt", "the run needs the exact training prompt in payload.prompt")
+        pc = policy or get_policy(ctx)
+        if require_production and pc.config.backend != "production":
+            raise RealRunRefused("backend_not_production",
+                                 f"POLICY_BACKEND is {pc.config.backend!r}; the real arm needs production")
+        ensure_active(pc, uri)
+        res, info = guarded_episode(ctx, pc, prompt, uri, seconds, checker=checker,
+                                    speed_scale=float(p.get("speed_scale") or REAL_RUN_MAX_SPEED_SCALE))
+    except RealRunRefused as e:
+        raise refused(e) from None
     except BaseException as e:  # e-stop / stop / time-cap cancel / errors: log the end, then let the loop report it
         _finish(ctx, {**base, "ok": False, "moved": True, "ended": getattr(e, "reason", type(e).__name__),
-                      "error": str(e)[:300], "capped": state["capped"]})
+                      "error": str(e)[:300]})
         raise
-    finally:
-        done.set()
-        ctx.finish_requested.clear()
-        try:
-            arm.hold()  # 6. hold, never disable
-        except Exception:  # noqa: BLE001 - latched by an e-stop: the layer already holds
-            pass
-        finally:
-            if prev_scale is not None and hasattr(arm, "set_speed_scale"):
-                arm.set_speed_scale(float(prev_scale))
-    ended = "chunk_rejected" if state.get("rejected") else ("time_cap" if state["capped"] else res.ended)
-    out = {**base, "ok": not state.get("rejected") and res.ended != "policy_error", "moved": res.steps > 0,
-           "ended": ended, "seconds": round(res.seconds, 2), "steps": res.steps, "first_chunk_verdict": verdict,
-           "chunks_checked": guarded.checked + 1, "verdicts": guarded.verdicts, "rejected": state.get("rejected"),
+    out = {**base, "ok": not info["rejected"] and res.ended != "policy_error", "moved": res.steps > 0,
+           "ended": info["ended"], "seconds": round(res.seconds, 2), "steps": res.steps,
+           "first_chunk_verdict": info["first_chunk_verdict"], "chunks_checked": info["chunks_checked"],
+           "verdicts": info["verdicts"], "rejected": info["rejected"], "speed_scale": info["speed_scale"],
            "flags": list(res.flags), "chunks_used": res.executor.get("chunks_used"),
            "rtt_p50_ms": res.latency.get("rtt_p50_ms"), "rtt_p95_ms": res.latency.get("rtt_p95_ms"),
            "note": "real-arm deployment run: not recorded, not an eval trial; the arm holds at the end"}
@@ -246,5 +283,5 @@ def real_arm_run(ctx: JobContext, *, checker: Checker | None = None, policy: Any
     return {**out, "rollout": res.to_dict()}
 
 
-__all__ = ["CheckedPolicy", "REAL_RUN_CONFIRM", "REAL_RUN_PURPOSE", "RealRunRefused", "default_checker",
-           "real_arm_run"]
+__all__ = ["CheckedPolicy", "REAL_RUN_CONFIRM", "REAL_RUN_MAX_S", "REAL_RUN_PURPOSE", "RealRunRefused",
+           "default_checker", "ensure_active", "guarded_episode", "real_arm_run", "real_checkpoint"]

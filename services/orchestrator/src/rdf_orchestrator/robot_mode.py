@@ -113,6 +113,19 @@ def real_checkpoint_ok(uri: Any) -> bool:
     return u.startswith(REAL_CHECKPOINT_PREFIX) and "fake" not in u and "stub-no-gpu" not in u
 
 
+def is_real_policy_arm(robot: Any) -> bool:
+    """TDM-126: a real arm that explicitly advertises ``policy: true`` (the Jetson's tdm119_teleop with
+    TDM119_ALLOW_POLICY=1 on yam-01). Its policy jobs get the real-arm rules: YAM-mapped checkpoints only."""
+    return robot is not None and not robot_is_sim(robot) and robot_config(robot).get("policy") is True
+
+
+def baseline_checkpoint_for(robot: Any, default: str) -> str:
+    """TDM-126: the baseline policy a ticket's robot evaluates. The real YAM (``is_real_policy_arm``) gets the
+    YAM-adapted smoke checkpoint instead of base pi05_base (DROID layout, unmapped on the YAM); others keep
+    ``default``."""
+    return REAL_YAM_BASELINE_CHECKPOINT if is_real_policy_arm(robot) else default
+
+
 CANNOT_EVAL_EVENT = "eval.robot_cannot_eval"
 SPLIT_AUTO_EVENT = "ticket.split_auto"
 PREFERRED_SIM_ROBOT = "sim-yam-mujoco"

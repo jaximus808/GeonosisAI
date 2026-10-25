@@ -813,8 +813,11 @@ class InterventionManager:
         if runs:
             return max(runs, key=lambda r: _i(r["id"]))["checkpoint_uri"].strip()
         from . import flywheel as _fw
+        from .robot_mode import baseline_checkpoint_for  # TDM-126: a real YAM never gets pi05_base
 
-        return getattr(_fw, "base_checkpoint_uri", lambda: _fw.PI05_BASE_CHECKPOINT)()
+        ticket = self.m.get("ticket", ticket_id)
+        robot = self.m.get("robot", _i((ticket or {}).get("robot_id"))) if ticket else None
+        return baseline_checkpoint_for(robot, getattr(_fw, "base_checkpoint_uri", lambda: _fw.PI05_BASE_CHECKPOINT)())
 
     def ensure_collection(self, ticket_id: int, why: str = "") -> str:
         """While a recovery_takeover plan is collecting: keep one policy rollout with interventions

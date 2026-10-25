@@ -364,6 +364,8 @@ class EvalTrialRunner:
         self.upload_wait_s = _env_float("RDF_EVAL_UPLOAD_WAIT_S", DEFAULT_UPLOAD_WAIT_S)
         self.mode = p.get("mode")
         self.sim = _is_sim(ctx)
+        self.real = not self.sim  # TDM-126: every policy episode on a real arm goes through guarded_episode
+        self._real_info: dict[str, Any] = {}
         self.success_check = load_success_check()
         self.inbox = inbox_for(ctx.client)
         self.outcomes: list[TrialOutcome] = []
@@ -467,6 +469,21 @@ class EvalTrialRunner:
         except ValueError as e:  # an operator verdict won the race: theirs stands
             _log("sim auto outcome not taken", error=str(e))
 
+    def _episode(self, prompt: str, *, timeout_s: float, success_check: Any, warm: bool,
+                 cancel_if_held: bool = False) -> RolloutResult:
+        """``rollout.run_episode`` on the sim; on a REAL arm TDM-126's guarded episode: speed scale <= 0.25, a
+        <= 30 s cap, the first chunk checked by the dry-run rules before anything moves (RealRunRefused), every
+        later chunk checked (a reject ends the rollout), and the arm holds at the end."""
+        if not self.real:
+            return run_episode(self.ctx, prompt, max_steps=self.max_steps, success_check=success_check,
+                               timeout_s=timeout_s, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=warm)
+        from .tdm126_real_run import guarded_episode
+
+        res, self._real_info = guarded_episode(self.ctx, get_policy(self.ctx), prompt, self.checkpoint_uri, timeout_s,
+                                               success_check=success_check, max_steps=self.max_steps, mode=self.mode,
+                                               cancel_if_held=cancel_if_held, event_prefix="eval.real_arm")
+        return res
+
     def run_trial(self, index: int, prompt: str) -> TrialOutcome:
         ctx = self.ctx
         label = f"eval {self.eval_run_id} trial {index + 1}/{self.trials}"
@@ -492,8 +509,17 @@ class EvalTrialRunner:
             self._sim_failure = None
             t_start = time.time()
             check = self._sim_done if self.sim_auto else self.success_check
-            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=check,
-                              timeout_s=self.timeout_s, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=True)
+            from .tdm126_real_run import RealRunRefused
+
+            self._real_info = {}
+            try:
+                res = self._episode(prompt, timeout_s=self.timeout_s, success_check=check, warm=True)
+            except RealRunRefused as e:  # real arm: the policy's first chunk failed the dry-run check; nothing moved
+                ctx.event("eval.real_arm_refused", eval_run_id=self.eval_run_id, index=index, code=e.code,
+                          error=e.message[:300])
+                return TrialOutcome(index=index, success=False, note=f"[real arm] refused before moving: {e}"[:1000],
+                                    duration_ms=0, episode_id=0, outcome_source="safety_refused", confirmed=True,
+                                    ended="safety_refused", suggested=None, episode_key=ep_key, flags=[])
             duration_ms = int(round(res.seconds * 1000))
             if res.ended == "policy_error" and int(res.executor.get("chunks_used") or 0) == 0:
                 raise InfraFailure(f"trial {index}: the policy never produced an action "
@@ -510,6 +536,10 @@ class EvalTrialRunner:
             if res.ended == "policy_error":
                 success, confirmed, source = False, True, "policy_error"
                 note = f"policy_error: {str(res.executor.get('aborted') or 'executor gave up')[:300]}"
+            elif self._real_info.get("rejected"):  # TDM-126: a later chunk failed the dry-run check; the arm held
+                success, confirmed, source = False, True, "safety_rejected"
+                rej = self._real_info["rejected"]
+                note = f"[real arm] chunk {rej.get('chunk')} {rej.get('verdict')}: {'; '.join(rej.get('problems') or [])}"[:600]
             elif intervened:  # TDM-69 contract: a trial a human had to take over is a policy failure
                 success, confirmed, source = False, True, "intervened"
                 v = self.inbox.verdict
@@ -707,8 +737,7 @@ class EvalTrialRunner:
                 det.start(time.monotonic())
             # the detector's timeout must win over the episode's own limit
             ep_timeout = self.timeout_s if det is None else max(self.timeout_s, det.trial_timeout_s) + 2.0
-            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=check, timeout_s=ep_timeout,
-                              checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=True)
+            res = self._episode(prompt, timeout_s=ep_timeout, success_check=check, warm=True)
             if res.ended == "policy_error" and int(res.executor.get("chunks_used") or 0) == 0:
                 raise InfraFailure(f"collection trial {index}: the policy never produced an action "
                                    f"({res.executor.get('aborted') or res.flags})")
@@ -736,9 +765,8 @@ class EvalTrialRunner:
             if tiv.handed_back and res.ended == "finish_requested" and tiv.failure is not None:
                 ctx.finish_requested.clear()
                 left = max(1.0, self.post_handback_s - (time.monotonic_ns() - tiv.handback_at_ns) / 1e9)
-                res = run_episode(ctx, prompt, max_steps=self.max_steps,
-                                  success_check=(lambda s, st: bool(base_check(s, st))) if base_check else None,
-                                  timeout_s=left, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=False)
+                res = self._episode(prompt, timeout_s=left, warm=False,
+                                    success_check=(lambda s, st: bool(base_check(s, st))) if base_check else None)
                 seconds += res.seconds
                 if base_check is not None:
                     suggested["v"] = bool(res.success)
@@ -859,6 +887,13 @@ class EvalTrialRunner:
         if self.deploy and self.sim_scene is None:
             raise ValueError("[SIM] deployment runs are for the MuJoCo sim robot only; this arm is not one")
         prompt = policy_prompt(ctx)
+        if self.real:  # TDM-126: base pi05_base (DROID, 8-dim) or a fake/stub checkpoint never runs on a real YAM
+            from .tdm126_real_run import ensure_active, real_checkpoint
+
+            if not real_checkpoint(self.checkpoint_uri):
+                raise ValueError(f"refusing {self.checkpoint_uri!r} on the real arm: only YAM-mapped "
+                                 "modal-vol://rdf-checkpoints/ checkpoints run here (base pi0.5 is unmapped on the YAM)")
+            ensure_active(get_policy(ctx), self.checkpoint_uri)  # 7-dim joint_pos_abs YAM spec, or refuse
         scene = self._settle_scene()  # [SIM] the ticket's deployed scene is loaded before any trial
         activate = self._activate()
         if self.deploy:

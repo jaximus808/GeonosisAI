@@ -164,6 +164,55 @@ make policy-down            # min_containers=0 and stops the running container n
 make policy-status          # expect no running containers
 ```
 
+## Real-arm ticket: the whole pipeline on yam-01 (baseline, demo, fine-tune, eval)
+
+With `TDM119_ALLOW_POLICY=1`, yam-01 advertises `policy: true`. A **Real** ticket on it then stays real and
+does not auto-split to the sim robot (`robot_can_eval`; the TDM-125 split applies to teleop-only arms only). Its
+evals run on the arm.
+
+**Every eval trial is one guarded episode.** It uses the same code as the one-off run: speed scale ≤ 0.25, a cap
+of ≤ 30 s (the orchestrator sends `timeout_s` ≤ 30 and the robot caps it again), the first-chunk dry-run gate,
+every chunk checked, the e-stop stops it at once, and the arm holds at the end.
+- **Before each trial** the arm moves slowly to its start pose (`YAM_READY`, through the SafetyLayer at ≤ 0.25 × the
+  live cap). That can take up to ~35 s per radian.
+- **A first chunk that fails the check** is recorded as a failed trial, `[real arm] refused before moving`. The arm
+  did not move.
+- **A later rejected chunk** ends the trial as a failure (`safety_rejected`).
+- **Eval trials are recorded** as episodes, exactly as before. Only the one-off deployment runs are not recorded.
+
+**Checkpoints.** The baseline on the real YAM is the YAM-adapted smoke checkpoint (`.../smoke-20261024-081135-ed9bc2/199`).
+It is resolved server-side for `policy: true` real arms, and `pi05_base` is never sent. The candidate is the
+ticket's own fine-tune. Any `fake://`, stub or base checkpoint is refused for the real arm, by the orchestrator
+(`checkpoint_not_real`, nothing dispatched) and again by the robot.
+
+Steps (you):
+
+1. Steps 1–3 and 5–6 above:
+   - `make modal-secrets`, `make policy-up`;
+   - preload the smoke checkpoint;
+   - `env`, stop + `sync`;
+   - `policy on`, restart `geonosis-robot-teleop`, supporting the arm first.
+
+   **The policy server must stay up the whole time**, ~$4.39/hr. The fine-tune also runs on Modal (TDM-124
+   rates: ~$4–5 for 2,000 steps).
+2. **File a Real ticket on yam-01**: New ticket, robot mode **Real**, robot **yam-01**, **3 eval trials**, **1 demo**
+   (target episodes 1). The form must not show a split note. If it does, yam-01 is not advertising policy: check
+   step 6.
+3. **Baseline (3 trials).** Watch the cockpit's eval stage: it shows yam-01's live camera stream.
+   - After each trial, score it **Pass / Fail** on the robot page `/robots/<yam-01 id>` (the trial panel). You
+     have 2 min (`outcome_timeout_s` 120 for the real arm). No answer is recorded as a failure.
+   - **Between trials** a reset job appears: the job drop or text, and `/reset/<taskId>`. Claim it, put the cube
+     back by hand, and tap **Done, robot may continue**. The dispatcher sends `resume_policy`, and the next trial
+     starts. Real robots never auto-reset: `EVAL_SIM_AUTO_RESET` applies to sim robots only.
+4. **Demo**: teleop the one clean demo when the collection job appears (as in the TDM-119 runbook).
+5. **Fine-tune**, then the **candidate eval** (3 trials, the same scoring and resets). Before trial 1 the robot
+   activates the new checkpoint on the policy server (~44 s the first time).
+6. Finish: `scripts/jetson/tdm118_geonosis.sh policy off`, support the arm and restart the service, then
+   `make policy-down` and `make policy-status`.
+
+Stop at any time with the hardware e-stop, or the STOP or soft e-stop on the robot page. The eval run is aborted,
+the trial in progress gets no row, and nothing restarts on its own.
+
 ## Evidence
 
 - `deployment.real_run_started` (orchestrator) carries the choice, URI, prompt, robot, time cap and speed scale.

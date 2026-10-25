@@ -243,3 +243,54 @@ def test_activates_the_requested_checkpoint_when_another_is_active(robot):
     pol = FakePolicy(active="modal-vol://rdf-checkpoints/runs/ticket-tdm40-yam-smoke/x/199")
     out = real_arm_run(robot.context(payload(timeout_s=0.5)), checker=ok_checker, policy=pol)
     assert pol.activated == [URI] and out["ok"]
+
+
+# --------------------------------------------------------------------------- real-arm pipeline evals (eval_trials)
+
+
+def _real_eval(monkeypatch, robot_arm, plan, checker, trials=2, **payload_kw):
+    from test_tdm51_eval_trials import FakeRobot, Operator
+
+    from rdf_robot_client import eval_trials, tdm126_real_run
+
+    monkeypatch.setattr(eval_trials, "_is_sim", lambda ctx: False)  # the YAM, as far as the runner knows
+    monkeypatch.setattr(tdm126_real_run, "default_checker", lambda: checker)
+    r = FakeRobot(robot_arm, {}, trials)
+    pol = FakePolicy(active="modal-vol://rdf-checkpoints/runs/ticket-tdm40-yam-smoke/x/199")
+    r.services["policy"] = pol
+    op = Operator(r, plan)
+    op.start()
+    try:
+        p = {"eval_run_id": 7, "checkpoint_uri": URI, "trials": trials, "timeout_s": 120, "kind": "candidate",
+             "prompt": "pick up the red cube", "outcome_timeout_s": 2.0, **payload_kw}
+        out = eval_trials.run_eval(r.context(p, "run_eval"))
+    finally:
+        op.stop.set()
+    return r, pol, out
+
+
+def test_real_arm_eval_trials_are_capped_gated_and_operator_scored(monkeypatch, robot):
+    t0 = time.monotonic()
+    r, pol, out = _real_eval(monkeypatch, robot.arm, [("during", True, ""), ("after", False, "missed")], ok_checker)
+    rows = r.http.rows
+    assert [x["success"] for x in rows] == [True, False] and r.resets == 1  # reset between trials, by a person
+    assert set(pol.activated) == {URI}  # the eval's checkpoint, never base pi0.5
+    assert len([e for e in r.events if e[0] == "eval.real_arm_first_chunk"]) == 2
+    assert out["outcomes"][1]["ended"] == "max_seconds" and time.monotonic() - t0 < 45  # 120 s -> the 30 s cap
+
+
+def test_real_arm_eval_first_chunk_reject_is_a_failed_trial_without_motion(monkeypatch, robot):
+    r, _pol, out = _real_eval(monkeypatch, robot.arm, [("none",)], lambda *a: {"verdict": "reject", "problems": ["x"]},
+                              trials=1)
+    (row,) = r.http.rows
+    assert row["success"] is False and row["failure_note"].startswith("[real arm] refused before moving")
+    assert out["outcomes"][0]["outcome_source"] == "safety_refused"
+
+
+def test_real_arm_eval_never_runs_base_pi05(monkeypatch, robot):
+    from rdf_robot_client.policy_client import BASE_CHECKPOINT
+
+    with pytest.raises(ValueError, match="real arm"):
+        _real_eval(monkeypatch, robot.arm, [], ok_checker, trials=1, checkpoint_uri=None, kind="baseline")
+    with pytest.raises(ValueError, match="real arm"):
+        _real_eval(monkeypatch, robot.arm, [], ok_checker, trials=1, checkpoint_uri=BASE_CHECKPOINT)

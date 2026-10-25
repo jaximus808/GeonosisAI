@@ -330,7 +330,7 @@ export function Tdm86Pip({ label, onTap, children }: { label: string; onTap?: ()
     <button
       type="button"
       onClick={onTap}
-      className="absolute right-1.5 top-12 z-10 aspect-[4/3] w-[38%] max-w-[180px] overflow-hidden rounded-sm bg-surface-sunken ring-2 ring-steel"
+      className="absolute right-1.5 top-12 z-10 aspect-[4/3] w-[36%] max-w-[170px] [@media(max-height:500px)]:w-[30%] overflow-hidden rounded-sm bg-surface-sunken ring-2 ring-steel"
       aria-label={`${label} view. Tap to make it the big view.`}
       data-testid="tdm86-pip"
     >

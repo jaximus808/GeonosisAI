@@ -113,6 +113,8 @@ export interface Tdm56TeleopConsoleProps {
   assistTarget?: () => { tool: V3; obj: V3 } | null;
   /** TDM-86: task.type ('clean_teleop' | 'recovery_takeover'), for the phone coach's first step. */
   taskKind?: string;
+  /** TDM-86: the task is completed (its episode was accepted): the phone shows the result, not "lost control". */
+  taskCompleted?: boolean;
 }
 
 type Block = { code: string; text: string } | null;
@@ -145,6 +147,7 @@ function ConsoleInner({
   getGrant,
   assistTarget,
   taskKind,
+  taskCompleted,
 }: Tdm56TeleopConsoleProps & { getGrant: () => Promise<StreamGrant> }) {
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
@@ -442,8 +445,11 @@ function ConsoleInner({
   if (phone) {
     const rec = (robot?.recording ?? null) as { active?: boolean; phase?: string; last?: { status?: string } | null } | null;
     const takeover = taskKind === 'recovery_takeover';
+    const barTone = taskCompleted ? 'idle' : status.tone;
     let coach: { tag?: string; title: string; detail?: string; tone?: 'plain' | 'done' | 'warn'; step?: string };
-    if (!dev && !canDrive) coach = { title: 'Waiting for control', detail: canDriveReason, tone: 'warn', step: 'lease' };
+    if (taskCompleted)
+      coach = { title: 'Accepted: this task is done', detail: 'Your payout is below (test mode). Earnings shows it too.', tone: 'done', step: 'completed' };
+    else if (!dev && !canDrive) coach = { title: 'Waiting for control', detail: canDriveReason, tone: 'warn', step: 'lease' };
     else if (rec && !rec.active && rec.last?.status === 'recorded')
       coach = { title: 'Submitted. The reviewer is checking it', detail: 'The verdict and your payout show up right here.', tone: 'done', step: 'submitted' };
     else if (rec && !rec.active)
@@ -473,20 +479,20 @@ function ConsoleInner({
                 <div className="flex items-stretch gap-2">
                   <div
                     className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2.5 py-1 transition-colors ${
-                      status.tone === 'drive'
+                      barTone === 'drive'
                         ? 'bg-[var(--tdm56-drive)] text-black'
-                        : status.tone === 'blocked'
+                        : barTone === 'blocked'
                           ? 'bg-slag-soft text-ink ring-1 ring-slag'
                           : 'bg-surface text-ink ring-1 ring-line'
                     }`}
                     aria-live="polite"
                     data-testid="tdm56-clutch-status"
-                    data-state={status.tone}
+                    data-state={barTone}
                   >
-                    <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${status.tone === 'drive' ? 'animate-pulse bg-black' : status.tone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
+                    <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] ${barTone === 'drive' ? 'animate-pulse bg-black' : barTone === 'blocked' ? 'bg-slag' : 'bg-steel'}`} />
                     <div className="min-w-0">
-                      <div className="truncate text-[15px] font-semibold leading-tight">{status.title}</div>
-                      <div className="truncate text-[12px] leading-tight opacity-80">{status.sub}</div>
+                      <div className="truncate text-[15px] font-semibold leading-tight">{taskCompleted ? 'Task finished' : status.title}</div>
+                      <div className="truncate text-[12px] leading-tight opacity-80">{taskCompleted ? 'Thanks for driving. The arm is free for the next person.' : status.sub}</div>
                     </div>
                   </div>
                   <button
@@ -512,13 +518,20 @@ function ConsoleInner({
                 title={coach.title}
                 detail={coach.detail}
                 tone={coach.tone}
+                action={
+                  taskCompleted ? (
+                    <a href="/earnings" className="gx-btn gx-btn-primary gx-btn-sm shrink-0" data-testid="tdm86-earnings">
+                      Earnings
+                    </a>
+                  ) : undefined
+                }
                 testId="tdm56-coach"
                 data={{ step: coach.step, keys: coach.step === hud.guide?.step ? hud.guide?.keys.join(' ') : '' }}
               />
             }
             action={
               <>
-                {!dev && !canDrive && controlSlot}
+                {!dev && !canDrive && !taskCompleted && controlSlot}
                 {recordingSlot && <div className="shrink-0">{recordingSlot}</div>}
               </>
             }

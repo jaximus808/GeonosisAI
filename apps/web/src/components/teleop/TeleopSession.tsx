@@ -89,6 +89,7 @@ export function TeleopSession({ taskId, dev }: { taskId: string; dev?: { streamU
         controlSlot={dev ? undefined : <ControlLeaseBanner lease={lease} className="py-2" />}
         recordingSlot={isTaskId && (dev || lease.task) ? <RecordingSlot taskId={taskId} kind={kind} compact={phone} /> : undefined}
         taskKind={lease.task?.type}
+        taskCompleted={lease.task?.status === 'completed'}
       />
     </>
   );

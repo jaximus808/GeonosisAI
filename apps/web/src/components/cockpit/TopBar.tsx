@@ -12,6 +12,7 @@ import { fmtCents } from '@/lib/format';
 import type { Tdm112Floor } from '@/lib/tdm112/floor';
 import { TDM116_TERMINAL, type Tdm116Action, type Tdm116StageKey } from '@/lib/tdm116/cockpit';
 import { FakeBadge, SimBadge } from '@/components/ticket/Badges';
+import { Button } from '@/components/brand/Button';
 import { Tdm116PrimaryButton } from './Actions';
 import { Tdm116CancelDialog, Tdm116RobotReleased } from './CancelTicket';
 import type { Tdm116Data } from './useCockpitData';
@@ -32,12 +33,15 @@ function RunNum({ run, label }: { run?: { status: string; trials: number; comple
   );
 }
 
-export function Tdm116TopBar({ d, shown, onPick, action, onTab }: {
+export function Tdm116TopBar({ d, shown, onPick, action, onTab, factory = false, onFactory }: {
   d: Tdm116Data;
   shown: Tdm116StageKey;
   onPick: (k: Tdm116StageKey) => void;
   action: Tdm116Action;
   onTab: (tab: 'settings' | 'report' | 'robot') => void;
+  /** The Overview is showing the factory cell (TDM-115) instead of the stage. */
+  factory?: boolean;
+  onFactory?: () => void;
 }) {
   const t = d.ticket!;
   const floor = d.floor;
@@ -100,6 +104,11 @@ export function Tdm116TopBar({ d, shown, onPick, action, onTab }: {
           {/* One melt button per view: when the stage itself shows the plan's Approve front and centre, the
               top bar's copy steps down to a plain button. */}
           <Tdm116PrimaryButton action={action} ticketId={Number(t.id)} variant={action?.kind === 'approve' && shown === 'plan_data' ? 'default' : 'primary'} />
+          {onFactory && (
+            <Button small aria-pressed={factory} onClick={onFactory} data-testid="cockpit-factory-toggle" title={factory ? 'Back to the stage' : 'This ticket’s deployment, as the factory cell: every agent at its machine'}>
+              {factory ? 'Stage view' : 'Factory view'}
+            </Button>
+          )}
           <Tdm116Menu ticketId={Number(t.id)} status={t.status} robotId={Number(t.robotId)} onTab={onTab} />
         </div>
       </div>

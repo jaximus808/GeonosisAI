@@ -174,7 +174,7 @@ export function IsoCell({ ticketId, compact, onStationClick, onPickTicket, class
           <span className="gx-station-label">{cell.robotName}</span>
           {cell.sim && <Tag tone="steel">Simulated</Tag>}
         </span>
-        <Link href={`/tickets/${cell.ticketId}`} className="fiso-ticket" title={taskDescription}>
+        <Link href={`/dashboard?ticket=${cell.ticketId}`} className="fiso-ticket" title={taskDescription}>
           <span className="gx-id">{tdm115Tkt(cell.ticketId)}</span>
           {!compact && taskDescription && <span className="fiso-task">{taskDescription}</span>}
         </Link>
@@ -267,7 +267,7 @@ function Queue({ queue, ticketId, onPick }: { queue: Tdm115QueueItem[]; ticketId
               {tdm115Tkt(q.ticketId)}
             </button>
           ) : (
-            <Link href={`/tickets/${q.ticketId}`} className="gx-id" title={q.task}>
+            <Link href={`/dashboard?ticket=${q.ticketId}`} className="gx-id" title={q.task}>
               {tdm115Tkt(q.ticketId)}
             </Link>
           )}

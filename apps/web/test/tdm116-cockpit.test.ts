@@ -118,3 +118,31 @@ describe('tdm116CancelNote', () => {
     assert.ok(m.TDM116_TERMINAL.has('shipped'));
   });
 });
+
+describe('dashboard view prefs', () => {
+  it('parses stored flags and the overview view', () => {
+    assert.equal(m.tdm116ParseFlag('1', false), true);
+    assert.equal(m.tdm116ParseFlag('0', true), false);
+    assert.equal(m.tdm116ParseFlag(null, true), true);
+    assert.equal(m.tdm116ParseFlag('yes', false), false);
+    assert.equal(m.tdm116ParseOverviewView('factory'), 'factory');
+    assert.equal(m.tdm116ParseOverviewView('stage'), 'stage');
+    assert.equal(m.tdm116ParseOverviewView(null), 'stage');
+  });
+  it('hides cancelled and test.* tickets, but never the selected one', () => {
+    const t = (id: number, status: string, taskDescription = 'pick up the cup') => ({ id: BigInt(id), status, taskDescription });
+    const rows = [t(5, 'train'), t(4, 'cancelled'), t(3, 'created', 'test.tdm19 smoke'), t(2, 'shipped'), t(1, 'cancelled', 'Test.old')];
+    assert.deepEqual(m.tdm116ListTickets(rows, true, null).shown.map((r) => Number(r.id)), [5, 2]);
+    assert.equal(m.tdm116ListTickets(rows, true, null).hidden, 3);
+    assert.deepEqual(m.tdm116ListTickets(rows, true, 4n).shown.map((r) => Number(r.id)), [5, 4, 2]);
+    assert.equal(m.tdm116ListTickets(rows, false, null).shown.length, 5);
+    assert.equal(m.tdm116ListTickets(rows, false, null).hidden, 0);
+  });
+  it('the [ shortcut ignores typing and modifiers', () => {
+    assert.equal(m.tdm116IsListToggleKey({ key: '[', target: { tagName: 'DIV' } }), true);
+    assert.equal(m.tdm116IsListToggleKey({ key: '[', target: { tagName: 'input' } }), false);
+    assert.equal(m.tdm116IsListToggleKey({ key: '[', target: { tagName: 'DIV', isContentEditable: true } }), false);
+    assert.equal(m.tdm116IsListToggleKey({ key: '[', metaKey: true }), false);
+    assert.equal(m.tdm116IsListToggleKey({ key: ']' }), false);
+  });
+});

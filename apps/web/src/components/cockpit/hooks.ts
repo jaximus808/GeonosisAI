@@ -53,3 +53,32 @@ export function useTdm116Now(ms = 1000): number {
   }, [ms]);
   return now;
 }
+
+/**
+ * One per-viewer preference in localStorage, as a string. Read after mount (the server render and the
+ * first client render use `fallback`), written on every set. Storage can be missing or throw (private
+ * windows, blocked site data): then the value just lives in memory for this page.
+ */
+export function useTdm116Stored(key: string, fallback: string | null = null): [string | null, (v: string) => void] {
+  const [value, setValue] = useState<string | null>(fallback);
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(key);
+      if (v !== null) setValue(v);
+    } catch {
+      /* no storage: keep the fallback */
+    }
+  }, [key]);
+  const set = useCallback(
+    (v: string) => {
+      setValue(v);
+      try {
+        window.localStorage.setItem(key, v);
+      } catch {
+        /* not remembered, still applied */
+      }
+    },
+    [key],
+  );
+  return [value, set];
+}

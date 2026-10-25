@@ -214,3 +214,52 @@ export function tdm116CancelNote(reason: string, by = 'web-operator'): string {
   const r = reason.replace(/\s+/g, ' ').trim().slice(0, 300);
   return r ? `Cancelled by ${by}: ${r}` : `Cancelled by ${by}`;
 }
+
+// ------------------------------------------------------------------------------ dashboard view prefs
+// The /dashboard ticket list (collapse to a rail, "Hide cancelled") and the Overview's Stage | Factory
+// switch. Stored per viewer in localStorage; these parse what comes back (anything else -> the default).
+
+export const TDM116_PREF_KEYS = {
+  ticketsCollapsed: 'gx.dash.ticketsCollapsed',
+  hideCancelled: 'gx.dash.hideCancelled',
+  overviewView: 'gx.cockpit.overviewView',
+} as const;
+
+export type Tdm116OverviewView = 'stage' | 'factory';
+
+/** A stored '1'/'0' -> boolean; missing or junk -> `fallback`. */
+export function tdm116ParseFlag(v: string | null | undefined, fallback: boolean): boolean {
+  return v === '1' ? true : v === '0' ? false : fallback;
+}
+
+/** A stored overview view -> 'stage' | 'factory' (default stage). */
+export function tdm116ParseOverviewView(v: string | null | undefined): Tdm116OverviewView {
+  return v === 'factory' ? 'factory' : 'stage';
+}
+
+/** Clutter in the ticket list: cancelled tickets and test tickets (task text starting `test.`). */
+export function tdm116IsClutter(t: { status: string; taskDescription: string }): boolean {
+  return t.status === 'cancelled' || /^\s*test\./i.test(t.taskDescription);
+}
+
+/**
+ * The tickets the list shows. With `hide` on, clutter is dropped, except the selected ticket (the one in
+ * the cockpit stays listed so the viewer can see where they are). Order is kept.
+ */
+export function tdm116ListTickets<T extends { id: bigint; status: string; taskDescription: string }>(
+  tickets: readonly T[],
+  hide: boolean,
+  selected: bigint | null,
+): { shown: T[]; hidden: number } {
+  if (!hide) return { shown: [...tickets], hidden: 0 };
+  const shown = tickets.filter((t) => t.id === selected || !tdm116IsClutter(t));
+  return { shown, hidden: tickets.length - shown.length };
+}
+
+/** The `[` shortcut toggles the ticket list, but not while typing or with a modifier held. */
+export function tdm116IsListToggleKey(e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; target?: unknown }): boolean {
+  if (e.key !== '[' || e.metaKey || e.ctrlKey || e.altKey) return false;
+  const el = e.target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
+  const tag = (el?.tagName ?? '').toUpperCase();
+  return !(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable);
+}

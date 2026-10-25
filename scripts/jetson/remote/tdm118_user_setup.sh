@@ -77,11 +77,13 @@ fi
 run mkdir -p "$CFG" "$UNIT_DIR"; run chmod 700 "$CFG"
 [ -f "$CFG/robot.env" ] || say "WARN $CFG/robot.env missing (push it: scripts/jetson/tdm118_geonosis.sh env)"
 [ -f "$CFG/robot.local.env" ] || say "WARN $CFG/robot.local.env missing (pushed by tdm118_geonosis.sh install)"
-run chmod 755 "$APP/scripts/jetson/remote/tdm118_guard.sh"
-if ! cmp -s "$APP/scripts/jetson/remote/geonosis-robot.service" "$UNIT_DIR/geonosis-robot.service"; then
-  run install -m 644 "$APP/scripts/jetson/remote/geonosis-robot.service" "$UNIT_DIR/geonosis-robot.service"
-  run systemctl --user daemon-reload
-  say "installed $UNIT_DIR/geonosis-robot.service (disabled; start it by hand after stopping vrteleop-rh)"
-else say "geonosis-robot.service unchanged"; fi
-say "unit: enabled=$(systemctl --user is-enabled geonosis-robot 2>/dev/null || true) active=$(systemctl --user is-active geonosis-robot 2>/dev/null || true)"
+run chmod 755 "$APP/scripts/jetson/remote/tdm118_guard.sh" "$APP/scripts/jetson/remote/tdm119_rt.sh"
+for unit in geonosis-robot geonosis-robot-teleop; do
+  if ! cmp -s "$APP/scripts/jetson/remote/$unit.service" "$UNIT_DIR/$unit.service"; then
+    run install -m 644 "$APP/scripts/jetson/remote/$unit.service" "$UNIT_DIR/$unit.service"
+    run systemctl --user daemon-reload
+    say "installed $UNIT_DIR/$unit.service (disabled; started by hand after stopping vrteleop-rh)"
+  else say "$unit.service unchanged"; fi
+  say "unit $unit: enabled=$(systemctl --user is-enabled $unit 2>/dev/null || true) active=$(systemctl --user is-active $unit 2>/dev/null || true)"
+done
 say "disk after: $(df -h / | awk 'NR==2{print $4" free ("$5" used)"}')"

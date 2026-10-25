@@ -253,3 +253,20 @@ def test_passive_read_prints_joints_and_releases(capsys, monkeypatch):
     assert line["joints"][1] == pytest.approx(0.25, abs=1e-3) and line["fault"] is None
     assert bus.closed and all(a == TDM118_REFRESH_ID for a, _ in bus.sent)
     assert tdm118_readonly.tdm118_passive_read(_arm(Tdm118FakeDmBus(REST)), 0.0, lambda: True) == 3
+
+
+def test_passive_read_channel_flag(monkeypatch):
+    from rdf_robot_client import tdm118_readonly
+
+    seen = {}
+
+    def fake_read(arm, seconds, vr_check):
+        seen["channel"] = arm.channel
+        return 0
+
+    monkeypatch.setattr(tdm118_readonly, "tdm118_passive_read", fake_read)
+    monkeypatch.setenv("YAM_CAN_CHANNEL", "can_right")
+    assert tdm118_readonly.run(["--passive-read", "1", "--channel", "can_left", "--no-vrteleop-check"]) == 0
+    assert seen["channel"] == "can_left"
+    with pytest.raises(SystemExit):
+        tdm118_readonly.run(["--passive-read", "1", "--channel", "can1"])

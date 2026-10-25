@@ -99,6 +99,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--port", type=int, default=None, help="stream server port (default $RDF_STREAM_PORT or 8091)")
     p.add_argument("--cameras", choices=["off", "config"], default=None,
                    help="off (default) | config: real cameras from $RDF_CAMERAS_CONFIG (default $TDM118_CAMERAS)")
+    p.add_argument("--channel", default=None, choices=["can_right", "can_left"],
+                   help="CAN bus to read (default $YAM_CAN_CHANNEL): check which physical arm each bus is")
     p.add_argument("--passive-read", type=float, default=None, metavar="SECONDS",
                    help="open only the read-only arm, print joints (2 Hz) for SECONDS, then exit")
     p.add_argument("--check", action="store_true", help="offline config check: build the adapter, open nothing")
@@ -112,7 +114,7 @@ def run(argv: list[str] | None = None) -> int:
     from .adapters.tdm118_yam_readonly import tdm118_vrteleop_active
 
     vr_check = None if a.no_vrteleop_check else tdm118_vrteleop_active
-    arm = make_adapter("yam_readonly", vrteleop_check=vr_check)
+    arm = make_adapter("yam_readonly", vrteleop_check=vr_check, **({"channel": a.channel} if a.channel else {}))
     name = a.name or os.environ.get("ROBOT_ID") or "yam-01"
     handlers = tdm118_handlers()
     cameras = a.cameras or os.environ.get("TDM118_CAMERAS") or "off"
@@ -200,6 +202,7 @@ def run(argv: list[str] | None = None) -> int:
          robot_id=client.robot_id, name=name, can=getattr(arm, "channel", None))
     done.wait()
     client.stop()
+    arm.disconnect()  # closes CAN, drops LARP's flock
     if stream is not None:
         stream.stop()
     if rig is not None:

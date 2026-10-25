@@ -1,0 +1,33 @@
+# TDM-119: GeonosisAI robot client in TELEOP mode on the real right YAM (LarpSafeYamArm + SafetyLayer, /ws/control).
+# systemd --user unit, installed DISABLED by tdm118_user_setup.sh. Never auto-restarts: a crashed motion client
+# stays down until the user starts it again. It refuses to start unless the user signed off the yam profile
+# (tdm119_bringup sign-off -> ~/.config/geonosis/safety.yaml verified: true) and vrteleop-rh is stopped.
+#   start:  systemctl --user start geonosis-robot-teleop
+#   stop:   systemctl --user stop geonosis-robot-teleop     (LARP release: damp, settle, disable: arm goes LIMP)
+#   clear a soft e-stop (human at the arm):  systemctl --user kill -s USR1 geonosis-robot-teleop
+#   logs:   journalctl --user -u geonosis-robot-teleop -f
+[Unit]
+Description=GeonosisAI robot client, TELEOP on the real right YAM (TDM-119)
+Documentation=file://%h/geonosis/app/docs/tdm119-teleop-runbook.md
+After=network-online.target
+Conflicts=geonosis-robot.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/geonosis/app/services/robot-client
+# later files win: local (CAN, cameras) < teleop (safety file, speeds, gripper) < env (pushed secrets/ids)
+EnvironmentFile=%h/.config/geonosis/robot.local.env
+EnvironmentFile=%h/.config/geonosis/teleop.env
+EnvironmentFile=%h/.config/geonosis/robot.env
+Environment=PYTHONUNBUFFERED=1 RDF_ENV_FILE=%h/.config/geonosis/robot.env
+ExecStartPre=%h/geonosis/app/scripts/jetson/remote/tdm118_guard.sh
+ExecStartPre=%h/geonosis/app/services/robot-client/.venv/bin/python -m rdf_robot_client.tdm119_bringup verified-check
+ExecStart=%h/geonosis/app/services/robot-client/.venv/bin/python -m rdf_robot_client.tdm119_teleop
+Restart=no
+KillSignal=SIGTERM
+# the LARP release waits up to 4.5 s for the arm to settle before disabling
+TimeoutStopSec=25
+SyslogIdentifier=geonosis-robot-teleop
+
+[Install]
+WantedBy=default.target

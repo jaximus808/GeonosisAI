@@ -166,8 +166,9 @@ def onboarding_link(account_id: str, return_url: str, refresh_url: str) -> str:
             "account": account_id,
             "use_case": {
                 "type": "account_onboarding",
+                # API 2026-09-30.endive: the link no longer takes `configurations` (the account's own
+                # configuration, recipient, decides what onboarding collects)
                 "account_onboarding": {
-                    "configurations": ["recipient"],
                     "return_url": return_url,
                     "refresh_url": refresh_url,
                 },

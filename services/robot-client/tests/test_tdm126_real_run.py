@@ -195,7 +195,7 @@ def test_time_cap_is_never_more_than_the_max(robot):
     ctx = robot.context(payload(timeout_s=600, confirm="no"))
     with pytest.raises(RealRunRefused):
         real_arm_run(ctx, checker=ok_checker, policy=FakePolicy())
-    assert ctx.result["time_cap_s"] == REAL_RUN_MAX_S_NOW() == 90.0
+    assert ctx.result["time_cap_s"] == REAL_RUN_MAX_S_NOW() == 45.0
 
 
 def test_soft_estop_stops_it_at_once_and_nothing_moves_after(robot):

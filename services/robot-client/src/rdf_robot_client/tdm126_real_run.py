@@ -49,8 +49,8 @@ from .state import RobotState
 
 REAL_RUN_PURPOSE = "deployment_real_run"
 REAL_RUN_CONFIRM = "HANDS_ON_ESTOP"
-REAL_RUN_DEFAULT_S = 90.0
-REAL_RUN_MAX_S = 90.0  # wall-clock cap per real-arm rollout (30 s was too short for a pick-and-place at <= 0.3 rad/s)
+REAL_RUN_DEFAULT_S = 45.0
+REAL_RUN_MAX_S = 45.0  # wall-clock cap per real-arm rollout
 REAL_RUN_MAX_SPEED_SCALE = 0.5  # the adapter still caps every joint at <= 0.3 rad/s; 0.25 left policy motion at ~0.2 rad/s
 PASS_VERDICTS = ("ok", "clamp")
 CANCEL_GRACE_S = 2.0  # still held in a pause this long after the cap: cancel the job

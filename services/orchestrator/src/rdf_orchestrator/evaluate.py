@@ -483,7 +483,7 @@ class EvalOrchestrator:
                            "modal-vol://rdf-checkpoints/ checkpoints run there", force=True)
                 return "checkpoint_not_real"
             # the operator scores each trial (Pass/Fail on /robots/<id>, trial_outcome): give them 2 min, not 30 s
-            payload.update(timeout_s=90.0, speed_scale=0.5,
+            payload.update(timeout_s=45.0, speed_scale=0.5,
                            outcome_timeout_s=max(float(payload.get("outcome_timeout_s") or 0), 120.0))
         base = {"ticket_id": ticket_id, "robot_id": robot_id, "eval_run_id": run_id, "kind": run.get("kind"),
                 "checkpoint_uri": run.get("checkpoint_uri"), "trials": trials, "solo_mode": self.cfg.solo_mode,

@@ -3,6 +3,7 @@
     cd services/orchestrator
     uv run python ../../scripts/demo/real_arm_run.py --ticket 14 --checkpoint before   # YAM-adapted pi0.5 (smoke-200)
     uv run python ../../scripts/demo/real_arm_run.py --ticket 14 --checkpoint after    # the ticket's fine-tune
+    uv run python ../../scripts/demo/real_arm_run.py --ticket 14 --plan                # both URIs + the prompt (read-only)
 
 It asks you to type HANDS_ON_ESTOP, then calls the orchestrator's ``POST /tickets/{id}/deployment/run``
 ``{real_arm: true, confirm: "HANDS_ON_ESTOP", checkpoint}``. The orchestrator resolves the checkpoint server side
@@ -59,10 +60,37 @@ def detail(body: dict) -> str:
     return str(d or body)[:300]
 
 
+def plan(ticket_id: int) -> int:
+    """The same server-side resolution the orchestrator does, read-only (SpacetimeDB SQL)."""
+    import asyncio
+
+    from rdf_common.spacetime_client import AsyncSpacetimeClient
+    from rdf_orchestrator.deployment_api import _opt, _training_prompt
+    from rdf_orchestrator.robot_mode import REAL_YAM_BASELINE_CHECKPOINT, real_checkpoint_ok
+
+    async def go() -> int:
+        stdb = AsyncSpacetimeClient()
+        rows = await stdb.sql(f"SELECT * FROM ticket WHERE id = {int(ticket_id)}")
+        if not rows:
+            log(f"no ticket {ticket_id}")
+            return 2
+        t = rows[0]
+        after = str(_opt(t.get("deployed_checkpoint_uri")) or "")
+        prompt = await _training_prompt(stdb, t, after)
+        print(json.dumps({"ticket": ticket_id, "status": t.get("status"),
+                          "before": REAL_YAM_BASELINE_CHECKPOINT, "after": after,
+                          "after_is_real": real_checkpoint_ok(after), "prompt": prompt}, indent=1))
+        return 0
+
+    return asyncio.run(go())
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--ticket", type=int, required=True)
-    ap.add_argument("--checkpoint", choices=("before", "after"), required=True)
+    ap.add_argument("--checkpoint", choices=("before", "after"), default=None)
+    ap.add_argument("--plan", action="store_true",
+                    help="print both checkpoint URIs and the training prompt (read-only), for the Jetson dry run")
     ap.add_argument("--robot-id", type=int, default=None, help="default: the ticket's real / collect robot")
     ap.add_argument("--orchestrator", default=None)
     ap.add_argument("--poll-s", type=float, default=0.5)
@@ -74,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError:
         print("run it from services/orchestrator with uv run (needs rdf_common)", file=sys.stderr)
         return 2
+    if a.plan:
+        return plan(a.ticket)
+    if not a.checkpoint:
+        ap.error("--checkpoint before|after is required (or --plan)")
     orch = (a.orchestrator or os.environ.get("ORCHESTRATOR_URL") or "http://127.0.0.1:8028").rstrip("/")
     key = os.environ.get("RDF_OPERATOR_KEY") or ""
     if not key:

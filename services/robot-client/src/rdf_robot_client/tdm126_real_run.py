@@ -10,7 +10,8 @@ What it does, in order (docs/real-arm-safety.md applies in full; the user holds 
   1. Refuses unless: the env gate, the payload's real_arm + confirm, a real ``modal-vol://`` checkpoint, a
      non-empty prompt (the exact training prompt), the production backend, and a policy server whose ACTIVE
      checkpoint is that one with the 7-dim ``joint_pos_abs`` YAM spec (``tdm122_dryrun.mapping_preflight``).
-     The checkpoint is never activated from here: the user activates it (``policy_ctl.py activate``).
+     When another checkpoint is active it activates this one first (no motion; a cache hit once the user has
+     preloaded both with ``policy_ctl.py activate <uri> --preload``), then checks the spec again.
   2. Caps the SafetyLayer speed scale at 0.25 (restored afterwards).
   3. Asks for the FIRST chunk from the arm's measured pose and runs the TDM-122 dry-run check on it
      (``ChunkChecker``: joint/LARP limits, jump from the observed pose, speed, workspace, floor, a replay through
@@ -156,6 +157,13 @@ def real_arm_run(ctx: JobContext, *, checker: Checker | None = None, policy: Any
         raise refuse("policy_server_down", f"policy server not healthy: {e}") from e
     from .tdm122_dryrun import mapping_preflight
 
+    active = str(health.get("active_checkpoint_uri") or "").rstrip("/").removesuffix("/params")
+    if active != uri.rstrip("/").removesuffix("/params") and pc.config.hot_swap:
+        try:  # a cache hit after policy_ctl.py activate --preload (both before/after preloaded): milliseconds
+            pc.activate(uri)
+            health = pc.wait_healthy(timeout=60.0)
+        except Exception as e:  # noqa: BLE001
+            raise refuse("activate_failed", f"could not activate {uri}: {e}") from e
     mapping = mapping_preflight(health, uri)
     if not mapping.get("yam_ok") or not health.get("active_checkpoint_uri"):
         probs = mapping.get("problems") or [f"active checkpoint is {health.get('active_checkpoint_uri')}"]

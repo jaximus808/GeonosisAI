@@ -10,6 +10,8 @@
 #   scripts/jetson/tdm118_geonosis.sh status      # unit state, vrteleop state, CAN links, disk
 #   scripts/jetson/tdm118_geonosis.sh logs        # journalctl --user -u geonosis-robot (FOLLOW=0 to print and exit)
 #   scripts/jetson/tdm118_geonosis.sh check       # offline config check on the Jetson (opens no CAN, no network)
+#   scripts/jetson/tdm118_geonosis.sh policy on   # TDM-126: TDM119_ALLOW_POLICY=1 in ~/.config/geonosis/teleop.env
+#   scripts/jetson/tdm118_geonosis.sh policy off  #   (=0); takes effect at the next start of geonosis-robot-teleop
 #
 # It never starts the unit: the user does that after stopping vrteleop (docs/jetson-inventory.md section 8).
 # Host: JETSON_HOST / JETSON_USER from .env (northstar / northstar). Secrets travel over ssh stdin into a 0600 file.
@@ -31,17 +33,21 @@ push_env() {
   for spec in "SPACETIME_HOST:SPACETIME_HOST" "SPACETIME_DB_NAME:SPACETIME_DB_NAME" \
               "SPACETIME_TOKEN:JETSON_ROBOT_CLIENT_SPACETIME_TOKEN" "ROBOT_ID:JETSON_ROBOT_ID" \
               "ORCHESTRATOR_URL:JETSON_ORCHESTRATOR_URL" "RDF_STREAM_TOKEN_SECRET:RDF_STREAM_TOKEN_SECRET" \
-              "RDF_MEDIA_STORE_URL:RDF_MEDIA_STORE_URL" "RDF_EDGE_SECRET:RDF_EDGE_SECRET"; do
+              "RDF_MEDIA_STORE_URL:RDF_MEDIA_STORE_URL" "RDF_EDGE_SECRET:RDF_EDGE_SECRET" \
+              "POLICY_SERVER_URL:JETSON_POLICY_SERVER_URL|POLICY_SERVER_URL" "POLICY_SERVER_TOKEN:POLICY_SERVER_TOKEN" \
+              "POLICY_BACKEND:JETSON_POLICY_BACKEND"; do
     k="${spec%%:*}"; v=""
     IFS='|' read -r -a srcs <<<"${spec#*:}"
     for src in "${srcs[@]}"; do v="$(val "$src")"; [ -n "$v" ] && break; done
     [ "$k" = ROBOT_ID ] && v="${v:-yam-01}"
+    # TDM-126: the Jetson always talks to the production policy server (never the laptop's sim/spike backend)
+    if [ "$k" = POLICY_BACKEND ] && [ -z "$v" ] && [ -n "$(val POLICY_SERVER_TOKEN)" ]; then v=production; fi
     if [ -z "$v" ]; then
       case "$k" in SPACETIME_*|RDF_STREAM_TOKEN_SECRET) echo "MISSING $k (from ${spec#*:})" >&2; exit 3 ;; esac
       echo "    unset $k (optional)"; continue
     fi
     case "$v" in *$'\n'*) echo "$k has a newline" >&2; exit 3 ;; esac
-    echo "    set   $k <- ${spec#*:}"
+    echo "    set   $k <- ${spec#*:}$([ "$k" = POLICY_BACKEND ] && [ -z "$(val JETSON_POLICY_BACKEND)" ] && echo ' (default: production, POLICY_SERVER_TOKEN is set)')"
     content+="$k=$v"$'\n'
     pushed+=" $k"
   done
@@ -95,13 +101,24 @@ cmd_status() {
     echo "== CAN"; ip -br link show type can; echo "== disk"; df -h / | tail -1'
 }
 
+cmd_policy() {
+  local want
+  case "${1:-}" in on) want=1 ;; off) want=0 ;; *) echo "usage: $0 policy on|off" >&2; exit 2 ;; esac
+  step "TDM119_ALLOW_POLICY=$want in ~/.config/geonosis/teleop.env (non-secret)"
+  "${SSH[@]}" "set -e; f=\$HOME/.config/geonosis/teleop.env; test -f \"\$f\" || { echo 'no teleop.env: run install first' >&2; exit 3; }
+    if grep -q '^TDM119_ALLOW_POLICY=' \"\$f\"; then t=\$(mktemp \"\$f.XXXXXX\"); sed 's/^TDM119_ALLOW_POLICY=.*/TDM119_ALLOW_POLICY=$want/' \"\$f\" >\"\$t\"; chmod 600 \"\$t\"; mv -f \"\$t\" \"\$f\"
+    else echo 'TDM119_ALLOW_POLICY=$want' >>\"\$f\"; fi
+    grep '^TDM119_ALLOW_POLICY=' \"\$f\"; printf 'geonosis-robot-teleop: %s (restart it for the change to apply)\\n' \"\$(systemctl --user is-active geonosis-robot-teleop 2>/dev/null || true)\""
+}
+
 case "${1:-}" in
   install) cmd_install ;;
+  policy) cmd_policy "${2:-}" ;;
   sync) cmd_sync ;;
   env) push_env ;;
   status) cmd_status ;;
   logs) if [ "${FOLLOW:-1}" = 0 ]; then "${SSH[@]}" "journalctl --user -u geonosis-robot -n ${LINES:-200} --no-pager -o short-iso"
         else ssh -t -o ConnectTimeout=15 "$TARGET" "journalctl --user -u geonosis-robot -n ${LINES:-100} -f -o short-iso"; fi ;;
   check) "${SSH[@]}" 'set -a; . $HOME/.config/geonosis/robot.local.env; set +a; cd $HOME/geonosis/app/services/robot-client && .venv/bin/python -m rdf_robot_client.tdm118_readonly --check' ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

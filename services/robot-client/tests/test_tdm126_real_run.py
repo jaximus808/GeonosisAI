@@ -33,6 +33,15 @@ class FakePolicy:
         self.n = 0
         self.pending: list[PolicyReply] = []
         self.observed: list[list[float]] = []
+        self.activated: list[str] = []
+        self.refuse_activate = False
+
+    def activate(self, uri: str) -> dict:
+        if self.refuse_activate:
+            raise RuntimeError("activate refused")
+        self.active = uri
+        self.activated.append(uri)
+        return {"ok": True}
 
     def wait_healthy(self, timeout: float = 0) -> dict:
         return {"ok": True, "ready": True, "active_checkpoint_uri": self.active, "active": {"spec": self.spec}}
@@ -162,8 +171,10 @@ def test_payload_gates(robot, change, code):
 def test_env_backend_and_active_checkpoint_gates(robot, monkeypatch):
     with pytest.raises(RealRunRefused, match="backend_not_production"):
         real_arm_run(robot.context(payload()), checker=ok_checker, policy=FakePolicy(backend="sim"))
-    with pytest.raises(RealRunRefused, match="checkpoint_not_active"):
-        real_arm_run(robot.context(payload()), checker=ok_checker, policy=FakePolicy(active="modal-vol://other/1"))
+    other = FakePolicy(active="modal-vol://rdf-checkpoints/other/1")
+    other.refuse_activate = True
+    with pytest.raises(RealRunRefused, match="activate_failed"):
+        real_arm_run(robot.context(payload()), checker=ok_checker, policy=other)
     with pytest.raises(RealRunRefused, match="checkpoint_not_active"):
         real_arm_run(robot.context(payload()), checker=ok_checker,
                      policy=FakePolicy(spec={"action_space": "droid_base", "action_dim": 8}))
@@ -226,3 +237,9 @@ def test_run_baseline_routes_the_real_run_purpose(robot, monkeypatch):
     monkeypatch.setattr(tdm126_real_run, "real_arm_run", lambda ctx: seen.append(ctx.payload) or {"ok": True})
     assert "run_baseline" not in tdm119_handlers(allow_policy=True)  # falls through to the registry handler
     assert eval_trials.run_baseline(robot.context(payload())) == {"ok": True} and seen
+
+
+def test_activates_the_requested_checkpoint_when_another_is_active(robot):
+    pol = FakePolicy(active="modal-vol://rdf-checkpoints/runs/ticket-tdm40-yam-smoke/x/199")
+    out = real_arm_run(robot.context(payload(timeout_s=0.5)), checker=ok_checker, policy=pol)
+    assert pol.activated == [URI] and out["ok"]

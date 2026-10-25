@@ -59,6 +59,11 @@ Failure handling:
 Every trial lands in ``ctx.result["outcomes"]`` as it is recorded, so a command that ends early
 still reports exactly what was recorded.
 
+[SIM] Deployment runs (``run_baseline`` {purpose: "deployment_run", checkpoint_uri, timeout_s?}, issued by the
+orchestrator's ``POST /tickets/{id}/deployment/run`` for a shipped ticket): ONE rollout of the deployed
+checkpoint on the MuJoCo sim (home, scene reset, policy episode with the sim success check) so the owner can
+watch their policy. No eval_trial row, no recording, no reset wait. Refused on anything but the MuJoCo sim.
+
 TDM-69 collection rollouts (``run_baseline`` {purpose: "collect_recovery", eval_run_id: 0, trials: 1,
 interventions: {enabled, trial_timeout_s, no_progress_s, verdict_wait_s}}, issued by the
 orchestrator's InterventionManager while a recovery_takeover plan collects): the same per-trial
@@ -108,6 +113,7 @@ from .state import RobotState
 INBOX_SERVICE = "eval_outcomes"
 DEFAULT_OUTCOME_TIMEOUT_S = 30.0
 DEFAULT_TRIAL_TIMEOUT_S = 60.0
+DEPLOYMENT_PURPOSE = "deployment_run"  # [SIM] run_baseline purpose: one watched rollout of a shipped checkpoint
 DEFAULT_UPLOAD_WAIT_S = 120.0
 DEFAULT_MAX_PAUSE_S = 900.0  # collection: longest wait for a handback once paused (RDF_INTERVENTION_MAX_PAUSE_S)
 # collection: how long the policy finishes the trial after a handback (RDF_INTERVENTION_POST_HANDBACK_S or
@@ -336,16 +342,17 @@ class EvalTrialRunner:
         p = ctx.payload
         self.ctx = ctx
         self.collect = str(p.get("purpose") or "") == COLLECT_PURPOSE  # TDM-69 collection rollout
-        self.eval_run_id = int(p.get("eval_run_id") or 0)
-        if not self.eval_run_id and not self.collect:
+        self.deploy = str(p.get("purpose") or "") == DEPLOYMENT_PURPOSE  # [SIM] watch a shipped policy run
+        self.eval_run_id = 0 if self.deploy else int(p.get("eval_run_id") or 0)
+        if not self.eval_run_id and not self.collect and not self.deploy:
             raise ValueError(f"{ctx.command.type} needs payload.eval_run_id (TDM-67 starts the eval run)")
-        self.trials = int(p.get("trials") or (1 if self.collect else 0))
+        self.trials = 1 if self.deploy else int(p.get("trials") or (1 if self.collect else 0))
         if self.trials <= 0:
             raise ValueError("payload.trials must be > 0")
         default_kind = "baseline" if ctx.command.type == "run_baseline" else "eval"
         self.run_kind = str(p.get("kind") or default_kind)  # TDM-67: baseline | candidate; TDM-69: collect_recovery
         self.episode_kind = "baseline" if self.run_kind in ("baseline", COLLECT_PURPOSE) or self.collect else "eval"
-        uri = p.get("checkpoint_uri") or (BASE_CHECKPOINT if self.episode_kind == "baseline" else None)
+        uri = p.get("checkpoint_uri") or (BASE_CHECKPOINT if self.episode_kind == "baseline" and not self.deploy else None)
         if not uri:
             raise ValueError("payload.checkpoint_uri is required for a candidate eval")
         self.checkpoint_uri = str(uri)
@@ -838,7 +845,8 @@ class EvalTrialRunner:
         """TDM-114: the trial this runner is on, for ``/ws/state`` ``policy`` (rollout.policy_phase_service)."""
         self.ctx.services[POLICY_TRIAL_SERVICE] = {
             "trial_index": index, "trials": self.trials, "eval_run_id": self.eval_run_id or None,
-            "purpose": COLLECT_PURPOSE if self.collect else self.run_kind, "resetting": resetting}
+            "purpose": COLLECT_PURPOSE if self.collect else DEPLOYMENT_PURPOSE if self.deploy else self.run_kind,
+            "resetting": resetting}
 
     def run(self) -> dict[str, Any]:
         try:
@@ -848,9 +856,13 @@ class EvalTrialRunner:
 
     def _run(self) -> dict[str, Any]:
         ctx = self.ctx
+        if self.deploy and self.sim_scene is None:
+            raise ValueError("[SIM] deployment runs are for the MuJoCo sim robot only; this arm is not one")
         prompt = policy_prompt(ctx)
         scene = self._settle_scene()  # [SIM] the ticket's deployed scene is loaded before any trial
         activate = self._activate()
+        if self.deploy:
+            return self._run_deploy(prompt, activate)
         if self.collect:
             return self._run_collect(prompt, activate)
         done = self._recorded_indices()
@@ -889,6 +901,33 @@ class EvalTrialRunner:
                "note": ("[SIM] sim arm / synthetic cameras: NOT a real-robot eval. " if self.sim else "")
                        + "outcomes are operator-confirmed; unconfirmed trials are recorded as failures"}
         _log("eval trials done", eval_run_id=self.eval_run_id, recorded=len(self.outcomes), successes=succ)
+        return out
+
+    def _run_deploy(self, prompt: str, activate: dict[str, Any]) -> dict[str, Any]:
+        """[SIM] one rollout of a shipped checkpoint for its owner to watch: no trial row, no recording."""
+        ctx = self.ctx
+        base = {"purpose": DEPLOYMENT_PURPOSE, "checkpoint_uri": self.checkpoint_uri, "prompt": prompt, "sim": True,
+                "ticket_id": int(ctx.command.ticket_id or 0)}
+        ctx.result.update(base)
+        self._set_trial(0)
+        try:
+            ctx.finish_requested.clear()
+            _go_home(ctx)
+            self._sim_reset(0)
+            ctx.event("deployment.run_rollout_started", **base)
+            self._sim_failure = None
+            res = run_episode(ctx, prompt, max_steps=self.max_steps, success_check=self._sim_done,
+                              timeout_s=self.timeout_s, checkpoint_uri=self.checkpoint_uri, mode=self.mode, warm=True)
+        finally:
+            ctx.finish_requested.clear()
+        if res.ended == "policy_error" and int(res.executor.get("chunks_used") or 0) == 0:
+            raise InfraFailure(f"the policy never produced an action ({res.executor.get('aborted') or res.flags})")
+        st = self.sim_scene.task_status()
+        out = {**base, "success": bool(st["success"]), "ended": res.ended, "seconds": round(res.seconds, 2),
+               "failure": st.get("failure") or self._sim_failure, "flags": list(res.flags),
+               "note": "[SIM] deployment run on the MuJoCo sim: not recorded, not an eval trial"}
+        ctx.event("deployment.run_finished", **{k: v for k, v in out.items() if k != "note"})
+        _log("deployment run done", success=out["success"], ended=res.ended, seconds=out["seconds"])
         return out
 
     def _run_collect(self, prompt: str, activate: dict[str, Any]) -> dict[str, Any]:
@@ -932,7 +971,7 @@ def run_baseline(ctx: JobContext) -> dict[str, Any]:
     """With payload.eval_run_id: the trial runner (kind baseline, base checkpoint by default). With
     purpose collect_recovery: a TDM-69 collection rollout (failure detector + takeover, no eval rows).
     Otherwise: TDM-50's single policy episode (the robot page's demo button), which records no trials."""
-    if ctx.payload.get("eval_run_id") or ctx.payload.get("purpose") == COLLECT_PURPOSE:
+    if ctx.payload.get("eval_run_id") or ctx.payload.get("purpose") in (COLLECT_PURPOSE, DEPLOYMENT_PURPOSE):
         return EvalTrialRunner(ctx).run()
     return rollout_episode_job(ctx)
 

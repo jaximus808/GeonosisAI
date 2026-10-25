@@ -113,6 +113,8 @@ def create_app(*, client: BusClient | None = None, registry: Registry | None = N
     app.include_router(reset_router)
     from .robot_mode import robot_mode_router  # TDM-107: GET/POST /tickets/{id}/robot_mode (sim robot | real YAM)
     app.include_router(robot_mode_router)
+    from .deployment_api import deployment_router  # [SIM] POST /tickets/{id}/deployment/run (watch a shipped policy)
+    app.include_router(deployment_router)
     from .admin_llm_api import admin_llm_router  # GET/PUT /admin/llm: switch the LLM backend (locked to api in production)
     app.include_router(admin_llm_router)
     from .scene_api import scene_router  # TDM-104: /tickets/{id}/scene[/generate|/deploy], /robots/{id}/scene, /scenes/*

@@ -271,6 +271,19 @@ def test_run_eval_needs_an_eval_run_and_run_baseline_without_one_is_a_single_epi
     assert out["rollout"]["ended"] == "max_seconds" and robot.http.rows == []
 
 
+def test_deployment_run_is_mujoco_sim_only(sim_arm):
+    """[SIM] run_baseline purpose=deployment_run: refused on any arm that is not the MuJoCo sim (here the
+    TDM-49 SimArm), before the policy is activated or the arm moves; it never writes a trial row."""
+    robot, pc = _setup(sim_arm, None, 1)
+    try:
+        with pytest.raises(ValueError, match="MuJoCo sim robot only"):
+            run_baseline(robot.context({"purpose": "deployment_run", "checkpoint_uri": "fake://stub-no-gpu/t/1",
+                                        "prompt": "move the cube"}, "run_baseline"))
+    finally:
+        pc.close()
+    assert robot.http.rows == []
+
+
 # --------------------------------------------------------------------------- TDM-69 collection rollouts
 
 from rdf_robot_client.commands import Command  # noqa: E402

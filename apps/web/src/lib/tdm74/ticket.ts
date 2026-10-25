@@ -52,11 +52,15 @@ export interface Tdm74Preview {
   robot_mode?: 'sim' | 'real' | null; // TDM-107: the mode the ticket would run in
   robot_selection: string | null;
   robot_error: { code: string; message: string; robots?: Tdm74Robot[] } | null;
+  collect_robot?: Tdm74Robot | null; // TDM-125 (also set by the server's auto split)
+  note?: string | null; // e.g. a Real ticket on a teleop-only arm became a split (evals on the sim robot)
 }
 
 export interface Tdm74Created {
   ticket_id: number;
   robot: Tdm74Robot;
+  collect_robot?: Tdm74Robot | null;
+  note?: string | null; // the server converted the ticket (e.g. to a split); shown before the redirect
   ticket: Record<string, unknown>;
 }
 
@@ -147,6 +151,7 @@ const TDM74_CODE: Record<string, Tdm74Field> = {
   no_online_robot: 'robot',
   multiple_online_robots: 'robot',
   robot_mode_mismatch: 'robot',
+  real_robot_cannot_eval: 'robot', // a Real ticket on a teleop-only arm with no sim robot online for its evals
 };
 
 export interface Tdm74Failure {

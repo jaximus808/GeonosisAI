@@ -844,6 +844,11 @@ class InterventionManager:
                 return self._wait(ticket_id, "max_rollouts", f"plan {plan['id']}: {len(rollouts)} collection rollouts "
                                                              f"(INTERVENTION_COLLECT_MAX_ROLLOUTS)")
             robot = self.m.get("robot", rid)
+            from .robot_mode import robot_can_eval  # never send run_baseline to a teleop-only arm
+
+            if robot is not None and not robot_can_eval(robot):
+                return self._wait(ticket_id, "robot_cannot_eval", f"robot {rid} ({robot.get('name')}) is teleop-only "
+                                                                  "(no policy: true in camera_config)")
             problem = self._robot_problem(robot)
             if problem or (robot or {}).get("status") == "paused":
                 return self._wait(ticket_id, "waiting_for_robot", problem or f"robot {rid} is paused")

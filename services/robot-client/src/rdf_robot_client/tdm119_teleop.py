@@ -110,7 +110,8 @@ def run(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa: BLE001
         _log("cameras NOT started", error=repr(e)[:300])
         cams = {"cameras": "off"}
-    client = RobotClient(arm, name=name, stdb=cfg, camera_config={**cams, "sim": False, "teleop": True},
+    client = RobotClient(arm, name=name, stdb=cfg, camera_config={**cams, "sim": False, "teleop": True,
+                                                                    "policy": allow_policy},
                          heartbeat_s=5.0, handlers=handlers, services=services, clear_estop_on_boot=False)
     if hasattr(arm, "set_event_sink"):
         arm.set_event_sink(client.event)

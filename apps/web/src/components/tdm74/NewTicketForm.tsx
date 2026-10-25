@@ -35,6 +35,8 @@ import {
   tdm107DefaultMode,
   tdm125DefaultCollectRobot,
   tdm107IsSimRobot,
+  tdm107IsTeleopOnly,
+  tdm125SplitNote,
   type Tdm107Mode,
 } from '@/lib/tdm107/robotMode';
 
@@ -125,6 +127,11 @@ export function NewTicketForm() {
     if (collectTouched || !robotsReady) return;
     setCollectRobotId(robotMode === 'sim' ? tdm125DefaultCollectRobot(robots.nonTestOnline) : '');
   }, [collectTouched, robotsReady, robotMode, robots.nonTestOnline]);
+  // A Real ticket on a teleop-only arm (no policy: true, e.g. yam-01 on tdm119_teleop tonight) can't run its
+  // evals there. The request is sent anyway: the server makes it a split (evals on the sim robot, data on the arm).
+  const selectedRobot = robots.shown.find((r) => String(r.id) === robotId);
+  const splitNote = robotMode === 'real' && selectedRobot && tdm107IsTeleopOnly(selectedRobot) ? tdm125SplitNote(selectedRobot.name) : null;
+  const [createdNote, setCreatedNote] = useState<{ id: number; note: string } | null>(null);
   const realRobots = useMemo(() => robotRows.filter((r) => !tdm107IsSimRobot(r) && (showTest || !r.name.startsWith('test.'))), [robotRows, showTest]);
   const inputs: Tdm74Inputs = { prompt, robotId, robotMode, budgetUsd, targetPct, advanced, collectRobotId };
   const stale = !!preview && prompt.trim() !== previewPrompt;
@@ -188,7 +195,12 @@ export function NewTicketForm() {
     setServerErrors({});
     const r = await tdm74Create(body);
     if (r.ok) {
-      router.push(`/tickets/${r.data.ticket_id}`);
+      const go = () => router.push(`/tickets/${r.data.ticket_id}`);
+      if (r.data.note) {
+        // The server changed the ticket (e.g. made it a split): say so, then open the ticket.
+        setCreatedNote({ id: r.data.ticket_id, note: r.data.note });
+        window.setTimeout(go, 3500);
+      } else go();
       return; // keep the "Creating" state until the ticket page takes over
     }
     setCreating(false);
@@ -413,6 +425,15 @@ export function NewTicketForm() {
             )}
           </div>
           <FieldError id="tdm74-robot-err" msg={shown.robot} />
+          {splitNote && (
+            <p
+              className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+              role="note"
+              data-testid="tdm125-split-note"
+            >
+              {splitNote}
+            </p>
+          )}
           {robotMode === 'sim' && realRobots.length > 0 && (
             <div className="mt-3" data-testid="tdm125-create-collect">
               <label className="block text-sm font-medium" htmlFor="tdm125-collect">
@@ -582,6 +603,18 @@ export function NewTicketForm() {
           {creating && <Spinner />}
           {creating ? 'Creating ticket…' : 'Create ticket'}
         </button>
+        {createdNote && (
+          <p
+            role="status"
+            className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            data-testid="tdm125-created-note"
+          >
+            {createdNote.note}{' '}
+            <a href={`/tickets/${createdNote.id}`} className="font-medium underline">
+              Open TKT-{String(createdNote.id).padStart(4, '0')}
+            </a>
+          </p>
+        )}
         {!creating && blockers.length > 0 && <p className="mt-2 text-sm text-zinc-500">{blockers.join(' ')}</p>}
         {!creating && !blockers.length && (
           <p className="mt-2 text-sm text-zinc-500">The factory starts onboarding the robot as soon as the ticket exists.</p>

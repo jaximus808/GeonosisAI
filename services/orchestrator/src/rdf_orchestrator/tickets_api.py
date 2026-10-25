@@ -227,6 +227,24 @@ class TicketsService:
         raise TicketError(422, "multiple_online_robots", "Several robots are online. Pass robot_id to pick one.",
                           robots=[_public_robot(r) for r in live])
 
+    async def auto_split(self, req: CreateTicketRequest, robot: dict) -> tuple[dict, dict, str] | None:
+        """Fix 1 (TDM-125 split): a Real ticket on a teleop-only real robot (camera_config ``teleop`` and
+        no ``policy: true``) can't run its baseline/evals there. Convert it: evals on an online sim
+        robot (prefers sim-yam-mujoco), data collection on the real robot. -> (sim robot, real robot, note),
+        None when no conversion is needed. No sim robot online: 422 ``real_robot_cannot_eval``."""
+        from .robot_mode import pick_split_sim_robot, robot_is_teleop_only, split_note
+
+        if req.robot_mode != "real" or not robot_is_teleop_only(robot):
+            return None
+        note = split_note(robot.get("name"))
+        sim = pick_split_sim_robot(await self.stdb.sql("SELECT * FROM robot"))
+        if sim is None:
+            raise TicketError(422, "real_robot_cannot_eval",
+                              f"{robot.get('name')} can collect data but can't run evals tonight, and no sim robot is "
+                              "online to run this ticket's evals. Start the sim robot (sim-yam-mujoco) and try again.",
+                              robot=_public_robot(robot))
+        return sim, robot, note
+
     def _resolve(self, req: CreateTicketRequest, parsed: ParsedTicket) -> dict:
         """Steps 1-2 without any I/O: explicit fields over the prompt, defaults, overrides.
         ``budget_cents`` is None when neither the prompt nor the request gave one."""
@@ -274,11 +292,18 @@ class TicketsService:
         parsed = await self._parsed(req)
         r = self._resolve(req, parsed)
         robot, selection, robot_error = None, None, None
+        collect, note = None, None
         try:
             robot, selection = await self.pick_robot(req.robot_id, req.robot_mode)
+            split = await self.auto_split(req, robot)
+            if split is not None:
+                robot, collect, note = split
+                selection = "split_auto"
         except TicketError as e:
             robot_error = {"code": e.code, "message": e.message, **e.extra}
         return {
+            "collect_robot": _public_robot(collect) if collect is not None else None,
+            "note": note,
             "parsed": parsed.model_dump(),
             **r,
             "missing": [] if r["budget_cents"] is not None else ["budget"],
@@ -300,8 +325,13 @@ class TicketsService:
                               parsed=parsed.model_dump())
 
         robot, selection = await self.pick_robot(req.robot_id, req.robot_mode)
+        collect, note, split_from = None, None, None
+        split = await self.auto_split(req, robot)
+        if split is not None:  # Real on a teleop-only arm -> evals on the sim robot, collection on the arm
+            robot, collect, note = split
+            split_from, selection = collect, "split_auto"
+            req = req.model_copy(update={"collect_robot_id": int(collect["id"])})
         rid = int(robot["id"])
-        collect = None
         if req.collect_robot_id is not None and req.collect_robot_id != rid:  # TDM-125 split-robot ticket
             collect = next((r for r in await self.stdb.sql("SELECT * FROM robot") if int(r["id"]) == req.collect_robot_id), None)
             if collect is None:
@@ -335,6 +365,20 @@ class TicketsService:
                     "eval_robot_id": rid, "eval_mode": mode, "by": "ticket_create"}))
             except Exception as e:  # noqa: BLE001 - the setting is saved; the event is the audit trail
                 log.error("tickets.collect_robot_event_failed", extra={"fields": {"error": str(e)[:300]}})
+        if split_from is not None:
+            from .robot_mode import SPLIT_AUTO_EVENT
+
+            reason = (f"{split_from.get('name')} is teleop-only (camera_config has no policy: true), so it can't run "
+                      "run_baseline/run_eval; evals go to the sim robot, data collection stays on the real arm")
+            fields = {"ticket_id": int(ticket["id"]), "requested_robot_mode": "real",
+                      "real_robot_id": int(split_from["id"]), "real_robot_name": split_from.get("name"),
+                      "eval_robot_id": rid, "eval_robot_name": robot.get("name"),
+                      "collect_robot_id": int(split_from["id"]), "reason": reason, "note": note}
+            log.info(SPLIT_AUTO_EVENT, extra={"fields": fields})
+            try:
+                await self.stdb.call_reducer("append_event", "orchestrator:tickets", SPLIT_AUTO_EVENT, json.dumps(fields))
+            except Exception as e:  # noqa: BLE001 - the split is saved in run_settings; the event is the audit trail
+                log.error("tickets.split_auto_event_failed", extra={"fields": {"error": str(e)[:300]}})
         log.info("tickets.created", extra={"fields": {"ticket_id": ticket["id"], "robot_id": rid, "selection": selection,
                                                       "budget_cents": budget_cents, "target_success": target,
                                                       "robot_mode": mode}})
@@ -344,6 +388,7 @@ class TicketsService:
             "robot_mode": mode,
             "collect_robot": _public_robot(collect) if collect is not None else None,
             "robot_selection": selection,
+            "note": note,
             "ticket": ticket,
             "run_settings": _with_hyperparams(settings[0] if settings else None),
             "parsed": parsed.model_dump(),

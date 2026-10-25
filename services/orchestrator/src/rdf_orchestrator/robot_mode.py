@@ -77,6 +77,46 @@ def robot_is_sim(robot: Any) -> bool:
     return robot_config(robot).get("sim") is True
 
 
+def robot_can_eval(robot: Any) -> bool:
+    """Can this robot run policy jobs (run_eval / run_baseline)? Sim robots: yes. A real robot only
+    when ``camera_config_json.policy`` is true; a real robot with ``teleop: true`` and no ``policy``
+    flag is teleop-only (tonight's ``tdm119_teleop`` refuses policy jobs unless TDM119_ALLOW_POLICY=1).
+    A real robot with neither flag (older clients) keeps the pre-flag behaviour: it can eval."""
+    if robot is None:
+        return False
+    cfg = robot_config(robot)
+    if cfg.get("sim") is True:
+        return True
+    pol = cfg.get("policy")
+    if isinstance(pol, bool):
+        return pol
+    return cfg.get("teleop") is not True
+
+
+def robot_is_teleop_only(robot: Any) -> bool:
+    """A real robot that can collect data (teleop) but can't run evals."""
+    return robot is not None and not robot_can_eval(robot)
+
+
+CANNOT_EVAL_EVENT = "eval.robot_cannot_eval"
+SPLIT_AUTO_EVENT = "ticket.split_auto"
+PREFERRED_SIM_ROBOT = "sim-yam-mujoco"
+
+
+def split_note(real_name: Any) -> str:
+    return (f"{real_name} can collect data but can't run evals tonight, so this ticket evaluates on the sim "
+            f"robot and collects on {real_name}.")
+
+
+def pick_split_sim_robot(robots: list[dict]) -> dict | None:
+    """The online sim robot a teleop-only real ticket evaluates on (prefers ``sim-yam-mujoco``)."""
+    live = [r for r in candidates(robots, SIM) if r.get("status") in ONLINE]
+    if not live:
+        return None
+    pref = [r for r in live if r.get("name") == PREFERRED_SIM_ROBOT]
+    return (pref or sorted(live, key=lambda r: _i(r.get("id"))))[0]
+
+
 def robot_mode(robot: Any) -> RobotMode | None:
     """'sim' | 'real' for a robot row, None when there is no row."""
     if robot is None:

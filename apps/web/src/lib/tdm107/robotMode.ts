@@ -49,3 +49,34 @@ export function tdm125DefaultCollectRobot<R extends RobotLike & { id: unknown }>
   const real = onlineNonTest.filter((r): r is R => !!r && !tdm107IsSimRobot(r));
   return real.length === 1 ? String(real[0].id) : '';
 }
+
+function cfgOf(r: RobotLike): Record<string, unknown> {
+  if (!r || !r.cameraConfigJson) return {};
+  try {
+    const cfg = JSON.parse(r.cameraConfigJson) as unknown;
+    return cfg && typeof cfg === 'object' ? (cfg as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Same rule as the orchestrator's `robot_can_eval`: sim robots can; a real robot only with `policy: true`.
+ * A real robot with `teleop: true` and no `policy` flag is teleop-only (tonight's tdm119_teleop on yam-01).
+ * A real robot with neither flag (older clients) keeps evals. */
+export function tdm107CanEval(r: RobotLike): boolean {
+  if (!r) return false;
+  const cfg = cfgOf(r);
+  if (cfg.sim === true) return true;
+  if (typeof cfg.policy === 'boolean') return cfg.policy;
+  return cfg.teleop !== true;
+}
+
+/** A real robot that can collect data (teleop) but can't run evals. */
+export function tdm107IsTeleopOnly(r: RobotLike): boolean {
+  return !!r && !tdm107CanEval(r);
+}
+
+/** The note the form shows (and the server returns) when a Real ticket on a teleop-only arm becomes a split. */
+export function tdm125SplitNote(realName: string): string {
+  return `${realName} can collect data but can't run evals tonight, so this ticket evaluates on the sim robot and collects on ${realName}.`;
+}

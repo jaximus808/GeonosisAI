@@ -303,6 +303,26 @@ class EvalOrchestrator:
             return f"{len(since)} evals in a row were aborted (last: {reason[:200]})"
         return None
 
+    def cannot_eval(self, ticket_id: int, robot: dict, why: str = "") -> bool:
+        """Guard: never send run_eval / run_baseline to a teleop-only robot (a real arm whose
+        camera_config has ``teleop`` and no ``policy: true``). The stage waits (no eval_run, nothing
+        failed) and ``eval.robot_cannot_eval`` is logged once per ticket + robot. Move the ticket's
+        evals to a sim robot (TDM-125 split) or restart the arm with TDM119_ALLOW_POLICY=1."""
+        from .robot_mode import CANNOT_EVAL_EVENT, robot_can_eval
+
+        if robot_can_eval(robot):
+            return False
+        rid = _i(robot.get("id"))
+        detail = (f"robot {rid} ({robot.get('name')}) is teleop-only (camera_config has no policy: true); "
+                  "evals need a sim robot or a policy-enabled arm")
+        if self._last_wait.get(ticket_id) != detail:
+            self.event(CANNOT_EVAL_EVENT, {"ticket_id": ticket_id, "robot_id": rid, "robot_name": robot.get("name"),
+                                           "why": why, "detail": detail,
+                                           "fix": "POST /tickets/{id}/robot_mode {mode: sim} (keep collect_robot_id on "
+                                                  "the arm), or restart the arm with TDM119_ALLOW_POLICY=1"})
+        self._waiting(ticket_id, "robot_cannot_eval", detail)
+        return True
+
     def _waiting(self, ticket_id: int, outcome: str, detail: str) -> str:
         if self._last_wait.get(ticket_id) != detail:
             self._last_wait[ticket_id] = detail
@@ -338,6 +358,8 @@ class EvalOrchestrator:
                 return "backoff"
             robot_id = _i(ticket.get("robot_id"))
             robot = self.m.get("robot", robot_id)
+            if robot is not None and self.cannot_eval(ticket_id, robot, why):
+                return "robot_cannot_eval"
             problem = self.robot_problem(robot)
             if problem:
                 return self._waiting(ticket_id, "waiting_for_robot", problem)
@@ -431,6 +453,9 @@ class EvalOrchestrator:
 
     def _dispatch(self, ticket: dict, run: dict, tgt: dict, why: str) -> str:
         run_id, robot_id, ticket_id = _i(run["id"]), _i(run.get("robot_id")) or _i(ticket.get("robot_id")), _i(ticket["id"])
+        robot_row = self.m.get("robot", robot_id)
+        if robot_row is not None and self.cannot_eval(ticket_id, robot_row, why):
+            return "robot_cannot_eval"
         if self.cfg.seed_evals:
             seeded = self.seed_eval(ticket, run, self.m.get("robot", robot_id))
             if seeded:

@@ -112,7 +112,8 @@ def run_virtual(policy: ScriptedPolicy, clock: VClock, steps: int, cfg: ExecConf
 def test_latency_skip_and_smooth_stitching():
     clock = VClock()
     pol = ScriptedPolicy(clock, lambda i: (5, "ok"))  # 5 steps = 167 ms, like H100 p50
-    ex, traj = run_virtual(pol, clock, 200)
+    # stitching alone: TDM-122's 0.3 rad/s cap + soft start are tested in test_tdm122_yam_mapping.py
+    ex, traj = run_virtual(pol, clock, 200, ExecConfig(max_speed_rad_s=1e9, soft_start_ticks=1))
     s = ex.stats
     assert s.skips[1:] and set(s.skips[1:]) == {5}  # round(latency / 33 ms)
     assert s.requests >= 15 and s.chunks_used == s.chunks_received
@@ -143,7 +144,7 @@ def test_crossfade_weights_over_three_steps():
         return np.repeat(next(chunks)[None], 50, axis=0)
 
     pol = ScriptedPolicy(clock, lambda i: (2, "ok"), const)
-    ex, traj = run_virtual(pol, clock, 40, ExecConfig(speed_fraction=10.0))
+    ex, traj = run_virtual(pol, clock, 40, ExecConfig(speed_fraction=10.0, max_speed_rad_s=1e9, soft_start_ticks=1))
     # chunk A in use from step 2; chunk B (requested at step 10) lands at step 12
     assert np.allclose(traj[11, :6], 0.1)
     for k, w in enumerate((0.25, 0.5, 0.75, 1.0)):

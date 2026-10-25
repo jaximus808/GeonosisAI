@@ -26,8 +26,11 @@ profiles:
     slow_mode_scale: 0.3       # teleop "slow mode" multiplies the speed scale by this
     joints:
       margin_rad: 0.10         # stay this far inside the joint limits (TO VERIFY ON ARM)
-      lower: null              # null = adapter limits (TDM-46 YamArm.limits); list of 6 to tighten
-      upper: null
+      # TDM-122: the joint limits of LARP's i2rt fork on the northstar arms (docs/real-arm-safety.md, Do 5).
+      # Stock URDF J4 lower is -1.69297, which put the safe range (-1.593) OUTSIDE LARP's -1.5708; J1/J2
+      # uppers are tighter too. The layer intersects these with the adapter's limits, then applies the margin.
+      lower: [-2.61799, 0.0, 0.0, -1.5708, -1.5708, -2.0944]
+      upper: [3.05433, 3.65, 3.66519, 1.5708, 1.5708, 2.0944]
       max_velocity: [0.8, 0.8, 0.8, 1.2, 1.2, 1.2]       # rad/s at scale 1.0 (TO VERIFY ON ARM)
       max_acceleration: [3.0, 3.0, 3.0, 5.0, 5.0, 5.0]   # rad/s^2 at scale 1.0 (TO VERIFY ON ARM)
       max_jump_rad: 0.30       # a setpoint this far (any joint) from the last one is a glitch

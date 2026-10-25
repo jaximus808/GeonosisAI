@@ -94,6 +94,12 @@ class ExecConfig:
     max_retries: int = 3  # consecutive failed calls tolerated (each one retried at once)
     gap_reset_s: float = 0.2  # a gap this long between ticks (pause) invalidates the chunk
     speed_fraction: float = 0.5  # per-step joint change cap, fraction of the arm's max velocity
+    # TDM-122 / docs/real-arm-safety.md rule 6 (LARP: a step change after a gap caused CAN failures and arm
+    # collapse): policy joint targets never move faster than this, whatever the safety scale allows, and
+    # every move out of a hold (first chunk, after a pause, after a stale-chunk hold) starts from the
+    # MEASURED pose with the per-tick cap ramping up linearly over ``soft_start_ticks`` ticks.
+    max_speed_rad_s: float = 0.3
+    soft_start_ticks: int = 15
     base_velocity_scale: float = 0.25  # droid_base: fraction of the predicted joint velocity used
     dof: int = 6
     skip_latency: bool = True  # False only in tests, to show what stitching without the skip does
@@ -184,6 +190,7 @@ class ChunkExecutor:
         self._obs_states: dict[int, np.ndarray] = {}  # req id -> observed state (velocity anchor)
         self._win, self._win_max = 0, 0.0  # switch window: the switch tick + the blend ticks
         self.phase: str | None = None  # TDM-114: phase label of the newest policy reply (None = server sends none)
+        self._moving_ticks = 0  # TDM-122: ticks since the last hold (soft start)
 
     # ---- helpers
     def _hold_reason(self) -> str:
@@ -255,6 +262,13 @@ class ChunkExecutor:
     def tick(self, step: int, now: float, st: ArmState) -> np.ndarray | None:
         cfg = self.cfg
         self.stats.ticks += 1
+        if self.last_now is not None and now - self.last_now > cfg.gap_reset_s:
+            # TDM-122: the arm may have moved during the pause (a human takeover drives it). Re-anchor on the
+            # MEASURED pose, so the hold and the rate-limited ramp into the next chunk start where the arm is,
+            # instead of commanding the pre-pause target (a jump the safety layer would reject, then abort on).
+            self.last_target = None
+            self.last_raw = None
+            self.blend_from = None
         if self.last_now is not None and now - self.last_now > cfg.gap_reset_s and self.chunk is not None:
             self.chunk = None  # paused (takeover / reset / link): the chunk describes the past
             self.stats.gap_resets += 1
@@ -283,6 +297,7 @@ class ChunkExecutor:
                 self.chunk = None  # executed its 25 steps: wait for the next one
                 self.retry_now = True
             self._start_hold(step)
+            self._moving_ticks = 0
             target = self.last_target if self.last_target is not None else np.asarray(st.state_vector(), dtype=float)
             raw = target
         else:
@@ -295,15 +310,21 @@ class ChunkExecutor:
                 self.stats.blends += 1
             self.pos += 1
             target = raw
+            if self.last_target is None:  # never start from a stale/unknown anchor: the measured pose
+                self.last_target = np.asarray(st.state_vector(), dtype=float)
             if self.last_target is not None:
                 d = raw[: cfg.dof] - self.last_target[: cfg.dof]
-                self.stats.max_jump_rad = max(self.stats.max_jump_rad, float(np.max(np.abs(d))))
+                # seam in the PLANNED trajectory (raw vs last raw); equals d unless the rate limit is lagging
+                seam = raw[: cfg.dof] - (self.last_raw if self.last_raw is not None else self.last_target)[: cfg.dof]
+                self.stats.max_jump_rad = max(self.stats.max_jump_rad, float(np.max(np.abs(seam))))
                 if self._win > 0:
-                    self._win_max = max(self._win_max, float(np.max(np.abs(d))))
+                    self._win_max = max(self._win_max, float(np.max(np.abs(seam))))
                     self._win -= 1
                     if self._win == 0:
                         self.stats.switch_jumps.append(self._win_max)
-                cap = self.vmax * cfg.period_s * cfg.speed_fraction
+                ramp = min(1.0, (self._moving_ticks + 1) / max(1, cfg.soft_start_ticks))
+                cap = np.minimum(self.vmax * cfg.speed_fraction, cfg.max_speed_rad_s) * cfg.period_s * ramp
+                self._moving_ticks += 1
                 if np.any(np.abs(d) > cap + 1e-12):
                     self.stats.rate_limited_ticks += 1
                     target = raw.copy()

@@ -48,13 +48,24 @@ export interface Tdm115Input {
   /** llm.call rows, oldest first (they carry no ticket id). */
   llmCalls?: readonly Tdm112Event[];
   nowUs: number;
+  /** AgentWorkbench liveness per TDM-112 station index (lib/agentwork/workbench.ts awLiveness + headline), so a
+   * figure only animates while its station really shows activity. Without it, the station state decides. */
+  liveness?: readonly (Tdm115Liveness | undefined)[];
+}
+
+/** The slice of the AgentWorkbench model this module reads (structural; awWorkbench satisfies it). */
+export interface Tdm115Liveness {
+  mode: 'working' | 'thinking' | 'waiting' | 'stalled' | 'done' | 'failed' | 'idle';
+  /** The newest narrated line (agent.step / agent.thought) of the station, if any. */
+  narration?: string;
+  ageS?: number;
 }
 
 // ------------------------------------------------------------------------------ outputs
 
 export type Tdm115MachineKey = 'eval' | 'diagnose' | 'plan' | 'collect' | 'review' | 'train' | 'ship';
 /** working melt, waiting for the robot ochre (dashed), waiting for a person ochre, idle steel, done ink, failed slag, asleep steel. */
-export type Tdm115State = 'working' | 'waiting_robot' | 'waiting_person' | 'idle' | 'done' | 'failed' | 'asleep';
+export type Tdm115State = 'working' | 'waiting_robot' | 'waiting_person' | 'idle' | 'done' | 'failed' | 'asleep' | 'stalled';
 
 export const TDM115_STATE_WORDS: Record<Tdm115State, string> = {
   working: 'Working',
@@ -64,6 +75,7 @@ export const TDM115_STATE_WORDS: Record<Tdm115State, string> = {
   done: 'Done',
   failed: 'Failed',
   asleep: 'Asleep',
+  stalled: 'No recent activity',
 };
 
 export interface Tdm115Agent {
@@ -87,6 +99,8 @@ export interface Tdm115Agent {
   wakes: string;
   /** TDM-112 station indexes this agent serves (for onStationClick). */
   stationIndex: number;
+  /** A Claude call is in flight right now (the figure shows thinking dots). */
+  thinking?: boolean;
 }
 
 export interface Tdm115Lights { trials: number; marks: ('pass' | 'fail' | 'todo' | 'now')[]; passed: number; done: boolean; seeded: boolean }
@@ -447,6 +461,23 @@ export function tdm115Cell(input: Tdm115Input): Tdm115Cell {
       does: 'Checks the whole dataset for gaps before training.', wakes: 'Starts when collection reaches its target.' },
   ];
 
+  // AgentWorkbench liveness: a working figure whose station has gone quiet is stalled, not busy; one whose
+  // Claude call is in flight is thinking; a narrated line beats the generic sentence.
+  const lv = input.liveness;
+  if (lv) {
+    for (const a of agents) {
+      const l = lv[a.stationIndex];
+      if (!l || a.state !== 'working') continue;
+      if (l.mode === 'stalled') {
+        a.state = 'stalled';
+        a.say = clip(`No activity for ${Math.round((l.ageS ?? 0) / 60)} min. It may be stuck.`);
+      } else if (l.mode === 'thinking') {
+        a.thinking = true;
+        a.say = clip(l.narration && !/^Asking Claude/.test(l.narration) ? l.narration : 'Thinking it through with Claude…', 90);
+      } else if (l.narration) a.say = clip(l.narration, 90);
+    }
+  }
+
   // Factory Droids: always three figures; a droid with no session for this ticket waits in the bay.
   const byRole = new Map<string, Tdm112DroidView>();
   for (const d of floor.droids) if (!byRole.has(d.role) || d.state !== 'docked') byRole.set(d.role, d);
@@ -492,6 +523,10 @@ export function tdm115Cell(input: Tdm115Input): Tdm115Cell {
     train: { key: 'train', label: label.train, state: stateOf(5), stationIndex: 5, readout: [train.tag, train.step].filter(Boolean) as string[] },
     ship: { key: 'ship', label: label.ship, state: shipState, stationIndex: 7, readout: floor.stations[7]?.facts.slice(0, 1) ?? [] },
   };
+  // A machine whose station went quiet stops glowing with its agent. Train and ship have no figure of their
+  // own here, so they read the liveness directly.
+  for (const a of agents) if (a.state === 'stalled' && a.kind !== 'droid' && machines[a.machine].state === 'working') machines[a.machine].state = 'stalled';
+  for (const [k, i] of [['train', 5], ['ship', 7]] as const) if (lv?.[i]?.mode === 'stalled' && machines[k].state === 'working') machines[k].state = 'stalled';
 
   const parts: Tdm115Part[] = [
     { key: 'eval_runs', label: 'eval runs', count: evalRuns.length, between: ['eval', 'diagnose'] },

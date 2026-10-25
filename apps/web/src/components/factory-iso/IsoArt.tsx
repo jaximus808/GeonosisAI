@@ -288,6 +288,7 @@ function Droid({ a, selected, onSelect }: { a: Tdm115Agent; selected: boolean; o
       data-st={a.state}
       data-kind={a.kind}
       data-woke={a.woke ? '' : undefined}
+      data-thinking={a.thinking ? '' : undefined}
       data-selected={selected ? '' : undefined}
       style={{ transform: moveTo(spot) }}
       onClick={() => onSelect(a.key)}

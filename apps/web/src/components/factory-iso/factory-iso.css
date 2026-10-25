@@ -34,6 +34,8 @@
 .fiso [data-st='idle'], .fiso [data-st='asleep'] { --fiso-st: var(--steel); }
 .fiso [data-st='done'] { --fiso-st: var(--ink-muted); }
 .fiso [data-st='failed'] { --fiso-st: var(--slag); }
+/* AgentWorkbench liveness: working, but nothing has happened for a while. Still, red-dashed, never animated. */
+.fiso [data-st='stalled'] { --fiso-st: var(--slag); }
 
 /* ---------------------------------------------------------------- header */
 .fiso-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-width: 0; }
@@ -263,3 +265,20 @@
 .fiso-seg button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .fiso-seg[data-overlap] { margin-bottom: calc(-1 * var(--space-12)); }
 @media (max-width: 640px) { .fiso-seg[data-overlap] { margin-bottom: 0; } }
+
+/* ---------------------------------------------------------------- liveness (AgentWorkbench rule)
+ * Stalled figures and plates are still and dashed; a figure whose Claude call is in flight shows three
+ * thinking dots in its bubble and a breathing visor. CSS only; paused with the rest of the cell. */
+.fiso-droid[data-st='stalled'] .fiso-droid-ring { stroke-dasharray: 2 2; }
+.fiso-droid[data-st='stalled'] .fiso-visor { fill: var(--slag); opacity: 0.6; }
+.fiso-plate[data-st='stalled'] { border-color: var(--slag); border-style: dashed; }
+.fiso-bubble[data-st='stalled'] { border-style: dashed; }
+.fiso-think { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: 1px; }
+.fiso-think i { width: 4px; height: 4px; border-radius: 50%; background: var(--melt); opacity: 0.35; }
+@media (prefers-reduced-motion: no-preference) {
+  .fiso-think i { animation: fiso-think 1.2s ease-in-out infinite; }
+  .fiso-think i:nth-child(2) { animation-delay: 0.2s; }
+  .fiso-think i:nth-child(3) { animation-delay: 0.4s; }
+  .fiso-droid[data-thinking] .fiso-visor { animation: fiso-glow 1.4s ease-in-out infinite; }
+}
+@keyframes fiso-think { 0%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }

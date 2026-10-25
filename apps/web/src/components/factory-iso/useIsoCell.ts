@@ -9,6 +9,7 @@ import { useRows } from '@/lib/spacetime/hooks';
 import { tdm112SplitEvents, useTdm112Floor, useTdm112Now } from '@/lib/tdm112/useFloor';
 import { tdm115Cell, tdm115Holder, tdm115RobotQueue, type Tdm115Cell, type Tdm115QueueItem } from '@/lib/tdm115/iso';
 import type { Tdm112Event, Tdm112Floor } from '@/lib/tdm112/floor';
+import { awFloorLiveness } from '@/lib/agentwork/workbench';
 
 export interface IsoCellData {
   cell: Tdm115Cell | null;
@@ -42,6 +43,8 @@ export function useIsoCell(ticketId: bigint): IsoCellData {
   const myTrials = useMemo(() => evalTrials.filter((t) => runIds.has(t.evalRunId)), [evalTrials, runIds]);
   const now = useTdm112Now(2000);
   const robot = robots[0] ?? null;
+  // AgentWorkbench liveness (same rule as the cockpit's droid): working only while the station shows activity.
+  const liveness = useMemo(() => (floor ? awFloorLiveness(floor.stations, events, now * 1000) : undefined), [floor, events, now]);
 
   const cell = useMemo(() => {
     if (!floor || !ticket) return null;
@@ -62,8 +65,9 @@ export function useIsoCell(ticketId: bigint): IsoCellData {
       events,
       llmCalls,
       nowUs: now * 1000,
+      liveness,
     });
-  }, [floor, ticket, robot, commands, robotTickets, evalRuns, myTrials, clusters, plans, tasks, episodes, reviews, trainingRuns, events, llmCalls, now]);
+  }, [floor, ticket, robot, commands, robotTickets, evalRuns, myTrials, clusters, plans, tasks, episodes, reviews, trainingRuns, events, llmCalls, now, liveness]);
 
   const queue = useMemo(() => tdm115RobotQueue(robotTickets, tdm115Holder(robot, commands)), [robotTickets, robot, commands]);
 

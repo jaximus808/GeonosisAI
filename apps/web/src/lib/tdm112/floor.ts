@@ -307,6 +307,11 @@ export function tdm112StationOfEvent(
     return st === 'eval' ? 'eval' : 'baseline';
   };
   if (t === 'flywheel.transition') return null; // handoffs, shown as the part on the conveyor
+  // AgentWorkbench narration (agent.step / agent.thought) names its station; droid reducer echoes do not.
+  if ((t === 'agent.step' || t === 'agent.thought') && typeof p.station === 'string' && p.station) {
+    const st = p.station === 'dispatch' ? 'collect' : p.station === 'shipped' ? 'ship' : p.station;
+    return TDM112_STATIONS.some((d) => d.key === st) ? (st as Tdm112StationKey) : null;
+  }
   if (starts(t, EVALISH)) return evalSide();
   if (t.startsWith('diagnose.') || t === 'planner.failure_cluster') return 'diagnose';
   if (t.startsWith('planner.') || t === 'plan.decision' || t === 'spend.approved' || t.startsWith('plan_offer.') || t.startsWith('flywheel.auto_approve')) return 'plan_data';
@@ -346,6 +351,9 @@ export function tdm112Words(e: Pick<Tdm112Event, 'type' | 'payload'>): string {
   const reason = s(p.reason);
   const note = s(p.note) || s(p.failure_note);
   switch (e.type) {
+    case 'agent.step':
+    case 'agent.thought':
+      return s(p.text) || (e.type === 'agent.thought' ? 'Thinking' : 'Working');
     case 'eval.policy_activated':
       return `Loaded the ${s(p.kind) === 'baseline' ? 'base' : 'fine-tuned'} policy`;
     case 'eval.started':

@@ -116,8 +116,8 @@ function useTabVisible() {
 const SIDE: Record<string, 'l' | 'r'> = {
   eval_runner: 'r', clusterer: 'l', planner: 'l', dispatcher: 'l', data_droid: 'r', reviewer: 'l', dataset_qa: 'r', training_droid: 'r', onboarding_droid: 'l',
 };
-const TALKS = new Set(['working', 'waiting_robot', 'waiting_person', 'failed', 'asleep']);
-const LOUD = new Set(['working', 'waiting_robot', 'waiting_person', 'failed']);
+const TALKS = new Set(['working', 'waiting_robot', 'waiting_person', 'failed', 'asleep', 'stalled']);
+const LOUD = new Set(['working', 'waiting_robot', 'waiting_person', 'failed', 'stalled']);
 const LINE: Tdm115MachineKey[] = ['eval', 'diagnose', 'plan', 'collect', 'review', 'train', 'ship'];
 /** The words of the line (brand book), shorter than the machine names. */
 const LINE_WORD: Record<Tdm115MachineKey, string> = { eval: 'Eval', diagnose: 'Diagnose', plan: 'Plan data', collect: 'Collect', review: 'Review', train: 'Train', ship: 'Ship' };
@@ -309,13 +309,22 @@ function headPos(a: Tdm115Agent) {
 
 function Bubble({ a, side, onClick, children }: { a: Tdm115Agent; side: 'l' | 'r'; onClick: () => void; children?: ReactNode }) {
   return (
-    <div className="fiso-bubble" data-st={a.state} data-side={side} data-woke={a.woke ? '' : undefined} style={headPos(a)}>
+    <div className="fiso-bubble" data-st={a.state} data-side={side} data-woke={a.woke ? '' : undefined} data-thinking={a.thinking ? '' : undefined} style={headPos(a)}>
       <button type="button" className="fiso-bubble-hit" onClick={onClick} aria-label={`${a.name}: ${a.say}`}>
         <span className="fiso-bubble-name">
           {a.name}
           {a.kind === 'claude' && <span className="fiso-badge">{a.model}</span>}
         </span>
-        <span className="fiso-bubble-say">{a.say}</span>
+        <span className="fiso-bubble-say">
+          {a.thinking && (
+            <span className="fiso-think" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
+          {a.say}
+        </span>
       </button>
       {children}
     </div>

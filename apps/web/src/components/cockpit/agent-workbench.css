@@ -1,0 +1,190 @@
+/* AgentWorkbench: the station's droid, its heartbeat and its transcript. Brand tokens only. One fixed
+ * height at every width (the transcript scrolls inside), so a new line never moves the page.
+ * Motion: CSS only; [data-paused] (offscreen, hidden tab, reduced motion) freezes every animation. */
+
+@layer components {
+.aw {
+  --aw-h: 168px;
+  --aw-st: var(--steel);
+  /* The Anatomy kit's tokens, remapped like the FactoryIso cell (factory-iso.css .fiso). */
+  --anatomy-paper: #1f1b18; --anatomy-face: #26221e; --anatomy-top: #312b26;
+  --anatomy-shade-0: #100e0c; --anatomy-shade-1: #151210; --anatomy-shade-2: #1a1714; --anatomy-shade-3: #201c19;
+  --anatomy-lit-top: #3b1d0a; --anatomy-lit-shade: #2a1609;
+  --anatomy-hi: #e2d7cc; --anatomy-mid: #a08f81; --anatomy-lo: #62564c; --anatomy-faint: #3a322c; --anatomy-lit: var(--melt);
+  --anatomy-halo: #000; --anatomy-halo-opacity: 0.55; --anatomy-dot: var(--ink);
+  --anatomy-weight: 1px;
+  flex: none;
+  height: var(--aw-h);
+  display: grid;
+  grid-template-columns: 150px minmax(180px, 240px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+  margin: var(--space-3) var(--tdm116-gutter, var(--space-4)) 0;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  contain: layout paint;
+  overflow: hidden;
+}
+:root[data-theme='light'] .aw {
+  --anatomy-paper: #fbf8f5; --anatomy-face: #ffffff; --anatomy-top: #ffffff;
+  --anatomy-shade-0: #d9cfc6; --anatomy-shade-1: #e3dad2; --anatomy-shade-2: #ece5de; --anatomy-shade-3: #f4efea;
+  --anatomy-lit-top: #fde1cc; --anatomy-lit-shade: #f6cfb3;
+  --anatomy-hi: #2a211c; --anatomy-mid: #8f7f72; --anatomy-lo: #b8aa9e; --anatomy-faint: #d8ccc1;
+  --anatomy-halo: #8f7f72; --anatomy-halo-opacity: 0.28;
+}
+.aw[data-mode='working'], .aw[data-mode='thinking'] { --aw-st: var(--melt); border-color: color-mix(in srgb, var(--melt) 45%, var(--line)); }
+.aw[data-mode='waiting'] { --aw-st: var(--ochre); border-color: color-mix(in srgb, var(--ochre) 45%, var(--line)); }
+.aw[data-mode='stalled'] { --aw-st: var(--slag); border-color: var(--slag); border-style: dashed; }
+.aw[data-mode='failed'] { --aw-st: var(--slag); }
+.aw[data-mode='done'] { --aw-st: var(--arc); }
+
+/* ---------------------------------------------------------------- the figure */
+.aw-figure { min-width: 0; min-height: 0; display: grid; place-items: center; background: var(--surface-sunken); border-radius: var(--radius-sm); overflow: hidden; }
+.aw-droid { width: 100%; height: 100%; max-height: calc(var(--aw-h) - 16px); overflow: visible; }
+.aw-droid path, .aw-droid circle { vector-effect: non-scaling-stroke; }
+.aw-ring { fill: none; stroke: var(--aw-st); stroke-width: 1.3px; }
+.aw[data-mode='stalled'] .aw-ring { stroke-dasharray: 3 2; }
+.aw[data-mode='idle'] .aw-ring, .aw[data-mode='done'] .aw-ring { stroke: var(--anatomy-lo); }
+.aw-visor { fill: var(--aw-st); }
+.aw[data-mode='idle'] .aw-visor { fill: var(--anatomy-lo); }
+.aw-chip { fill: var(--ochre); }
+.aw-tip { fill: var(--anatomy-mid); }
+.aw-hand { fill: var(--anatomy-mid); }
+.aw-screen { fill: var(--anatomy-shade-0); stroke: var(--anatomy-lo); stroke-width: 0.6px; }
+.aw[data-mode='working'] .aw-screen, .aw[data-mode='thinking'] .aw-screen { fill: color-mix(in srgb, var(--melt) 16%, var(--anatomy-shade-0)); }
+.aw-screen-lines path { fill: none; stroke: var(--anatomy-faint); stroke-width: 1.4px; stroke-linecap: round; }
+.aw[data-mode='working'] .aw-screen-lines path, .aw[data-mode='thinking'] .aw-screen-lines path { stroke: var(--melt); opacity: 0.5; }
+.aw-lamp .iso-top { fill: var(--aw-st); }
+.aw-sparks path { fill: none; stroke: var(--melt); stroke-width: 1.4px; stroke-linecap: round; opacity: 0; }
+.aw-droid > g, .aw-body, .aw-head, .aw-arm { transform-box: fill-box; }
+.aw-head { transform-origin: 50% 100%; }
+.aw-arm { transform-origin: 50% 8%; }
+.aw-body { transform-origin: 50% 100%; }
+
+/* Marks over the head: one per mode. */
+.aw-mark > * { opacity: 0; }
+.aw-think circle { fill: var(--surface); stroke: var(--melt); stroke-width: 1px; }
+.aw-clock circle { fill: var(--surface); stroke: var(--ochre); stroke-width: 1px; }
+.aw-clock path { stroke: var(--ochre); stroke-width: 1.2px; stroke-linecap: round; }
+.aw-clock-hand { transform-box: view-box; transform-origin: 0 0; }
+.aw-check { fill: none; stroke: var(--arc); stroke-width: 1.8px; stroke-linecap: round; stroke-linejoin: round; }
+.aw-glyph { font-family: var(--font-display); font-weight: 800; font-size: 13px; }
+.aw-bang { fill: var(--slag); }
+.aw-what { fill: var(--slag); }
+.aw[data-mode='thinking'] .aw-think, .aw[data-mode='waiting'] .aw-clock, .aw[data-mode='done'] .aw-check,
+.aw[data-mode='failed'] .aw-bang, .aw[data-mode='stalled'] .aw-what { opacity: 1; }
+
+/* Static poses (no motion needed): failed hangs its head, stalled slumps, idle and done stand dim. */
+.aw[data-mode='failed'] .aw-head { transform: rotate(14deg) translateY(1px); }
+.aw[data-mode='failed'] .aw-visor { fill: var(--slag); }
+.aw[data-mode='stalled'] .aw-head { transform: rotate(8deg); }
+.aw[data-mode='stalled'] .aw-arm { transform: rotate(10deg); }
+.aw[data-mode='stalled'] .aw-visor { opacity: 0.55; }
+.aw[data-mode='idle'] .aw-droid { opacity: 0.7; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .aw[data-mode='working'] .aw-arm { animation: aw-hammer 0.9s cubic-bezier(0.5, 0, 0.5, 1) infinite; }
+  .aw[data-mode='working'] .aw-body { animation: aw-bob 1.8s ease-in-out infinite; }
+  .aw[data-mode='working'] .aw-sparks path { animation: aw-spark 0.9s ease-out infinite; }
+  .aw[data-mode='working'] .aw-tip { fill: var(--melt); animation: aw-blink 1.8s steps(1, end) infinite; }
+  .aw[data-mode='working'] .aw-screen-lines path, .aw[data-mode='thinking'] .aw-screen-lines path { animation: aw-type 1.4s steps(2, end) infinite; }
+  .aw[data-mode='thinking'] .aw-head { animation: aw-ponder 3.2s ease-in-out infinite; }
+  .aw[data-mode='thinking'] .aw-visor { animation: aw-breathe 1.6s ease-in-out infinite; }
+  .aw[data-mode='thinking'] .aw-tip { fill: var(--arc); animation: aw-breathe 1.6s ease-in-out infinite; }
+  .aw[data-mode='thinking'] .aw-think circle { animation: aw-bubble 1.5s ease-in-out infinite; }
+  .aw[data-mode='thinking'] .aw-think circle:nth-child(2) { animation-delay: 0.25s; }
+  .aw[data-mode='thinking'] .aw-think circle:nth-child(3) { animation-delay: 0.5s; }
+  .aw[data-mode='waiting'] .aw-body { animation: aw-wait 4s ease-in-out infinite; }
+  .aw[data-mode='waiting'] .aw-clock-hand { animation: aw-turn 6s linear infinite; }
+}
+.aw[data-paused] *, .aw[data-paused] *::before, .aw[data-paused] *::after { animation-play-state: paused !important; }
+/* A line that arrived while paused just appears (a frozen fade would leave it invisible). */
+.aw[data-paused] .aw-line { animation: none; }
+
+@keyframes aw-hammer { 0%, 100% { transform: rotate(-4deg); } 45% { transform: rotate(-26deg); } 60% { transform: rotate(4deg); } }
+@keyframes aw-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+@keyframes aw-spark { 0%, 55% { opacity: 0; transform: scale(0.4); } 62% { opacity: 1; transform: scale(1); } 90%, 100% { opacity: 0; transform: scale(1.5); } }
+@keyframes aw-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@keyframes aw-type { 0% { stroke-dasharray: 2 14; } 50% { stroke-dasharray: 9 14; } 100% { stroke-dasharray: 14 0; } }
+@keyframes aw-ponder { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(-6deg); } 65% { transform: rotate(3deg); } }
+@keyframes aw-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes aw-bubble { 0%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-1.5px); } }
+@keyframes aw-wait { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.012); } }
+@keyframes aw-turn { to { transform: rotate(360deg); } }
+
+/* ---------------------------------------------------------------- status column */
+.aw-status { min-width: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 4px; padding: 2px 0; }
+.aw-who { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.aw-who strong { font-family: var(--font-display); font-weight: 700; font-size: 16px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-kind { font-family: var(--font-mono); font-size: 10px; line-height: 14px; color: var(--ochre); padding: 0 4px; border: 1px solid var(--ochre-soft); border-radius: var(--radius-sm); }
+.aw-mode { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 16px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--aw-st); }
+.aw[data-mode='idle'] .aw-mode, .aw[data-mode='done'] .aw-mode { color: var(--ink-muted); }
+.aw-mode-dot { width: 8px; height: 8px; background: var(--aw-st); }
+.aw-headline {
+  margin: 0; min-width: 0; font-size: 13px; line-height: 18px; color: var(--ink);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.aw[data-mode='waiting'] .aw-headline { color: var(--ochre); }
+.aw[data-mode='stalled'] .aw-headline, .aw[data-mode='failed'] .aw-headline { color: var(--slag); }
+.aw[data-mode='idle'] .aw-headline { color: var(--ink-muted); }
+.aw-beat { display: flex; align-items: center; gap: 6px; height: 16px; font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; color: var(--ink-muted); white-space: nowrap; }
+.aw-beat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--arc); flex: none; }
+.aw-beat[data-tone='fresh'] { color: var(--arc); }
+.aw-beat[data-tone='slow'] { color: var(--ochre); }
+.aw-beat[data-tone='slow'] .aw-beat-dot { background: var(--ochre); }
+.aw-beat[data-tone='stale'] { color: var(--slag); }
+.aw-beat[data-tone='stale'] .aw-beat-dot { background: var(--slag); }
+.aw-beat-quiet { color: var(--ink-muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .aw-beat[data-tone='fresh'] .aw-beat-dot[data-busy] { animation: aw-beat 1.6s ease-out infinite; }
+}
+@keyframes aw-beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--arc) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+
+/* ---------------------------------------------------------------- transcript */
+.aw-log-wrap { position: relative; min-width: 0; min-height: 0; display: flex; }
+.aw-log {
+  list-style: none; margin: 0; padding: var(--space-2) var(--space-3); flex: 1 1 auto; min-width: 0; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable;
+  background: var(--ground); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12px; line-height: 18px; color: var(--ink-muted);
+}
+.aw-line { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 6px; padding: 1px 0; }
+.aw-g { display: inline-block; width: 16px; text-align: center; color: var(--ink-muted); }
+.aw-t { min-width: 0; overflow-wrap: anywhere; }
+.aw-line[data-glyph='step'] .aw-t { color: var(--ink); }
+.aw-line[data-glyph='step'] .aw-g { color: var(--ink); }
+.aw-line[data-glyph='thought'] .aw-g, .aw-line[data-glyph='thought'] .aw-t { color: var(--ochre); }
+.aw-line[data-glyph='thought'] .aw-t { font-style: italic; }
+.aw-line[data-glyph='decision'] .aw-g, .aw-line[data-glyph='decision'] .aw-t { color: var(--arc); }
+.aw-line[data-glyph='error'] .aw-g, .aw-line[data-glyph='error'] .aw-t { color: var(--slag); }
+.aw-line[data-glyph='wait'] .aw-g, .aw-line[data-glyph='wait'] .aw-t { color: var(--ochre); }
+.aw-line[data-live] .aw-g { color: var(--melt); }
+.aw-line[data-live] .aw-t { color: var(--ink); }
+.aw-ellipsis::after { content: '…'; display: inline-block; width: 1.2em; text-align: left; }
+@media (prefers-reduced-motion: no-preference) {
+  .aw-g.is-spin { animation: aw-spin 1.4s linear infinite; }
+  .aw-line { animation: aw-in 220ms ease-out both; }
+  .aw-ellipsis::after { animation: aw-dots 1.2s steps(4, end) infinite; overflow: hidden; vertical-align: bottom; }
+}
+@keyframes aw-spin { to { transform: rotate(360deg); } }
+@keyframes aw-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes aw-dots { 0% { width: 0; } 100% { width: 1.2em; } }
+.aw-jump {
+  position: absolute; right: var(--space-3); bottom: var(--space-2); font: inherit; font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); cursor: pointer;
+}
+.aw-jump:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Narrow: figure and status side by side, the transcript under them; still one fixed height. */
+@media (max-width: 899.98px) {
+  .aw { --aw-h: 236px; grid-template-columns: 96px minmax(0, 1fr); grid-template-rows: 92px minmax(0, 1fr); gap: var(--space-2) var(--space-3); margin: var(--space-2) var(--space-4) 0; }
+  .aw-log-wrap { grid-column: 1 / -1; }
+  .aw-headline { -webkit-line-clamp: 2; }
+}
+@media (min-width: 900px) and (max-height: 760px) {
+  .aw { --aw-h: 132px; grid-template-columns: 116px minmax(170px, 220px) minmax(0, 1fr); }
+  .aw-headline { -webkit-line-clamp: 2; }
+}
+}

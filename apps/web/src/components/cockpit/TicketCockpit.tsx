@@ -4,7 +4,8 @@
 //   top bar  ticket, task, sim/real, robot · before -> after, spend, target · the one primary action · the line
 //   rail     Overview (the stage) · Robot · Data · Money · Agents · Events · Settings · Report
 //   stage    follows the ticket's current station on its own (hands-off); clicking a station on the line
-//            pins its view ("Pinned: Diagnose · Back to live")
+//            pins its view ("Pinned: Diagnose · Back to live"). Above it, the AgentWorkbench: the station's
+//            agent as a droid at work, its heartbeat and a live transcript (fixed height, no layout shift)
 // Below 900 px: the top line, the stage, and a bottom tab bar. `?tab=` and `?stage=` keep the view in the URL.
 //
 //   <TicketCockpit id="12" />             the ticket page
@@ -32,6 +33,7 @@ import {
   type Tdm116StageKey,
   type Tdm116TabKey,
 } from '@/lib/tdm116/cockpit';
+import { AgentWorkbench } from './AgentWorkbench';
 import { Tdm116Panel } from './Panels';
 import { Tdm116Stage } from './Stages';
 import { Tdm116TopBar } from './TopBar';
@@ -139,6 +141,7 @@ export function TicketCockpit({ id, embedded = false }: { id: string; embedded?:
         {tab === 'overview' ? (
           <>
             <StageHead d={d} shown={shown} live={live} pinned={!!pinned} onBack={backToLive} view={view} onView={setView} />
+            <AgentWorkbench station={d.floor?.stations.find((s) => s.key === shown)} events={d.floorEvents} ended={d.floor?.ended} />
             {view === 'factory' ? (
               <div key="factory" className="tdm116-stage tdm116-shutter is-factory" data-testid="cockpit-stage" data-stage={shown} data-view="factory">
                 <FactoryIso ticketId={Number(d.tid)} onStationClick={pinFromFactory} />

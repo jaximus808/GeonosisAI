@@ -38,7 +38,14 @@ export const TDM107_MODE_HINT: Record<Tdm107Mode, string> = {
   real: 'The Jetson YAM. Only real-robot results count toward real success numbers.',
 };
 
-/** The default for a new ticket: the real arm when one is online, else the sim robot. */
-export function tdm107DefaultMode(onlineNonTest: RobotLike[]): Tdm107Mode {
-  return onlineNonTest.some((r) => r && !tdm107IsSimRobot(r)) ? 'real' : 'sim';
+/** The default for a new ticket: the sim robot. Evals on the real arm need a deployed policy, so a real arm
+ * that is online is offered as the data-collection robot (TDM-125) instead of becoming the default eval robot. */
+export function tdm107DefaultMode(_onlineNonTest: RobotLike[]): Tdm107Mode {
+  return 'sim';
+}
+
+/** TDM-125 default: collect on the one online real arm, if there is exactly one. '' = same robot as the evals. */
+export function tdm125DefaultCollectRobot<R extends RobotLike & { id: unknown }>(onlineNonTest: R[]): string {
+  const real = onlineNonTest.filter((r): r is R => !!r && !tdm107IsSimRobot(r));
+  return real.length === 1 ? String(real[0].id) : '';
 }

@@ -24,7 +24,7 @@ describe('tdm107 robot mode', () => {
   });
   it('defaults new tickets to the real arm only when one is online', () => {
     assert.equal(tdm107DefaultMode([sim]), 'sim');
-    assert.equal(tdm107DefaultMode([sim, real]), 'real');
+    assert.equal(tdm107DefaultMode([sim, real]), 'sim'); // real arms collect data; evals stay on the sim
     assert.equal(tdm107DefaultMode([]), 'sim');
   });
 });

@@ -33,6 +33,7 @@ import {
   TDM107_MODE_HINT,
   TDM107_MODE_LABEL,
   tdm107DefaultMode,
+  tdm125DefaultCollectRobot,
   tdm107IsSimRobot,
   type Tdm107Mode,
 } from '@/lib/tdm107/robotMode';
@@ -118,6 +119,12 @@ export function NewTicketForm() {
 
   // ------------------------------------------------------------ request + validation
   const [collectRobotId, setCollectRobotId] = useState(''); // TDM-125: '' = collect on the same robot
+  const [collectTouched, setCollectTouched] = useState(false);
+  // TDM-125: a sim ticket collects on the online real arm by default (evals stay on the sim).
+  useEffect(() => {
+    if (collectTouched || !robotsReady) return;
+    setCollectRobotId(robotMode === 'sim' ? tdm125DefaultCollectRobot(robots.nonTestOnline) : '');
+  }, [collectTouched, robotsReady, robotMode, robots.nonTestOnline]);
   const realRobots = useMemo(() => robotRows.filter((r) => !tdm107IsSimRobot(r) && (showTest || !r.name.startsWith('test.'))), [robotRows, showTest]);
   const inputs: Tdm74Inputs = { prompt, robotId, robotMode, budgetUsd, targetPct, advanced, collectRobotId };
   const stale = !!preview && prompt.trim() !== previewPrompt;
@@ -415,7 +422,7 @@ export function NewTicketForm() {
                 id="tdm125-collect"
                 className="mt-1 w-full rounded-sm border border-zinc-300 bg-white px-2 py-1 text-sm"
                 value={collectRobotId}
-                onChange={(e) => setCollectRobotId(e.target.value)}
+                onChange={(e) => { setCollectTouched(true); setCollectRobotId(e.target.value); }}
               >
                 <option value="">No: collect on the sim robot too</option>
                 {realRobots.map((r) => (

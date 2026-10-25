@@ -89,6 +89,7 @@ TAKEN = "Taken, we'll text you the next one."
 NO_OFFER = "No open job right now. We'll text you the next one."
 NUDGE = "Reply YES to claim the job, or STOP to stop job texts."
 OFFER_FMT = "{price} robot job, about {mins} min: {kind} on {robot}. Reply YES to claim."
+REPEAT_CLAIMED_TEXT_S = 30.0  # a YES delivered twice within this window gets one "It's yours" text, not two
 CLAIMED_FMT = "It's yours: {kind}, task #{task}. Open {link} in the next 3 minutes to start."
 LOGIN_FMT = "Your GeonosisAI sign-in code is {code}. It expires in 10 minutes. Didn't ask for it? Ignore this text."
 LOGIN_SENT = "If that number gets GeonosisAI job texts, a 6-digit code is on its way."
@@ -721,6 +722,7 @@ class TextOffers:
         self._release = release
         self._lock = threading.Lock()
         self._claim_lock = threading.Lock()
+        self._claimed_texted: dict[str, float] = {}  # phone -> when the last "It's yours" text went out
         self._offered: set[int] = set()
         self._holds: dict[int, tuple[int, float]] = {}  # task_id -> (contributor_id, hold until)
         self._hold_thread: threading.Thread | None = None
@@ -994,6 +996,11 @@ class TextOffers:
             live = [o for o in recent if o.state == "sent"]
             if not live and recent and recent[0].state == "claimed":  # a second YES: send the link again
                 o = recent[0]
+                # ...but not for the same YES delivered twice (two webhook events a second apart): once per 30 s
+                last = self._claimed_texted.get(row.phone, 0.0)
+                if now - last < REPEAT_CLAIMED_TEXT_S:
+                    return {"action": "claimed", "task_id": o.claimed_task, "repeat": True, "texted": False}
+                self._claimed_texted[row.phone] = now
                 self._text(row.phone, CLAIMED_FMT.format(kind=KIND.get(o.task_type, o.task_type), task=o.claimed_task,
                                                          link=self.task_link(o.claimed_task)), "claimed")
                 return {"action": "claimed", "task_id": o.claimed_task, "repeat": True}
@@ -1024,6 +1031,7 @@ class TextOffers:
                                 "task_type": offer.task_type, "src": SRC, "offer_age_s": round(now - offer.sent_at, 1)})
         self.attribute_claim(won, row.contributor_id)
         link = self.task_link(won)
+        self._claimed_texted[row.phone] = now
         self._text(row.phone, CLAIMED_FMT.format(kind=KIND.get(offer.task_type, offer.task_type), task=won, link=link),
                    "claimed")
         return {"action": "claimed", "task_id": won}

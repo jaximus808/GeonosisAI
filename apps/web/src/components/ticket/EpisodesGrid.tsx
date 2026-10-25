@@ -65,7 +65,7 @@ function Verdict({ e, review }: { e: Episode; review?: Review }) {
   return <p className="mt-3"><StatusPill status={e.reviewStatus} /></p>;
 }
 
-function EpisodeCard({ e, review, payment, who, sim }: { e: Episode; review?: Review; payment?: Payment; who?: Contributor; sim?: boolean }) {
+export function EpisodeCard({ e, review, payment, who, sim }: { e: Episode; review?: Review; payment?: Payment; who?: Contributor; sim?: boolean }) {
   const fake = isFakeEpisode(e);
   const cams = cameraUris(e);
   return (

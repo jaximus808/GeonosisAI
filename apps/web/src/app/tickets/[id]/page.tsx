@@ -1,16 +1,8 @@
 import { TicketView } from '@/components/ticket/TicketView';
-import { TicketAgentsPanel } from '@/components/agents/TicketAgentsPanel';
-import { Tdm104ScenePanel } from '@/components/scene/Tdm104ScenePanel';
 
+// TDM-116: the ticket cockpit. The practice scene (TDM-104) is in its Settings tab and the agents panel
+// (TDM-76) in its Agents tab.
 export default async function TicketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return (
-    <>
-      <TicketView id={id} />
-      {/* TDM-104: the generated practice scene (3D preview, Deploy scene to the sim robot). */}
-      <Tdm104ScenePanel ticketId={id} />
-      {/* TDM-76: this ticket's droids and orchestrator agents, live. */}
-      <TicketAgentsPanel ticketId={id} />
-    </>
-  );
+  return <TicketView id={id} />;
 }

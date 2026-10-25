@@ -16,10 +16,10 @@ import {
   type TicketEvent,
 } from './util';
 
-type ClusterNote = { description?: string; phase?: string; recoverable?: boolean; recoverabilityReason?: string };
+export type ClusterNote = { description?: string; phase?: string; recoverable?: boolean; recoverabilityReason?: string };
 
 /** diagnose.clusters events (orchestrator diagnose.py) carry the per-cluster text the reducer does not store. */
-function clusterNotes(events: TicketEvent[]): { notes: Map<number, ClusterNote>; reasoning?: string } {
+export function clusterNotes(events: TicketEvent[]): { notes: Map<number, ClusterNote>; reasoning?: string } {
   const notes = new Map<number, ClusterNote>();
   let reasoning: string | undefined;
   for (const { row, payload } of events) {

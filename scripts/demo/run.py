@@ -326,7 +326,9 @@ def up(a: argparse.Namespace) -> int:
                     "INTERVENTION_ROLLOUT_TIMEOUT_S": str(a.trial_timeout_s), "INTERVENTION_CLAIM_TIMEOUT_S": "900",
                     "INTERVENTION_TAKEOVER_MAX_S": "300", "INTERVENTION_VERDICT_WAIT_S": "30",
                     "FLYWHEEL_AUTO_APPROVE_MAX_CENTS": str(a.auto_approve_max_cents)}
-        for k in ("RDF_DROP_SHOW_ACCESS_CODE", "RDF_WEB_PUBLIC_URL"):  # .env settings the orchestrator reads from os.environ
+        for k in ("RDF_DROP_SHOW_ACCESS_CODE", "RDF_WEB_PUBLIC_URL",  # .env settings the orchestrator reads from os.environ
+                  "RDF_DATA_DROID", "RDF_TRAINING_DROID", "RDF_ONBOARDING_DROID", "RDF_DATA_DROID_BACKEND",  # Factory Droids
+                  "FACTORY_API_KEY"):
             v = os.environ.get(k) or _root_env_value(k)
             if v:
                 orch_env[k] = v

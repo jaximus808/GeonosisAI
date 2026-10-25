@@ -970,7 +970,13 @@ def run_eval(ctx: JobContext) -> dict[str, Any]:
 def run_baseline(ctx: JobContext) -> dict[str, Any]:
     """With payload.eval_run_id: the trial runner (kind baseline, base checkpoint by default). With
     purpose collect_recovery: a TDM-69 collection rollout (failure detector + takeover, no eval rows).
+    With purpose deployment_real_run: TDM-126's ONE supervised real-arm run of a shipped checkpoint (no
+    recording, no trial rows; refused unless TDM119_ALLOW_POLICY=1 and the payload confirms the e-stop).
     Otherwise: TDM-50's single policy episode (the robot page's demo button), which records no trials."""
+    from .tdm126_real_run import REAL_RUN_PURPOSE, real_arm_run
+
+    if ctx.payload.get("purpose") == REAL_RUN_PURPOSE:
+        return real_arm_run(ctx)
     if ctx.payload.get("eval_run_id") or ctx.payload.get("purpose") in (COLLECT_PURPOSE, DEPLOYMENT_PURPOSE):
         return EvalTrialRunner(ctx).run()
     return rollout_episode_job(ctx)

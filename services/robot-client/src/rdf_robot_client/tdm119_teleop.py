@@ -11,7 +11,9 @@ What runs:
     through a cloudflared quick tunnel on the Jetson, announced in ``robot.camera_config_json.stream``.
   * jobs: ``start_teleop`` (clean teleop and recovery takeovers, with TDM-58 recording), ``load_checkpoint``,
     ``reset_request``. **Policy rollouts (run_baseline / run_eval) and ``home`` are refused** on the real arm
-    tonight, unless ``TDM119_ALLOW_POLICY=1`` (they then use the ramped TDM-50/122 executor).
+    tonight, unless ``TDM119_ALLOW_POLICY=1`` (they then use the ramped TDM-50/122 executor). TDM-126: with it,
+    ``run_baseline`` {purpose: "deployment_real_run"} is the one supervised, time-capped real-arm run of a
+    shipped checkpoint (``tdm126_real_run.py``; docs/tdm126-real-arm-policy-run.md).
 
 Speeds (all of them apply, the slowest wins):
   * teleop EE speed = ``RDF_TELEOP_MAX_LIN_SPEED`` (default here 0.10 m/s) x the phone's speed_scale (0.5 by

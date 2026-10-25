@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import os
 from typing import Any, Iterable, Literal, Protocol
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -96,6 +97,20 @@ def robot_can_eval(robot: Any) -> bool:
 def robot_is_teleop_only(robot: Any) -> bool:
     """A real robot that can collect data (teleop) but can't run evals."""
     return robot is not None and not robot_can_eval(robot)
+
+
+# TDM-126: base pi05_base is DROID-layout (8-dim, unmapped on the YAM) and never goes to a real YAM. The "before"
+# policy on the real arm is the YAM-adapted pi0.5 trained 200 steps on public YAM data (TDM-40 smoke run),
+# which serves the 7-dim joint_pos_abs YAM spec. Override: RDF_REAL_YAM_BASELINE_CHECKPOINT (same allow-list).
+REAL_YAM_BASELINE_DEFAULT = "modal-vol://rdf-checkpoints/runs/ticket-tdm40-yam-smoke/smoke-20261024-081135-ed9bc2/199"
+REAL_YAM_BASELINE_CHECKPOINT = os.environ.get("RDF_REAL_YAM_BASELINE_CHECKPOINT") or REAL_YAM_BASELINE_DEFAULT
+REAL_CHECKPOINT_PREFIX = "modal-vol://rdf-checkpoints/"
+
+
+def real_checkpoint_ok(uri: Any) -> bool:
+    """A checkpoint a real YAM may run: a real Modal volume checkpoint (no fake://, no stub, no base pi0.5)."""
+    u = str(uri or "")
+    return u.startswith(REAL_CHECKPOINT_PREFIX) and "fake" not in u and "stub-no-gpu" not in u
 
 
 CANNOT_EVAL_EVENT = "eval.robot_cannot_eval"

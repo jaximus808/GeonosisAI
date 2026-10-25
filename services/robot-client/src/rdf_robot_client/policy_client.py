@@ -145,6 +145,9 @@ class PolicyReply:
     timing: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     code: str | None = None  # network | timeout | server codes (checkpoint_mismatch, not_ready, ...)
+    # TDM-114: the server's own phase label for this chunk ([SIM] scripted policy: approach / descend / close /
+    # lift / carry / lower / release / retreat / regrasp). Real policies send none: stays None, never invented.
+    phase: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -395,7 +398,9 @@ class PolicyClient:
             acts, space, timing = parse_reply(raw)
         except PolicyClientError as e:
             return PolicyReply(rid, obs.step, obs.t_obs, t_sent, t_recv, error=str(e), code=e.code)
-        return PolicyReply(rid, obs.step, obs.t_obs, t_sent, t_recv, actions=acts, action_space=space, timing=timing)
+        ph = raw.get("phase") if isinstance(raw, dict) else None
+        return PolicyReply(rid, obs.step, obs.t_obs, t_sent, t_recv, actions=acts, action_space=space, timing=timing,
+                           phase=ph if isinstance(ph, str) and ph else None)
 
     # ---- control-plane calls (blocking; not from the control loop)
     def _http(self) -> _HttpTransport:

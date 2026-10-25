@@ -685,6 +685,25 @@ class InterventionManager:
                                                             "trial_index": iv.trial_index, "task_id": iv.task_id,
                                                             "reason": reason}, iv.ticket_id, iv=iv)
 
+    def preempt(self, iv: Intervention, *, reason: str, to_ticket_id: int = 0) -> dict:
+        """TDM-114: give the robot to another ticket while this rollout waits for a takeover nobody claimed.
+        Same path as the claim timeout: end the trial as a failure (the robot resets and the rollout ends),
+        return the task to the marketplace (cancel it if this module created it), close the intervention."""
+        with self._lock:
+            self._load()
+            if not iv.live or iv.phase != "awaiting_claim":
+                return {"intervention_ref": iv.ref, "preempted": False, "phase": iv.phase}
+            sent = self._end_trial(iv, f"preempted: {reason}"[:300])
+            task = self.m.get("task", iv.task_id) or {}
+            task_outcome = "returned" if task.get("status") == "open" else (task.get("status") or "missing")
+            if iv.route == "created" and task.get("status") == "open":
+                task_outcome = "cancelled" if self._call("cancel_task", iv.task_id,
+                                                         f"intervention {iv.ref}: robot reassigned", iv=iv) else "cancel_failed"
+            self._close(iv, "preempted", extra={"to_ticket_id": to_ticket_id, "reason": reason[:300],
+                                                "task_outcome": task_outcome})
+            return {"intervention_ref": iv.ref, "preempted": True, "end_trial_sent": sent, "task_id": iv.task_id,
+                    "task_outcome": task_outcome}
+
     def on_episode(self, ep: dict, old: dict | None = None) -> str | None:
         task_id = _i(ep.get("task_id"))
         if not task_id:
@@ -834,6 +853,11 @@ class InterventionManager:
                 return self._wait(ticket_id, "robot_busy", ", ".join(f"{c['id']}:{c.get('type')}" for c in jobs))
             if self.live_on_robot(rid) is not None:
                 return self._wait(ticket_id, "intervention_live", "an intervention is live on the robot")
+            from .robot_arbitration import collection_blocker  # TDM-114: evals go first; a reassigned ticket waits
+
+            blk = collection_blocker(self.m, ticket_id, rid)
+            if blk is not None:
+                return self._wait(ticket_id, *blk)
             resets = [t for t in self.m.rows("task") if t.get("type") == "reset" and _i(t.get("robot_id")) == rid
                       and t.get("status") in ("open", "claimed")]
             if resets:

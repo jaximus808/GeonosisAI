@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRows } from '@/lib/spacetime/hooks';
 import { parsePredicate, predicateWords } from '@/lib/tdm76/predicate';
 import { tdm112Floor, tdm112IsDroidRole, type Tdm112Event, type Tdm112Floor } from './floor';
+import type { Tdm114LivePolicy } from './floor';
 
 type Obj = Record<string, unknown>;
 
@@ -41,6 +42,21 @@ export function tdm112SplitEvents(rows: readonly EvRow[], ticketId: number) {
   return { events: events.sort(byTs), llmCalls: llmCalls.sort(byTs), resumes: resumes.sort(byTs) };
 }
 
+/** TDM-114: event_log rows naming this robot (interventions, robot.* holds / state), oldest first. */
+export function tdm114RobotEvents(rows: readonly EvRow[], robotId: number): Tdm112Event[] {
+  const out: Tdm112Event[] = [];
+  if (!robotId) return out;
+  const needle = `"robot_id"`;
+  for (const r of rows) {
+    if (!(r.type.startsWith('intervention.') || r.type.startsWith('robot.'))) continue;
+    if (!r.payloadJson.includes(needle)) continue;
+    const payload = parse(r.payloadJson);
+    if (!payload || Number(payload.robot_id) !== robotId) continue;
+    out.push({ id: Number(r.id), tsUs: Number(r.ts.microsSinceUnixEpoch), actor: r.actor, type: r.type, payload });
+  }
+  return out.sort((a, b) => a.tsUs - b.tsUs || a.id - b.id);
+}
+
 /** A clock that ticks every `ms`. 0 until mounted, so server and first client render agree. */
 export function useTdm112Now(ms = 1000): number {
   const [now, setNow] = useState(0);
@@ -56,7 +72,7 @@ const describe = (json: string) => predicateWords(parsePredicate(json));
 
 export type Tdm112FloorData = { floor: Tdm112Floor | null; ready: boolean; events: Tdm112Event[]; taskDescription?: string };
 
-export function useTdm112Floor(ticketId: bigint): Tdm112FloorData {
+export function useTdm112Floor(ticketId: bigint, opts: { livePolicy?: Tdm114LivePolicy | null } = {}): Tdm112FloorData {
   const tid = ticketId;
   const [tickets, ready] = useRows('ticket', (r) => r.id.eq(tid));
   const [evalRuns] = useRows('evalRun', (r) => r.ticketId.eq(tid));
@@ -70,6 +86,15 @@ export function useTdm112Floor(ticketId: bigint): Tdm112FloorData {
   const [settings] = useRows('runSettings', (r) => r.ticketId.eq(tid));
   const [sessions] = useRows('agentSession', (r) => r.ticketId.eq(tid));
   const [eventRows] = useRows('eventLog');
+  // TDM-114: the ticket's robot, its commands, its other tickets and eval runs (who holds it, who waits)
+  const rid: bigint = tickets[0]?.robotId ?? 0n;
+  const [robots] = useRows('robot', (r) => r.id.eq(rid));
+  const [robotCommands] = useRows('robotCommand', (r) => r.robotId.eq(rid));
+  const [allTickets] = useRows('ticket');
+  const [robotEvalRuns] = useRows('evalRun', (r) => r.robotId.eq(rid));
+  const robotTickets = useMemo(() => allTickets.filter((t) => t.robotId === rid), [allTickets, rid]);
+  const robotEvents = useMemo(() => tdm114RobotEvents(eventRows, Number(rid)), [eventRows, rid]);
+  const openCommands = useMemo(() => robotCommands.filter((c) => c.status === 'issued' || c.status === 'acked'), [robotCommands]);
 
   const split = useMemo(() => tdm112SplitEvents(eventRows, Number(tid)), [eventRows, tid]);
   const runIds = useMemo(() => new Set(evalRuns.map((r) => r.id)), [evalRuns]);
@@ -99,8 +124,14 @@ export function useTdm112Floor(ticketId: bigint): Tdm112FloorData {
       sessions: droids,
       describePredicate: describe,
       nowUs: bucket * 2000 * 1000,
+      robot: robots[0] ?? null,
+      robotCommands: openCommands,
+      robotTickets,
+      robotEvalRuns,
+      robotEvents,
+      livePolicy: opts.livePolicy ?? null,
     });
-  }, [ticket, settings, evalRuns, myTrials, clusters, plans, tasks, episodes, reviews, trainingRuns, split, droids, bucket]);
+  }, [ticket, settings, evalRuns, myTrials, clusters, plans, tasks, episodes, reviews, trainingRuns, split, droids, bucket, robots, openCommands, robotTickets, robotEvalRuns, robotEvents, opts.livePolicy]);
 
   return { floor, ready, events: split.events, taskDescription: ticket?.taskDescription };
 }

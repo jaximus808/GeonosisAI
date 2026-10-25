@@ -207,6 +207,10 @@ def run(argv: list[str] | None = None) -> None:
     from .scene_watch import start_scene_watch  # TDM-104: the MuJoCo sim loads deployed scenes (no-op elsewhere)
 
     start_scene_watch(client)
+    if sim:  # TDM-114: nobody stands at a sim arm, so a web operator can clear its soft e-stop
+        from .tdm114_estop_watch import start_tdm114_estop_watch
+
+        start_tdm114_estop_watch(client)
     if sys.stdin and sys.stdin.isatty():
         def _stdin() -> None:
             for line in sys.stdin:

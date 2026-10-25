@@ -102,7 +102,7 @@ from .interventions import COLLECT_PURPOSE, FAILURE_EVENT, FailureDetector, Tria
 from .jobs import JobContext, job_handler
 from .policy_client import BASE_CHECKPOINT
 from .recorder import META_FILENAME, _write_json, recorder_for
-from .rollout import RolloutResult, get_policy, resolve_prompt, rollout_episode_job, run_episode
+from .rollout import POLICY_TRIAL_SERVICE, RolloutResult, get_policy, resolve_prompt, rollout_episode_job, run_episode
 from .state import RobotState
 
 INBOX_SERVICE = "eval_outcomes"
@@ -834,7 +834,19 @@ class EvalTrialRunner:
             out["warning"] = f"[SIM] the sim holds ticket {meta['ticket_id']}'s scene, this eval is for ticket {tid}"
         return out
 
+    def _set_trial(self, index: int, *, resetting: bool = False) -> None:
+        """TDM-114: the trial this runner is on, for ``/ws/state`` ``policy`` (rollout.policy_phase_service)."""
+        self.ctx.services[POLICY_TRIAL_SERVICE] = {
+            "trial_index": index, "trials": self.trials, "eval_run_id": self.eval_run_id or None,
+            "purpose": COLLECT_PURPOSE if self.collect else self.run_kind, "resetting": resetting}
+
     def run(self) -> dict[str, Any]:
+        try:
+            return self._run()
+        finally:
+            self.ctx.services.pop(POLICY_TRIAL_SERVICE, None)
+
+    def _run(self) -> dict[str, Any]:
         ctx = self.ctx
         prompt = policy_prompt(ctx)
         scene = self._settle_scene()  # [SIM] the ticket's deployed scene is loaded before any trial
@@ -856,6 +868,7 @@ class EvalTrialRunner:
         ctx.event("eval.trials_started", **{k: v for k, v in base.items() if k != "activate"})
         _log("eval started", **{k: v for k, v in base.items() if k != "activate"})
         for n, i in enumerate(todo):
+            self._set_trial(i)
             o = self.run_trial(i, prompt)
             self._record(o)
             self.outcomes.append(o)
@@ -867,6 +880,7 @@ class EvalTrialRunner:
                 raise InfraFailure(f"{self.policy_errors_in_row} trials in a row ended in policy_error; "
                                    "stopping the eval (check the policy endpoint)")
             if n < len(todo) - 1:
+                self._set_trial(todo[n + 1], resetting=True)  # TDM-114: /ws/state shows phase "reset" meanwhile
                 ctx.wait_for_reset(reason=f"eval {self.eval_run_id}: reset the scene for trial {i + 2}/{self.trials}")
         succ = sum(o.success for o in self.outcomes)
         out = {**base, "recorded": len(self.outcomes), "successes": succ,
@@ -888,11 +902,13 @@ class EvalTrialRunner:
         ctx.event("eval.trials_started", **{k: v for k, v in base.items() if k != "activate"})
         _log("collection rollout started", **{k: v for k, v in base.items() if k != "activate"})
         for i in range(self.trials):
+            self._set_trial(i)
             o = self.run_collect_trial(i, prompt)
             self.outcomes.append(o)
             ctx.result["outcomes"] = [x.to_dict() for x in self.outcomes]
             _log("collection trial ended", index=i, intervention=o.intervention, episode_id=o.episode_id, note=o.note)
             if i < self.trials - 1:
+                self._set_trial(i + 1, resetting=True)
                 ctx.wait_for_reset(reason=f"collection rollout {ctx.command.id}: reset the scene for trial {i + 2}")
         recovered = [o for o in self.outcomes if (o.intervention or {}).get("phase") == "handed_back"]
         return {**base, "outcomes": [o.to_dict() for o in self.outcomes],

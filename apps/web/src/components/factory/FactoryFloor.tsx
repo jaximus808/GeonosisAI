@@ -61,8 +61,9 @@ const STATE_TAG: Record<Tdm112StationView['state'], { tone: GxTone | 'ink'; labe
   failed: { tone: 'failed', label: 'Failed' },
 };
 
-function StateTag({ st }: { st: Tdm112StationView }) {
+function StateTag({ st, robotWait }: { st: Tdm112StationView; robotWait?: boolean }) {
   if (st.key === 'ship' && st.state === 'done') return <Tag tone="shipped">Shipped</Tag>;
+  if (robotWait && st.state === 'waiting') return <Tag tone="money">Waiting for robot</Tag>; // TDM-114
   const t = STATE_TAG[st.state];
   if (t.tone === 'ink') return <Tag className="tdm112-tag-ink">{t.label}</Tag>;
   return <Tag tone={t.tone}>{t.label}</Tag>;
@@ -185,7 +186,7 @@ export function FloorView({ floor, variant = 'full', className, onOpen }: { floo
                     {st.sub && <small>{st.sub}</small>}
                   </span>
                   <span className="flex flex-wrap items-center gap-1">
-                    <StateTag st={st} />
+                    <StateTag st={st} robotWait={floor.waitingFor?.stationIndex === st.index} />
                     {st.computeTag && (
                       <Tag tone={st.computeTag === 'REAL' ? 'shipped' : 'failed'} title={COMPUTE_TITLE[st.computeTag]}>
                         {st.computeTag}

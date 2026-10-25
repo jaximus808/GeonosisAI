@@ -61,7 +61,8 @@ describe('tdm112Floor stations', () => {
     const st = f.stations[0];
     assert.deepEqual(st.chips, [{ index: 0, pass: false }, { index: 1, pass: true }]);
     assert.deepEqual(st.facts, ['trial 3/6', '1/2 pass']);
-    assert.equal(st.activity, 'Trial 2: pass, the cube is resting in the plate');
+    // TDM-114: a running eval reads as live progress (trial x/N, last trial; its note comes from the trial row)
+    assert.equal(st.activity, 'Trial 3 of 6 · last: trial 2 pass');
   });
 
   it('loop-back: Iteration 2 of 3, later stations idle again', () => {

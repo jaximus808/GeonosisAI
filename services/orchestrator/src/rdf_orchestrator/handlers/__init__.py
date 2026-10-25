@@ -19,6 +19,7 @@ from . import offers  # noqa: F401  (TDM-91 dataset offers: finalize_offer -> re
 from . import plan_offers  # noqa: F401  (TDM-95 planner offer suggestion -> offer after approve_spend; timeout fallback)
 from . import flywheel  # noqa: F401  (TDM-22 flywheel state machine; keep last)
 from . import evaluate  # noqa: F401  (TDM-67 eval orchestration; after flywheel: registers its steps)
+from . import robot_arbitration  # noqa: F401  (TDM-114 robot arbitration: release on cancel, auto-yield watchdog)
 from . import interventions  # noqa: F401  (TDM-69 DAgger interventions: pause on failure, takeover task, recovery episode)
 from . import resume_bridge  # noqa: F401  (TDM-27 SpacetimeDB predicate -> Factory session resume)
 from . import data_droid  # noqa: F401  (TDM-33 Data Droid: started when a ticket enters review; RDF_DATA_DROID=1)

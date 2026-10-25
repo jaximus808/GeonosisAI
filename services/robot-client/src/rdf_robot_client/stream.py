@@ -53,7 +53,8 @@ Live state, ``/ws/state`` (TDM-96, protocol ``rdf-state/1``; ``install_state_fee
   server -> client   {t:"hello", protocol, robot_id, hz, sim, exp, server_ms}
                      {t:"state", v:1, sim, t_ms, joints[6] rad, gripper 0..1, ee:{pos[3] m, quat[w,x,y,z]},
                       control_source, robot_state, estop, safety:{clamps_1s:{kind:n}}, checkpoint_uri?,
-                      scene?, chunk_preview?, workspace?}       at ``hz`` (default 30), newest only
+                      scene?, chunk_preview?, workspace?, policy?:{phase, trial_index, trials, purpose,
+                      eval_run_id} (TDM-114)}       at ``hz`` (default 30), newest only
                      {t:"pong", c, server_ms} / {t:"auth_ok", exp} / {t:"error", code}
   close codes 4001 expired / 4003 bad token. Any valid token for this robot works, including a
   ``view``-scope one (``POST /stream/token`` with ``scope:"view"``); ``/control`` refuses ``view``.
@@ -627,6 +628,9 @@ class LiveStateSampler:
                     msg["scene"] = scene
             except Exception:  # noqa: BLE001 - scene is decoration; never drop the state for it
                 log.debug("scene_state failed", exc_info=True)
+        pol = _policy_phase(c, str(sm.state))
+        if pol is not None:
+            msg["policy"] = pol
         preview = (getattr(c, "services", None) or {}).get("chunk_preview")
         if callable(preview):
             try:
@@ -636,6 +640,32 @@ class LiveStateSampler:
             except Exception:  # noqa: BLE001
                 log.debug("chunk_preview failed", exc_info=True)
         return msg
+
+
+def _policy_phase(c: Any, robot_state: str) -> dict[str, Any] | None:
+    """TDM-114 ``policy`` field: {phase, trial_index, trials, purpose, eval_run_id} while a rollout or a trial
+    runner is active, else None (the field is left out). ``phase`` is the policy server's own label (None when it
+    sends none, e.g. real pi0.5); between trials (waiting_reset) it reads "reset"."""
+    services = getattr(c, "services", None) or {}
+    fn = services.get("policy_phase")
+    trial = services.get("policy_trial")
+    out: dict[str, Any] | None = None
+    if callable(fn):
+        try:
+            v = fn()
+            out = dict(v) if isinstance(v, dict) else None
+        except Exception:  # noqa: BLE001 - decoration; never drop the state for it
+            log.debug("policy_phase failed", exc_info=True)
+    if out is None and isinstance(trial, dict):
+        out = {"phase": None, "trial_index": trial.get("trial_index"), "trials": trial.get("trials"),
+               "purpose": trial.get("purpose"), "eval_run_id": trial.get("eval_run_id")}
+    if out is None:
+        return None
+    if robot_state == "waiting_reset":
+        out["phase"] = "reset"
+    ph = out.get("phase")
+    out["phase"] = ph if isinstance(ph, str) and ph else None
+    return {k: out.get(k) for k in ("phase", "trial_index", "trials", "purpose", "eval_run_id")}
 
 
 class StateFeed:

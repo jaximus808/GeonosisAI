@@ -46,6 +46,7 @@ export function Tdm100RobotPanel({ robotId, robot, ticketId, defaultMode, compac
       compact={compact}
       simCameras={simCameras ?? simCamerasSlot}
       onFeedHealth={onFeedHealth}
+      ticketId={ticketId != null && Number(ticketId) > 0 ? Number(ticketId) : undefined}
       hud={({ live, robotId: shown }) => (
         // The ticket's eval runs belong to the ticket's robot; another robot picked in the view
         // shows its own newest run instead.

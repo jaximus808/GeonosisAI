@@ -21,6 +21,8 @@ import {
   type CommandRow,
 } from '@/lib/tdm78/useRobotConsole';
 import { Tdm78Boundary } from './Tdm78Boundary';
+import { Tdm114ClearEstop } from '@/components/tdm114/WaitingForRobot';
+import { tdm114IsSim } from '@/lib/tdm112/floor';
 import { Tdm78CameraHealth } from './Tdm78Cameras';
 import { Tdm78CommandPanel } from './Tdm78CommandPanel';
 import { Tdm78TrialPanel } from './Tdm78TrialPanel';
@@ -124,6 +126,8 @@ export function Tdm78RobotConsole({ id }: { id: string }) {
               <kbd className="rounded bg-zinc-800 px-1 font-mono">clear</kbd> in the robot-client terminal on the Jetson, or run{' '}
               <kbd className="rounded bg-zinc-800 px-1 font-mono">pkill -USR1 -f rdf-robot-client</kbd> there.
             </p>
+            {/* TDM-114: nobody stands at a sim arm, so an operator clears a sim robot's e-stop from here */}
+            <Tdm114ClearEstop robotId={id} sim={tdm114IsSim(r)} className="mt-2" />
           </div>
         </div>
       )}

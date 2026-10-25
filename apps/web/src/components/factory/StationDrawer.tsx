@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { AgentCard } from '@/components/agents/AgentCard';
 import { OrchestratorAgents } from '@/components/agents/OrchestratorAgents';
 import { DecisionTrail } from '@/components/ticket/DecisionTrail';
+import { EvalProgressLine, RobotQueueList, WaitingForRobot } from '@/components/tdm114/WaitingForRobot';
 import { Button } from '@/components/brand/Button';
 import { Tag } from '@/components/brand/StatusTag';
 import { gxCx } from '@/components/brand/cx';
@@ -111,7 +112,17 @@ export function StationDrawer({
           {station.facts.length > 0 && <p className="gx-data m-0">{station.facts.join(' · ')}</p>}
           <p className={gxCx('m-0 text-[15px]', station.activityIsError ? 'text-slag' : 'text-ink')}>{station.activity}</p>
           {station.state === 'idle' && <p className="gx-small m-0">{station.waitsFor}</p>}
+          {/* TDM-114: who holds the robot, and the operator's way out */}
+          {floor.waitingFor && floor.waitingFor.stationIndex === station.index && <WaitingForRobot floor={floor} />}
+          {running && (station.key === 'baseline' || station.key === 'eval') && <EvalProgressLine phase={floor.evalPhase} />}
         </header>
+
+        {running && (station.key === 'baseline' || station.key === 'eval' || station.key === 'collect') && floor.robotQueue.length > 0 && (
+          <section className="grid gap-2" aria-label="Robot queue">
+            <h3 className="gx-heading">Robot queue{floor.holder ? `: ${floor.holder.robotName}` : ''}</h3>
+            <RobotQueueList queue={floor.robotQueue} />
+          </section>
+        )}
 
         <section className="grid gap-2" aria-label="Events">
           <h3 className="gx-heading">Last events</h3>

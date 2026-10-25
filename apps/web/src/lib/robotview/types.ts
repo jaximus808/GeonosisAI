@@ -33,6 +33,8 @@ export interface RobotLiveState {
   /** Downsampled joint targets of the current policy action chunk. */
   chunk_preview?: number[][];
   workspace?: { min: Vec3; max: Vec3; table_z: number };
+  /** TDM-114: the policy's own phase label (null when the policy sends none; "reset" between trials) and the trial it is on. */
+  policy?: { phase: string | null; trial_index?: number | null; trials?: number | null; purpose?: string | null; eval_run_id?: number | null };
 }
 
 export type RobotLiveSource = 'sim' | 'live';

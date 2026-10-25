@@ -45,6 +45,7 @@ import type { RobotLive } from '@/lib/robotview/types';
 import type { TwinCamera } from './RobotTwin3D';
 import { useRobotLive, type RobotLiveResult, type UseRobotLiveOptions } from '@/lib/robotview/useRobotLive';
 import { useRobotScene } from '@/lib/robotview/useRobotScene';
+import { tdm114SceneMismatch } from '@/lib/robotview/tdm114LoadedScene';
 
 const RobotTwin3D = dynamic(() => import('./RobotTwin3D').then((m) => m.RobotTwin3D), {
   ssr: false,
@@ -73,6 +74,11 @@ export interface RobotViewProps {
    * second socket: simCameras={({ live, robotId, compact }) => <SimCameras state={live.state} ... />}.
    */
   simCameras?: ReactNode | ((ctx: SimCamerasContext) => ReactNode);
+  /**
+   * TDM-114: the ticket being viewed (ticket page). When the pinned sim robot has another ticket's scene loaded,
+   * the view says so under the twin (the twin always draws the scene the robot actually has).
+   */
+  ticketId?: number;
 }
 
 export interface SimCamerasContext {
@@ -451,7 +457,7 @@ function CameraPane({
 
 // ---------------------------------------------------------------------------------------------
 
-export function RobotView({ robotId, defaultMode, compact = false, hud, simCameras, onFeedHealth }: RobotViewProps) {
+export function RobotView({ robotId, defaultMode, compact = false, hud, simCameras, onFeedHealth, ticketId }: RobotViewProps) {
   const { registry, ready, now } = useRobotSources();
   const { mode, source, setMode, pickRobot } = useRobotViewMode(registry, { robotId, defaultMode });
   const { camera: access, live: liveOpts } = useRobotAccess(source, now);
@@ -469,7 +475,9 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
   const cam = camPick && cams.includes(camPick) ? camPick : cams[0];
 
   const sim = mode === 'sim';
-  const scene = useRobotScene(sim ? source?.id : null); // TDM-104: the deployed scene spec (sim only)
+  // TDM-104 + TDM-114: the scene the sim robot has LOADED (not a newer deploy still pending), sim only
+  const scene = useRobotScene(sim ? source?.id : null);
+  const sceneNote = sim && source && robotId !== undefined && source.id === robotId ? tdm114SceneMismatch({ ticketId: scene.loadedTicketId }, ticketId) : null;
   // What the twin pane may show. Live never shows sim data; sim never claims to be live.
   let block: { title: string; body?: ReactNode; tone: 'neutral' | 'warn' | 'sim'; offerOther?: boolean } | null = null;
   if (!ready) block = { title: 'Connecting to the factory…', tone: 'neutral' };
@@ -589,6 +597,11 @@ export function RobotView({ robotId, defaultMode, compact = false, hud, simCamer
               </div>
             )}
           </div>
+        )}
+        {sceneNote && (
+          <p className="mt-2 px-1 text-xs text-zinc-300" data-testid="tdm114-scene-note">
+            {sceneNote}
+          </p>
         )}
         {camNote && (
           <p className="mt-2 px-1 text-xs text-zinc-400">

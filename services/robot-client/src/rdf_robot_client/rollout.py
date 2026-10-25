@@ -183,6 +183,7 @@ class ChunkExecutor:
         self._hold: dict[str, Any] | None = None
         self._obs_states: dict[int, np.ndarray] = {}  # req id -> observed state (velocity anchor)
         self._win, self._win_max = 0, 0.0  # switch window: the switch tick + the blend ticks
+        self.phase: str | None = None  # TDM-114: phase label of the newest policy reply (None = server sends none)
 
     # ---- helpers
     def _hold_reason(self) -> str:
@@ -264,6 +265,7 @@ class ChunkExecutor:
         for r in self.client.poll():
             if r.ok:
                 self.consecutive_errors = 0
+                self.phase = getattr(r, "phase", None)
                 self._accept(r, step, now, st)
             else:
                 self.consecutive_errors += 1
@@ -405,6 +407,23 @@ def _timing(stamps: list[float], period: float, overruns: int) -> dict[str, Any]
     }
 
 
+# ---- TDM-114: live policy phase for /ws/state (stream.LiveStateSampler publishes it as ``policy``)
+POLICY_PHASE_SERVICE = "policy_phase"  # callable -> {phase, trial_index, trials, purpose, eval_run_id}
+POLICY_TRIAL_SERVICE = "policy_trial"  # dict set by the eval trial runner for the trial it is on
+
+
+def policy_phase_service(services: dict[str, Any], phase: Callable[[], str | None]) -> Callable[[], dict[str, Any]]:
+    """The ``policy_phase`` callable for one episode: the newest reply's phase label (None when the server sends
+    none, e.g. real pi0.5) plus the trial context in ``services['policy_trial']`` (None outside a trial runner)."""
+
+    def read() -> dict[str, Any]:
+        trial = services.get(POLICY_TRIAL_SERVICE) or {}
+        return {"phase": phase(), "trial_index": trial.get("trial_index"), "trials": trial.get("trials"),
+                "purpose": trial.get("purpose"), "eval_run_id": trial.get("eval_run_id")}
+
+    return read
+
+
 def resolve_prompt(ctx: JobContext, prompt: str | None) -> str:
     p = (prompt or ctx.payload.get("prompt") or ctx.payload.get("task_prompt") or "").strip()
     if p:
@@ -498,6 +517,9 @@ class PolicyRollout:
         # TDM-99: the state feed (stream.LiveStateSampler) publishes this as chunk_preview while it is ours
         preview = ex.preview
         ctx.services["chunk_preview"] = preview
+        # TDM-114: the policy's phase (+ the trial the eval runner is on) for the same feed, same lifecycle
+        phase_fn = policy_phase_service(ctx.services, lambda: ex.phase)
+        ctx.services[POLICY_PHASE_SERVICE] = phase_fn
         t0 = time.monotonic()
         try:
             stats = ctx.run_control_loop(step, max_steps=max_steps, max_seconds=timeout_s,
@@ -505,6 +527,8 @@ class PolicyRollout:
         finally:
             if ctx.services.get("chunk_preview") is preview:
                 ctx.services.pop("chunk_preview", None)
+            if ctx.services.get(POLICY_PHASE_SERVICE) is phase_fn:
+                ctx.services.pop(POLICY_PHASE_SERVICE, None)
             ctx.arm.hold()
         ended = state["ended"] or stats.ended
         if ex.stats.hold_ticks:

@@ -37,6 +37,8 @@ import {
   type TrialCounter,
 } from '@/lib/robotview/hud';
 import type { ControlSource, RobotLiveState } from '@/lib/robotview/types';
+import { useTdm114Robot } from '@/lib/tdm114/useRobotArbitration';
+import type { Tdm114Holder, Tdm114QueueEntry } from '@/lib/tdm112/floor';
 
 export interface RobotHudProps {
   robotId: number | bigint;
@@ -93,6 +95,7 @@ export function RobotHud({ robotId, ticketId, state, stale = false, className = 
   const ckpt = classifyCheckpoint(state?.checkpoint_uri, run, trainingRuns);
   const ticket = tid != null ? tickets.find((t) => t.id === tid) : undefined;
   const estop = !!state && (state.estop || state.robot_state === 'estop');
+  const arb = useTdm114Robot(rid, tidProp); // TDM-114: who holds the robot, what's next
 
   return (
     <div
@@ -107,9 +110,10 @@ export function RobotHud({ robotId, ticketId, state, stale = false, className = 
         <Plan plan={planSummary(state)} driving={state?.control_source === 'policy'} />
         <Gripper state={state} />
         <Safety state={state} />
-        <Trials counter={counter} />
+        <Trials counter={counter} policy={state?.policy} />
         <TicketCheckpoint ticketId={tid} title={ticket?.taskDescription} ckpt={ckpt} />
       </div>
+      <Tdm114HudQueue holder={arb.holder} queue={arb.queue} />
     </div>
   );
 }
@@ -271,7 +275,33 @@ function Safety({ state }: { state: RobotLiveState | null }) {
   );
 }
 
-function Trials({ counter }: { counter: TrialCounter | null }) {
+/** TDM-114: what the robot is doing now (ticket, job, phase) and what's queued next, one plain line. */
+function Tdm114HudQueue({ holder, queue }: { holder: Tdm114Holder | null; queue: Tdm114QueueEntry[] }) {
+  const next = queue.filter((q) => q.state === 'queued');
+  const paused = queue.filter((q) => q.state === 'paused');
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line px-3 py-1.5 text-xs" data-testid="hud-tdm114-queue">
+      <span className="text-zinc-400">Now</span>
+      <span className="text-zinc-100" data-testid="hud-tdm114-holder" data-state={holder?.state ?? 'free'}>
+        {holder ? `${holder.ticketRef || 'robot'} ${holder.jobLabel}: ${holder.words}` : 'Free, no job running'}
+      </span>
+      {next.length > 0 && (
+        <>
+          <span className="text-zinc-400">Next</span>
+          <span className="text-zinc-200">{next.map((q) => `${q.ticketRef} ${q.jobLabel}`).join(', then ')}</span>
+        </>
+      )}
+      {paused.length > 0 && (
+        <>
+          <span className="text-zinc-400">Paused</span>
+          <span className="text-zinc-300">{paused.map((q) => `${q.ticketRef} (${q.note})`).join(', ')}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Trials({ counter, policy }: { counter: TrialCounter | null; policy?: RobotLiveState['policy'] }) {
   if (!counter)
     return (
       <Segment caption="Eval" testid="hud-trials">
@@ -310,6 +340,11 @@ function Trials({ counter }: { counter: TrialCounter | null }) {
           {counter.passed} passed, {counter.failed} failed of {counter.planned} planned trials
         </span>
         {counter.simulated && <span className="gx-tag gx-tag-sim">Simulated trials</span>}
+        {counter.running && policy?.phase && (!policy.eval_run_id || policy.eval_run_id === counter.runId) && (
+          <span className="text-xs text-zinc-300" data-testid="hud-policy-phase">
+            phase <b className="font-semibold text-zinc-100">{policy.phase}</b>
+          </span>
+        )}
       </span>
     </Segment>
   );

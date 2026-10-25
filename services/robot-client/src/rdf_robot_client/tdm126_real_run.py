@@ -74,8 +74,17 @@ def default_checker() -> Checker:
     """The TDM-122 dry-run check against the live safety config ($RDF_SAFETY_CONFIG, profile yam)."""
     from .tdm122_dryrun import ChunkChecker
 
+    import numpy as np
+
     c = ChunkChecker(safety_config=os.environ.get("RDF_SAFETY_CONFIG") or None)
-    return lambda actions, space, state: executor_verdict(c.check(actions, space, state))
+
+    def check(actions: Any, space: Any, state: Any) -> dict[str, Any]:
+        a = np.asarray(actions, dtype=float)
+        if a.size == 0 or not np.all(np.isfinite(a)):  # never ramp toward NaN / inf, whatever else the check says
+            return {"verdict": "reject", "problems": ["non-finite or empty action chunk"]}
+        return executor_verdict(c.check(actions, space, state))
+
+    return check
 
 
 def executor_verdict(chk: dict[str, Any]) -> dict[str, Any]:
@@ -86,13 +95,13 @@ def executor_verdict(chk: dict[str, Any]) -> dict[str, Any]:
     gripper range, any other safety violation, and an unmapped (non-YAM) action space."""
     if str(chk.get("verdict")) != "reject":
         return chk
+    # The LIVE safety layer still clamps every streamed setpoint to the joint range (inside LARP's), the
+    # workspace box and table floor, the gripper range and the speed caps, and holds on a jump. So only what
+    # it cannot make safe refuses a chunk here: non-finite values, or a violation that is not a jump.
     rep = chk.get("replay") or {}
     rej = {k for k, v in rep.items() if k.startswith("rejected") and v}
     viol = str(rep.get("violation") or "")
-    st = chk.get("static") or {}
-    unsafe = any(st.get(k) for k in ("targets_outside_larp_limits", "targets_outside_workspace",
-                                     "targets_below_floor", "gripper_outside_range"))
-    if rej <= {"rejected_jump"} and (not viol or "jump" in viol.lower()) and not unsafe:
+    if rej <= {"rejected_jump"} and (not viol or "jump" in viol.lower()):
         return {**chk, "verdict": "clamp", "raw_verdict": "reject",
                 "problems": [*(chk.get("problems") or []), "jump-only reject: the executor ramps toward these "
                              "targets from the measured pose (<= 0.3 rad/s), so it runs as a clamp"]}

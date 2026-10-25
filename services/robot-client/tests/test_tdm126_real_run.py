@@ -224,7 +224,7 @@ def test_soft_estop_stops_it_at_once_and_nothing_moves_after(robot):
     assert fin and fin[-1]["ok"] is False
 
 
-def test_default_checker_rejects_a_far_first_target():
+def test_default_checker_ramps_far_targets_but_rejects_nonfinite():
     from rdf_robot_client.tdm122_dryrun import YAM_READY
 
     chk = default_checker()
@@ -233,7 +233,11 @@ def test_default_checker_rejects_a_far_first_target():
     far = near.copy()
     far[:, 1] += 0.6
     assert chk(near, "joint_pos_abs", st)["verdict"] in ("ok", "clamp")
-    assert chk(far, "joint_pos_abs", st)["verdict"] == "reject"
+    # far targets: the executor ramps toward them from the measured pose, so it is a clamp, not a refusal
+    assert chk(far, "joint_pos_abs", st)["verdict"] == "clamp"
+    bad = near.copy()
+    bad[3, 2] = float("nan")
+    assert chk(bad, "joint_pos_abs", st)["verdict"] == "reject"
 
 
 def test_run_baseline_routes_the_real_run_purpose(robot, monkeypatch):

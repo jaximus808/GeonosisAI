@@ -489,13 +489,21 @@ class EvalTrialRunner:
         same guarded ``home`` the next trial starts with). A failure here is logged, never the trial's outcome;
         an e-stop / stop still propagates (Cancelled)."""
         try:
+            from .teleop import LARP_HOME_JOINTS  # the same zeroed rest pose as the teleop page's Reset arm
+
             arm = ctx.arm
             q = list(arm.read_state().joints)
             arm.move_joints(q, gripper=1.0, speed_fraction=1.0, should_abort=ctx.should_abort,
                             tolerance=0.05, settle_timeout=2.0)  # gripper 1 = open (TDM-122 mapping)
-            _go_home(ctx)
+            if ctx.state is not RobotState.IDLE:
+                ctx.enter(RobotState.IDLE, "eval: arm reset to rest")
+            # all joints 0 (the safety layer keeps J2/J3 at its 0.1 rad margin), the full safety-layer cap
+            arm.move_joints(tuple(LARP_HOME_JOINTS), gripper=1.0, speed_fraction=1.0, should_abort=ctx.should_abort,
+                            tolerance=0.12, settle_timeout=4.0)
+            ctx.check()
             ctx.event("eval.arm_reset", eval_run_id=self.eval_run_id, index=index,
-                      note="real arm: gripper opened and back at the start pose; place the cube for the next trial")
+                      note="real arm: gripper opened and folded back to rest (teleop's Reset arm pose); "
+                           "place the cube for the next trial")
         except Cancelled:
             raise
         except Exception as e:  # noqa: BLE001 - the next trial homes again anyway

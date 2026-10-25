@@ -56,3 +56,35 @@ describe('task-scope cookie', () => {
     assert.ok(!tdm108TaskScopeAllows(scope, 'GET', '/api/tdm113/status', ''));
   });
 });
+
+describe('two devices, one person', () => {
+  it('proxies the release / takeover / phone sign-in posts, and the task scope allows them', async () => {
+    for (const p of ['release', 'takeover', 'login_code', 'login']) {
+      assert.deepEqual(tdm113Route('POST', [p]), { target: `texts/${p}`, operator: false });
+      assert.ok(tdm108TaskScopeAllows({ ids: [7], ticket: 1, robot: 4, exp: 0 }, 'POST', `/api/tdm113/${p}`, ''));
+    }
+    assert.equal(tdm113Route('GET', ['login']), null);
+  });
+
+  it('takes over a claim this browser did not drive, never its own', async () => {
+    const { tdm57TakeoverNeeded } = (await import(new URL('../src/lib/tdm113/texts.ts', import.meta.url).href)) as typeof import(
+      '../src/lib/tdm113/texts'
+    );
+    assert.equal(tdm57TakeoverNeeded('held', 1000, undefined), true); // text YES claim / other device
+    assert.equal(tdm57TakeoverNeeded('held', 1000, 900), true); // the other device's newer generation
+    assert.equal(tdm57TakeoverNeeded('held', 1000, 1000), false); // this browser's own (reload)
+    assert.equal(tdm57TakeoverNeeded('view_only', 1000, undefined), true); // asks; the server decides
+    assert.equal(tdm57TakeoverNeeded('available', undefined, undefined), false);
+    assert.equal(tdm57TakeoverNeeded('closed', 1000, undefined), false);
+  });
+
+  it('accepts 6-digit codes only', async () => {
+    const { tdm113CodeOk } = (await import(new URL('../src/lib/tdm113/texts.ts', import.meta.url).href)) as typeof import(
+      '../src/lib/tdm113/texts'
+    );
+    assert.equal(tdm113CodeOk('123 456'), '123456');
+    assert.equal(tdm113CodeOk('123-456'), '123456');
+    assert.equal(tdm113CodeOk('12345'), null);
+    assert.equal(tdm113CodeOk('12345a'), null);
+  });
+});

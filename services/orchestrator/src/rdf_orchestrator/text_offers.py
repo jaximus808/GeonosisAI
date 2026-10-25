@@ -90,6 +90,9 @@ NO_OFFER = "No open job right now. We'll text you the next one."
 NUDGE = "Reply YES to claim the job, or STOP to stop job texts."
 OFFER_FMT = "{price} robot job, about {mins} min: {kind} on {robot}. Reply YES to claim."
 CLAIMED_FMT = "It's yours: {kind}, task #{task}. Open {link} in the next 3 minutes to start."
+LOGIN_FMT = "Your GeonosisAI sign-in code is {code}. It expires in 10 minutes. Didn't ask for it? Ignore this text."
+LOGIN_SENT = "If that number gets GeonosisAI job texts, a 6-digit code is on its way."
+EV_RELEASED, EV_TAKEOVER, EV_LOGIN = "text.released", "text.takeover", "text.login"
 
 STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}
 START_WORDS = {"START", "UNSTOP", "RESUME"}
@@ -108,6 +111,11 @@ class TextSettings(RdfSettings):
     rdf_text_daily_max: int = 20  # and 20 per day
     rdf_text_offer_ttl_s: float = 900.0  # an unanswered offer stops counting after 15 min
     rdf_text_hold_s: float = 180.0  # heartbeat a text claim this long while the phone opens the link
+    rdf_text_login_ttl_s: float = 600.0  # phone sign-in codes expire after 10 min
+    rdf_text_login_gap_s: float = 30.0  # one code per number per 30 s
+    rdf_text_login_hourly: int = 5  # and 5 per number per hour
+    rdf_text_login_global_10m: int = 30  # and 30 for everyone per 10 min
+    rdf_text_login_attempts: int = 5  # wrong guesses before a code is burned
     rdf_text_webhook_secret: SecretStr | None = None  # override the stored Inkbox signing key (tests / sign-test)
     inkbox_api_key: SecretStr | None = None
     inkbox_base_url: str | None = None
@@ -209,6 +217,12 @@ class TextStore:
             CREATE TABLE IF NOT EXISTS sends (phone TEXT NOT NULL, at REAL NOT NULL, kind TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS sends_phone ON sends(phone, at);
             CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS login_code (phone TEXT PRIMARY KEY, code_hash TEXT NOT NULL,
+                expires_at REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS device (identity TEXT PRIMARY KEY, contributor_id INTEGER NOT NULL,
+                token TEXT NOT NULL, updated_at REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS device_contrib ON device(contributor_id, updated_at);
+            CREATE TABLE IF NOT EXISTS merged (from_id INTEGER PRIMARY KEY, into_id INTEGER NOT NULL, at REAL NOT NULL);
         """)
         self._db.commit()
 
@@ -305,6 +319,80 @@ class TextStore:
                 return False
             except sqlite3.IntegrityError:
                 return True
+
+    # phone login (6-digit codes; only the keyed hash is stored)
+    def put_code(self, phone: str, code_hash: str, expires_at: float, now: float) -> None:
+        self._x("INSERT INTO login_code(phone, code_hash, expires_at, attempts, created_at) VALUES (?,?,?,0,?) "
+                "ON CONFLICT(phone) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at, "
+                "attempts=0, created_at=excluded.created_at", (phone, code_hash, expires_at, now))
+
+    def get_code(self, phone: str) -> tuple[str, float, int] | None:
+        r = self._q("SELECT code_hash, expires_at, attempts FROM login_code WHERE phone=?", (phone,))
+        return (r[0][0], float(r[0][1]), int(r[0][2])) if r else None
+
+    def bump_code(self, phone: str) -> None:
+        self._x("UPDATE login_code SET attempts=attempts+1 WHERE phone=?", (phone,))
+
+    def drop_code(self, phone: str) -> None:
+        self._x("DELETE FROM login_code WHERE phone=?", (phone,))
+
+    def sends_since(self, kind: str, since: float, phone: str | None = None) -> int:
+        if phone is None:
+            return int(self._q("SELECT COUNT(*) FROM sends WHERE kind=? AND at>=?", (kind, since))[0][0])
+        return int(self._q("SELECT COUNT(*) FROM sends WHERE kind=? AND at>=? AND phone=?", (kind, since, phone))[0][0])
+
+    # devices: a browser identity's SpacetimeDB token, seen on a verified /texts/* call. Phone login hands
+    # the token of the contributor's device to the new browser so laptop and phone are the same identity.
+    def remember_device(self, identity: str, contributor_id: int, token: str, now: float) -> None:
+        self._x("INSERT INTO device(identity, contributor_id, token, updated_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(identity) DO UPDATE SET contributor_id=excluded.contributor_id, token=excluded.token, "
+                "updated_at=excluded.updated_at", (identity, contributor_id, token, now))
+
+    def devices_for(self, contributor_id: int) -> list[tuple[str, str]]:
+        """[(identity, token)] newest first."""
+        return [(r[0], r[1]) for r in self._q("SELECT identity, token FROM device WHERE contributor_id=? "
+                                              "ORDER BY updated_at DESC", (contributor_id,))]
+
+    def forget_device(self, identity: str) -> None:
+        self._x("DELETE FROM device WHERE identity=?", (identity,))
+
+    # merged accounts (scripts/demo/merge_contributors.py): from_id is the same person as into_id
+    def canonical(self, contributor_id: int) -> int:
+        cid, seen = int(contributor_id), set()
+        while cid not in seen:
+            seen.add(cid)
+            r = self._q("SELECT into_id FROM merged WHERE from_id=?", (cid,))
+            if not r:
+                return cid
+            cid = int(r[0][0])
+        return cid
+
+    def merged_from(self, into_id: int) -> list[int]:
+        return [int(r[0]) for r in self._q("SELECT from_id FROM merged WHERE into_id=?", (into_id,))]
+
+    def merge(self, from_id: int, into_id: int, now: float, *, move_devices: bool) -> dict:
+        """Repoint from_id's opt-in, offers and devices to into_id and record the merge. Idempotent."""
+        with self._lock:
+            db = self._db
+            out = {"optin": 0, "offers": 0, "devices_moved": 0, "devices_dropped": 0}
+            src, dst = self.optin_for(from_id), self.optin_for(into_id)
+            if src is not None:
+                if dst is None or dst.phone == src.phone:
+                    out["optin"] = db.execute("UPDATE optin SET contributor_id=?, updated_at=? WHERE contributor_id=?",
+                                              (into_id, now, from_id)).rowcount
+                else:  # the survivor keeps its own number; the merged account's number stops getting texts
+                    db.execute("DELETE FROM optin WHERE contributor_id=?", (from_id,))
+            out["offers"] = db.execute("UPDATE offer SET contributor_id=? WHERE contributor_id=?",
+                                       (into_id, from_id)).rowcount
+            if move_devices:
+                out["devices_moved"] = db.execute("UPDATE device SET contributor_id=? WHERE contributor_id=?",
+                                                  (into_id, from_id)).rowcount
+            else:
+                out["devices_dropped"] = db.execute("DELETE FROM device WHERE contributor_id=?", (from_id,)).rowcount
+            db.execute("INSERT INTO merged(from_id, into_id, at) VALUES (?,?,?) ON CONFLICT(from_id) DO UPDATE SET "
+                       "into_id=excluded.into_id, at=excluded.at", (from_id, into_id, now))
+            db.commit()
+            return out
 
     def stats(self, now: float) -> dict:
         n_in, n_person = self._q("SELECT COUNT(*), COALESCE(SUM(in_person),0) FROM optin WHERE status='opted_in'")[0]
@@ -614,7 +702,8 @@ class TextOffers:
                  transport: Transport | None = None, link: InkboxLink | None = None, outbox: Outbox | None = None,
                  append: Append | None = None, claim: Claim | None = None, heartbeat: Heartbeat | None = None,
                  rows: Rows | None = None, clock: Callable[[], float] = time.time, inline: bool = False,
-                 drop_settings: Any = None, record_claim: Callable[[int, int, str], Any] | None = None) -> None:
+                 drop_settings: Any = None, record_claim: Callable[[int, int, str], Any] | None = None,
+                 release: Callable[[int], None] | None = None) -> None:
         self.s = settings or TextSettings()
         self.store = store or TextStore(self.s.rdf_text_store or DEFAULT_STORE)
         self.link = link or InkboxLink(self.s)
@@ -629,6 +718,7 @@ class TextOffers:
         self._heartbeat = heartbeat
         self._drop_settings = drop_settings
         self._record_claim = record_claim
+        self._release = release
         self._lock = threading.Lock()
         self._claim_lock = threading.Lock()
         self._offered: set[int] = set()
@@ -660,6 +750,11 @@ class TextOffers:
         if self._claim is not None:
             return self._claim(task_id, contributor_id)
         self.w().call_reducer("claim_task", task_id, contributor_id)
+
+    def release_task(self, task_id: int) -> None:
+        if self._release is not None:
+            return self._release(task_id)
+        self.w().call_reducer("release_task", task_id)
 
     def heartbeat_claim(self, task_id: int) -> None:
         if self._heartbeat is not None:
@@ -703,7 +798,8 @@ class TextOffers:
         ds = self.drop_settings()
         return jd.invite_link(ds, jd.public_base(ds), task_id, SRC)
 
-    def _text(self, phone: str, text: str, kind: str, *, allow_stopped: bool = False) -> SendResult:
+    def _text(self, phone: str, text: str, kind: str, *, allow_stopped: bool = False,
+              outbox_text: str | None = None) -> SendResult:
         """THE only path that texts anyone: the number must be opted in (STOP's confirmation excepted)."""
         row = self.store.optin(phone)
         if row is None or (row.status != "opted_in" and not allow_stopped):
@@ -715,7 +811,7 @@ class TextOffers:
         except Exception as e:  # noqa: BLE001
             res = SendResult("error", type(e).__name__)
         self.store.record_send(phone, kind, now)
-        self.outbox.write(phone, text, kind, self.mode, res, now)
+        self.outbox.write(phone, outbox_text if outbox_text is not None else text, kind, self.mode, res, now)
         log.info("text.sent" if self.mode == "live" else "text.dry_run",
                  extra={"fields": {"kind": kind, "to": mask(phone), "state": res.state, "contributor_id": row.contributor_id}})
         return res
@@ -939,6 +1035,121 @@ class TextOffers:
             if self._hold_thread is None and not self.inline:
                 self._hold_thread = threading.Thread(target=self._hold_loop, name="tdm113-hold", daemon=True)
                 self._hold_thread.start()
+
+    def drop_hold(self, task_id: int) -> bool:
+        """Stop heartbeating a text claim (its holder gave it back, or another device took it over)."""
+        with self._lock:
+            return self._holds.pop(int(task_id), None) is not None
+
+    def holding(self, task_id: int) -> bool:
+        with self._lock:
+            return int(task_id) in self._holds
+
+    # ---- same person on two devices / two accounts (merged by scripts/demo/merge_contributors.py)
+    def same_person(self, a: int, b: int) -> bool:
+        return bool(a) and bool(b) and self.store.canonical(int(a)) == self.store.canonical(int(b))
+
+    def give_back(self, caller_id: int, task: dict | None) -> dict:
+        """The "Give back control" button: release_task as the orchestrator when the caller is the holder (or the
+        holder's other, merged account), and stop the text-offer hold so nothing heartbeats it again."""
+        if task is None:
+            return {"ok": False, "code": "no_task", "detail": "That task does not exist."}
+        tid, holder = _i(task.get("id")), _i(task.get("assignee_id"))
+        if task.get("status") != "claimed":
+            dropped = self.drop_hold(tid)
+            return {"ok": True, "released": False, "task_id": tid, "hold_dropped": dropped,
+                    "detail": f"Task {tid} is {task.get('status')}: nobody holds it."}
+        if not self.same_person(caller_id, holder):
+            return {"ok": False, "code": "not_holder", "detail": "Only the person driving can give control back."}
+        dropped = self.drop_hold(tid)
+        self.release_task(tid)
+        self.event(EV_RELEASED, {"task_id": tid, "contributor_id": int(caller_id), "holder_id": holder,
+                                 "robot_id": _i(task.get("robot_id")), "hold_dropped": dropped, "via": "web"})
+        return {"ok": True, "released": True, "task_id": tid, "holder_id": holder, "hold_dropped": dropped}
+
+    def take_over(self, caller_id: int, task: dict | None) -> dict:
+        """A second device of the same person opened the job link: move the claim to this device instead of
+        refusing it. release_task + claim_task(caller) as the orchestrator gives a new claim generation, so the
+        first device loses control (its commands carry the old claimed_at and the robot refuses them)."""
+        if task is None:
+            return {"ok": False, "code": "no_task", "detail": "That task does not exist."}
+        tid, holder = _i(task.get("id")), _i(task.get("assignee_id"))
+        if task.get("status") not in ("claimed", "open"):
+            return {"ok": False, "code": "closed", "detail": f"Task {tid} is {task.get('status')}."}
+        if task.get("status") == "claimed" and not self.same_person(caller_id, holder):
+            return {"ok": False, "code": "taken", "detail": "Someone else is driving this task."}
+        dropped = self.drop_hold(tid)
+        if task.get("status") == "claimed":
+            try:
+                self.release_task(tid)
+            except Exception as e:  # noqa: BLE001 - lapsed in between: the claim below decides
+                log.info("text.takeover_release", extra={"fields": {"task_id": tid, "error": str(e)[:120]}})
+        self.claim_task(tid, int(caller_id))
+        self.event(EV_TAKEOVER, {"task_id": tid, "contributor_id": int(caller_id), "previous_holder_id": holder,
+                                 "robot_id": _i(task.get("robot_id")), "hold_dropped": dropped})
+        return {"ok": True, "task_id": tid, "contributor_id": int(caller_id), "previous_holder_id": holder}
+
+    # ---- phone sign-in: a 6-digit code by text binds this browser to the contributor with that number
+    def _code_hash(self, phone: str, code: str) -> str:
+        key = (self.drop_settings().invite_secret or "rdf-tdm113").encode()
+        return hmac.new(key, f"login:{phone}:{code}".encode(), hashlib.sha256).hexdigest()
+
+    def login_start(self, phone_raw: str) -> dict:
+        """Text a code to an opted-in number. The answer is the same whether or not the number is known, so the
+        form can't be used to find out who gets job texts. Rate limits: 1 / 30 s and 5 / hour per number,
+        30 / 10 min overall."""
+        import secrets
+
+        phone = normalize_phone(phone_raw)
+        if phone is None:
+            return {"ok": False, "code": "bad_phone", "detail": "Enter a mobile number, e.g. (415) 555-0123."}
+        now = self.clock()
+        s = self.s
+        if self.store.sends_since("login_code", now - 600) >= s.rdf_text_login_global_10m:
+            log.warning("text.login_rate_global", extra={"fields": {"to": mask(phone)}})
+            return {"ok": False, "code": "rate_limited", "detail": "Too many sign-in codes right now. Try again in a few minutes."}
+        if (self.store.sends_since("login_code", now - s.rdf_text_login_gap_s, phone)
+                or self.store.sends_since("login_code", now - 3600, phone) >= s.rdf_text_login_hourly):
+            log.info("text.login_rate", extra={"fields": {"to": mask(phone)}})
+            return {"ok": False, "code": "rate_limited", "detail": "A code was sent a moment ago. Wait a bit before asking again."}
+        row = self.store.optin(phone)
+        if row is None or row.status != "opted_in":
+            log.info("text.login_unknown", extra={"fields": {"to": mask(phone)}})
+            self.store.record_send(phone, "login_code", now)  # rate-limit unknown numbers the same way; nothing is sent
+            return {"ok": True, "detail": LOGIN_SENT}
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        self.store.put_code(phone, self._code_hash(phone, code), now + s.rdf_text_login_ttl_s, now)
+        res = self._text(phone, LOGIN_FMT.format(code=code), "login_code",
+                         outbox_text=None if self.mode == "dry_run" else LOGIN_FMT.format(code="******"))
+        self.event(EV_LOGIN, {"step": "code_sent", "contributor_id": row.contributor_id, "ph": self.phash(phone),
+                              "state": res.state})
+        return {"ok": True, "detail": LOGIN_SENT, "mode": self.mode}
+
+    def login_check(self, phone_raw: str, code: str) -> dict:
+        """-> {ok, contributor_id} for the right code (single use), else {ok: False, code, detail}."""
+        phone = normalize_phone(phone_raw)
+        bad = {"ok": False, "code": "bad_code", "detail": "That code is wrong or has expired. Ask for a new one."}
+        if phone is None or not re.fullmatch(r"\d{6}", (code or "").strip()):
+            return bad
+        got = self.store.get_code(phone)
+        now = self.clock()
+        if got is None:
+            return bad
+        h, exp, attempts = got
+        if now >= exp or attempts >= self.s.rdf_text_login_attempts:
+            self.store.drop_code(phone)
+            return bad
+        if not hmac.compare_digest(h, self._code_hash(phone, code.strip())):
+            self.store.bump_code(phone)
+            log.info("text.login_wrong_code", extra={"fields": {"to": mask(phone), "attempt": attempts + 1}})
+            return bad
+        self.store.drop_code(phone)
+        row = self.store.optin(phone)
+        if row is None or row.status != "opted_in":
+            return bad
+        cid = self.store.canonical(row.contributor_id)
+        self.event(EV_LOGIN, {"step": "verified", "contributor_id": cid, "ph": self.phash(phone)})
+        return {"ok": True, "contributor_id": cid}
 
     def _hold_loop(self) -> None:
         while True:

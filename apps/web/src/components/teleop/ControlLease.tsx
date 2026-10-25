@@ -65,7 +65,9 @@ export function ControlLeaseBanner({ lease, className = '', variant = 'banner' }
       break;
     case 'view_only':
       title = `Controlled by ${holderName ?? 'someone else'}`;
-      body = 'You are watching. Controls unlock if they give it back or their hold runs out.';
+      body = 'You are watching. Controls unlock if they give it back or their hold runs out. Is that you on another device? Give back control.';
+      // The orchestrator only releases it when the holder is this person (this account or its merged one).
+      action = { label: 'Give back control', run: () => void lease.giveBack(), disabled: busy };
       break;
     case 'available':
       tone = 'warn';
@@ -79,7 +81,10 @@ export function ControlLeaseBanner({ lease, className = '', variant = 'banner' }
       body = lostWhileHidden && lostReason === 'expired' ? `${why} The tab was in the background.` : why;
       const closed = lostReason === 'revoked' || lostReason === 'completed';
       const othersLive = lease.task?.status === 'claimed' && holderName !== undefined;
-      if (!closed) {
+      if (lostReason === 'moved') {
+        // the same person drives on another device: take it back here (a new claim generation)
+        action = { label: 'Take control here', run: () => void lease.takeover(), disabled: busy };
+      } else if (!closed) {
         action = {
           label: othersLive ? `Controlled by ${holderName}` : 'Reclaim control',
           run: () => void lease.reclaim(),
@@ -110,8 +115,8 @@ export function ControlLeaseBanner({ lease, className = '', variant = 'banner' }
             {title}
           </p>
           {state === 'not_joined' ? (
-            <Link href="/join" className="text-xs font-semibold underline">
-              Join
+            <Link href="/join#phone-sign-in" className="text-xs font-semibold underline">
+              Join, or sign in with your phone number
             </Link>
           ) : (
             line && <OneLine text={line} className={`text-xs ${error ? 'font-medium text-red-700 dark:text-red-300' : 'opacity-90'}`} testId="tdm57-bar-line" />
@@ -144,8 +149,8 @@ export function ControlLeaseBanner({ lease, className = '', variant = 'banner' }
         <p className="font-semibold">{title}</p>
         {body && <p className="text-sm opacity-90">{body}</p>}
         {state === 'not_joined' && (
-          <Link href="/join" className="text-sm font-semibold underline">
-            Join
+          <Link href="/join#phone-sign-in" className="text-sm font-semibold underline">
+            Join, or sign in with your phone number
           </Link>
         )}
         {error && <p className="text-sm font-medium text-red-700 dark:text-red-300">{error}</p>}

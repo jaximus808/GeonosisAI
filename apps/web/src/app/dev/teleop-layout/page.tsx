@@ -21,7 +21,7 @@ const LONG_ERROR =
   'Heartbeat failed: the control plane answered 503 three times in a row (upstream connect error or disconnect/reset before headers, reset reason: connection termination). Your hold is kept for now; this retries every 5 s.';
 
 function fakeLease(kind: LeaseKind): TeleopLease {
-  const base = { busy: false, reclaim: async () => {}, release: async () => {}, stamp: <T extends object>(m: T) => ({ ...m, task_id: 0, claimed_at_us: 0 }) };
+  const base = { busy: false, reclaim: async () => {}, release: async () => {}, giveBack: async () => {}, takeover: async () => {}, stamp: <T extends object>(m: T) => ({ ...m, task_id: 0, claimed_at_us: 0 }) };
   if (kind === 'lost') return { ...base, state: 'lost', canControl: false, lostReason: 'expired', lostWhileHidden: true };
   if (kind === 'view_only') return { ...base, state: 'view_only', canControl: false, holderName: 'Someone with a very long display name indeed' };
   return { ...base, state: 'held', canControl: true, secondsLeft: 47, error: kind === 'held_error' ? LONG_ERROR : undefined };

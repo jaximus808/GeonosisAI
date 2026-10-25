@@ -64,7 +64,7 @@ push_env() {
 
 sync_bundle() {
   step "bundle committed HEAD ($(git -C "$REPO" rev-parse --short=12 HEAD)) -> $TARGET:~/geonosis/app"
-  local b; b="$(mktemp -d "${TMPDIR:-/tmp}/tdm118-bundle.XXXXXX")"; trap 'rm -rf "$b"' RETURN
+  local b; b="$(mktemp -d "${TMPDIR:-/tmp}/tdm118-bundle.XXXXXX")"; trap 'rm -rf "${b:-}"; trap - RETURN' RETURN
   git -C "$REPO" archive --format=tar HEAD -- "${BUNDLE_PATHS[@]}" | tar -x -C "$b"
   printf 'rev=%s\nsrc=head\nbuilt_at=%s\nticket=TDM-118\n' "$(git -C "$REPO" rev-parse --short=12 HEAD)" "$(date -u +%FT%TZ)" >"$b/DEPLOYED_REV"
   "${SSH[@]}" 'mkdir -p $HOME/geonosis/app'
